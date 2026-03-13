@@ -11,5 +11,9 @@ post {
 }
 
 headers {
-  Cookie: mb_session={{sessionToken}}
+  Authorization: Bearer {{token}}
+}
+
+script:post-response {
+  bru.setEnvVar("token", "");
 }

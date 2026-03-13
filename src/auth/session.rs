@@ -68,19 +68,6 @@ pub async fn get_user_from_token(pool: &SqlitePool, token: &str) -> AppResult<Us
     }
 }
 
-/// Refresh the session expiry time.
-pub async fn refresh_session(pool: &SqlitePool, token: &str) -> AppResult<()> {
-    let expires_at = (Utc::now() + Duration::days(SESSION_DURATION_DAYS)).to_rfc3339();
-
-    sqlx::query("UPDATE sessions SET expires_at = ? WHERE token = ?")
-        .bind(&expires_at)
-        .bind(token)
-        .execute(pool)
-        .await?;
-
-    Ok(())
-}
-
 /// Delete a session (logout).
 pub async fn delete_session(pool: &SqlitePool, token: &str) -> AppResult<()> {
     sqlx::query("DELETE FROM sessions WHERE token = ?")

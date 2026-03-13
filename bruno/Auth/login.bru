@@ -20,6 +20,6 @@ body:json {
 script:post-response {
   const data = res.getBody();
   if (data.token) {
-    bru.setEnvVar("sessionToken", data.token);
+    bru.setEnvVar("token", data.token);
   }
 }

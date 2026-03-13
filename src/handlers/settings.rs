@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::State,
     Json,
 };
 use chrono::Utc;
@@ -95,32 +95,8 @@ pub async fn get_settings(
         })
     };
 
-    let auth_rows = sqlx::query(
-        "SELECT id, user_id, device_type, backed_up, transports, created_at \
-         FROM authenticators WHERE user_id = ?",
-    )
-    .bind(user.id)
-    .fetch_all(&pool)
-    .await?;
-
-    let authenticators: Vec<Value> = auth_rows
-        .iter()
-        .map(|r| {
-            let backed_up_raw: i64 = r.get("backed_up");
-            json!({
-                "id": r.get::<String, _>("id"),
-                "userId": r.get::<i64, _>("user_id"),
-                "deviceType": r.get::<String, _>("device_type"),
-                "backedUp": backed_up_raw != 0,
-                "transports": r.get::<Option<String>, _>("transports"),
-                "createdAt": r.get::<String, _>("created_at"),
-            })
-        })
-        .collect();
-
     Ok(Json(json!({
         "settings": settings,
-        "authenticators": authenticators,
         "user": PublicUser::from(user),
     })))
 }
@@ -310,20 +286,3 @@ pub async fn change_password(
     Ok(Json(json!({ "message": "Password changed successfully" })))
 }
 
-pub async fn delete_authenticator(
-    State(pool): State<SqlitePool>,
-    AuthUser(user): AuthUser,
-    Path(id): Path<String>,
-) -> AppResult<Json<Value>> {
-    let result = sqlx::query("DELETE FROM authenticators WHERE id = ? AND user_id = ?")
-        .bind(&id)
-        .bind(user.id)
-        .execute(&pool)
-        .await?;
-
-    if result.rows_affected() == 0 {
-        return Err(AppError::NotFound("Authenticator not found".to_string()));
-    }
-
-    Ok(Json(json!({ "message": "Authenticator deleted" })))
-}

@@ -1,6 +1,6 @@
 use axum::{
     http::{HeaderValue, Method},
-    routing::{delete, get, post, put},
+    routing::{get, post, put},
     Json, Router,
 };
 use serde_json::json;
@@ -170,10 +170,6 @@ async fn main() -> anyhow::Result<()> {
             "/api/settings/change-password",
             post(handlers::settings::change_password),
         )
-        .route(
-            "/api/settings/authenticators/:id",
-            delete(handlers::settings::delete_authenticator),
-        )
         // Admin routes
         .route(
             "/api/admin/users",
@@ -224,7 +220,6 @@ fn build_cors(origin: &str) -> CorsLayer {
 
     CorsLayer::new()
         .allow_origin(allowed_origin)
-        .allow_credentials(true)
         .allow_methods([
             Method::GET,
             Method::POST,

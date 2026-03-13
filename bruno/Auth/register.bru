@@ -19,3 +19,10 @@ body:json {
     "confirmPassword": "password"
   }
 }
+
+script:post-response {
+  const data = res.getBody();
+  if (data.token) {
+    bru.setEnvVar("token", data.token);
+  }
+}

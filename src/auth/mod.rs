@@ -3,18 +3,19 @@ pub mod session;
 
 use axum::{
     async_trait,
-    extract::{FromRef, FromRequestParts, Request},
-    http::request::Parts,
-    middleware::Next,
-    response::Response,
+    extract::{FromRef, FromRequestParts},
+    http::{header, request::Parts, HeaderMap},
 };
-use axum_extra::extract::CookieJar;
 use sqlx::SqlitePool;
 
 use crate::{error::AppError, models::User};
 
-pub const SESSION_COOKIE_NAME: &str = "mb_session";
 pub const SESSION_DURATION_DAYS: i64 = 14;
+
+pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    value.strip_prefix("Bearer ").map(|s| s.to_string())
+}
 
 #[derive(Debug, Clone)]
 pub struct AuthUser(pub User);
@@ -32,12 +33,8 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let pool = SqlitePool::from_ref(state);
-        let jar = CookieJar::from_headers(&parts.headers);
 
-        let token = jar
-            .get(SESSION_COOKIE_NAME)
-            .map(|c| c.value().to_string())
-            .ok_or(AppError::Unauthorized)?;
+        let token = extract_bearer_token(&parts.headers).ok_or(AppError::Unauthorized)?;
 
         let user = session::get_user_from_token(&pool, &token).await?;
         Ok(AuthUser(user))
@@ -59,17 +56,4 @@ where
         }
         Ok(AdminUser(auth_user.0))
     }
-}
-
-pub async fn session_refresh_middleware(
-    pool: axum::extract::State<SqlitePool>,
-    jar: CookieJar,
-    request: Request,
-    next: Next,
-) -> Response {
-    if let Some(token_cookie) = jar.get(SESSION_COOKIE_NAME) {
-        let token = token_cookie.value().to_string();
-        let _ = session::refresh_session(&pool, &token).await;
-    }
-    next.run(request).await
 }

@@ -1,20 +1,20 @@
 use axum::{
     extract::State,
-    http::{header, StatusCode},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     Json,
 };
-use axum_extra::extract::CookieJar;
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
 use sqlx::{Row, SqlitePool};
 
 use crate::{
     auth::{
+        extract_bearer_token,
         password::{hash_password, verify_password},
         session::{create_session, delete_session},
-        AuthUser, SESSION_COOKIE_NAME, SESSION_DURATION_DAYS,
+        AuthUser,
     },
     config::Config,
     error::{AppError, AppResult},
@@ -37,22 +37,6 @@ pub struct RegisterRequest {
     pub confirm_password: String,
 }
 
-#[derive(Debug, Serialize)]
-pub struct AuthResponse {
-    pub user: PublicUser,
-    pub token: String,
-}
-
-fn make_session_cookie(token: &str, secure: bool) -> String {
-    let expires = chrono::Utc::now() + chrono::Duration::days(SESSION_DURATION_DAYS);
-    let expires_str = expires.format("%a, %d %b %Y %H:%M:%S GMT").to_string();
-    let secure_flag = if secure { "; Secure" } else { "" };
-    format!(
-        "{}={}; HttpOnly; SameSite=Lax{}; Path=/; Expires={}",
-        SESSION_COOKIE_NAME, token, secure_flag, expires_str
-    )
-}
-
 fn row_to_user(row: &sqlx::sqlite::SqliteRow) -> User {
     User {
         id: row.get("id"),
@@ -69,14 +53,12 @@ fn row_to_user(row: &sqlx::sqlite::SqliteRow) -> User {
 
 pub async fn login(
     State(pool): State<SqlitePool>,
-    State(config): State<Config>,
     Json(body): Json<LoginRequest>,
 ) -> AppResult<Response> {
     let row = sqlx::query(
         "SELECT id, email, username, name, password_hash, role, created_at, updated_at, last_login_at \
-         FROM users WHERE email = ? OR username = ?",
+         FROM users WHERE ? IN (email, username)",
     )
-    .bind(&body.identifier)
     .bind(&body.identifier)
     .fetch_optional(&pool)
     .await?;
@@ -86,13 +68,12 @@ pub async fn login(
         None => return Err(AppError::Unauthorized),
     };
 
-    let valid = verify_password(&body.password, &user.password_hash)?;
-    if !valid {
+    if !verify_password(&body.password, &user.password_hash)? {
         return Err(AppError::Unauthorized);
     }
 
-    // Update last_login_at
     let now = Utc::now().to_rfc3339();
+
     sqlx::query("UPDATE users SET last_login_at = ? WHERE id = ?")
         .bind(&now)
         .bind(user.id)
@@ -100,43 +81,19 @@ pub async fn login(
         .await?;
 
     let token = create_session(&pool, user.id).await?;
-    let secure = config.origin.starts_with("https://");
-    let cookie = make_session_cookie(&token, secure);
-
     let public_user = PublicUser::from(user);
-    let body = json!({ "user": public_user, "token": token });
 
-    Ok((
-        StatusCode::OK,
-        [(header::SET_COOKIE, cookie)],
-        Json(body),
-    )
-        .into_response())
+    Ok((StatusCode::OK, Json(json!({ "user": public_user, "token": token }))).into_response())
 }
 
 pub async fn logout(
     State(pool): State<SqlitePool>,
-    State(config): State<Config>,
-    jar: CookieJar,
+    headers: HeaderMap,
 ) -> AppResult<Response> {
-    if let Some(cookie) = jar.get(SESSION_COOKIE_NAME) {
-        let token = cookie.value().to_string();
+    if let Some(token) = extract_bearer_token(&headers) {
         let _ = delete_session(&pool, &token).await;
     }
-
-    let secure = config.origin.starts_with("https://");
-    let secure_flag = if secure { "; Secure" } else { "" };
-    let clear_cookie = format!(
-        "{}=; HttpOnly; SameSite=Lax{}; Path=/; Max-Age=0",
-        SESSION_COOKIE_NAME, secure_flag
-    );
-
-    Ok((
-        StatusCode::OK,
-        [(header::SET_COOKIE, clear_cookie)],
-        Json(json!({ "message": "Logged out" })),
-    )
-        .into_response())
+    Ok((StatusCode::OK, Json(json!({ "message": "Logged out" }))).into_response())
 }
 
 pub async fn me(AuthUser(user): AuthUser) -> AppResult<Json<serde_json::Value>> {
@@ -148,7 +105,6 @@ pub async fn register(
     State(config): State<Config>,
     Json(body): Json<RegisterRequest>,
 ) -> AppResult<Response> {
-    // Check if registration is allowed
     let user_count: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM users")
         .fetch_one(&pool)
         .await?
@@ -168,7 +124,6 @@ pub async fn register(
         ));
     }
 
-    // Check for existing user
     let existing: i64 = sqlx::query(
         "SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?",
     )
@@ -203,7 +158,6 @@ pub async fn register(
     .await?
     .last_insert_rowid();
 
-    // Create default settings
     sqlx::query("INSERT OR IGNORE INTO user_settings (user_id, updated_at) VALUES (?, ?)")
         .bind(user_id)
         .bind(&now)
@@ -211,8 +165,6 @@ pub async fn register(
         .await?;
 
     let token = create_session(&pool, user_id).await?;
-    let secure = config.origin.starts_with("https://");
-    let cookie = make_session_cookie(&token, secure);
 
     let user_row = sqlx::query(
         "SELECT id, email, username, name, password_hash, role, created_at, updated_at, last_login_at \
@@ -223,12 +175,10 @@ pub async fn register(
     .await?;
 
     let public_user = PublicUser::from(row_to_user(&user_row));
-    let resp_body = json!({ "user": public_user, "token": token });
 
     Ok((
         StatusCode::CREATED,
-        [(header::SET_COOKIE, cookie)],
-        Json(resp_body),
+        Json(json!({ "user": public_user, "token": token })),
     )
         .into_response())
 }
