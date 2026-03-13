@@ -1,0 +1,28 @@
+# Rust build artifacts
+/target/
+Cargo.lock
+
+# SQLx offline query cache (if used)
+.sqlx/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Runtime data
+/data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo

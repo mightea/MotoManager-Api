@@ -1,0 +1,12 @@
+pub mod admin;
+pub mod auth;
+pub mod documents;
+pub mod files;
+pub mod issues;
+pub mod locations;
+pub mod maintenance;
+pub mod motorcycles;
+pub mod previous_owners;
+pub mod settings;
+pub mod stats;
+pub mod torque_specs;
