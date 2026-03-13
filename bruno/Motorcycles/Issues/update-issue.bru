@@ -1,0 +1,23 @@
+meta {
+  name: Update Issue
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/issues/{{issueId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "description": "Front brake pads worn - replaced",
+    "priority": "high",
+    "status": "resolved"
+  }
+}

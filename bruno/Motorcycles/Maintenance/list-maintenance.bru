@@ -1,0 +1,15 @@
+meta {
+  name: List Maintenance
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/maintenance
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Update Torque Spec
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/torque-specs/{{torqueSpecId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "torque": 14,
+    "description": "Updated torque value"
+  }
+}

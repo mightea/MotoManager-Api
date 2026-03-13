@@ -1,0 +1,21 @@
+meta {
+  name: Update Document
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/api/documents/{{documentId}}
+  body: multipart-form
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:multipart-form {
+  title: Updated Service Manual
+  isPrivate: true
+  motorcycleIds: 1
+}

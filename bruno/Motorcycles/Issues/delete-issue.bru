@@ -1,0 +1,15 @@
+meta {
+  name: Delete Issue
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/issues/{{issueId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

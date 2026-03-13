@@ -1,0 +1,27 @@
+meta {
+  name: Create Torque Spec
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/torque-specs
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "category": "Engine",
+    "name": "Spark plug",
+    "torque": 12,
+    "torqueEnd": null,
+    "variation": null,
+    "toolSize": "16mm",
+    "description": "Standard spark plug torque"
+  }
+}

@@ -1,0 +1,34 @@
+meta {
+  name: Update Motorcycle
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}
+  body: multipart-form
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:multipart-form {
+  make: Honda
+  model: CB500F
+  fabricationDate: 2020-01-01
+  vin:
+  engineNumber:
+  vehicleNr:
+  numberPlate:
+  isVeteran: false
+  initialOdo: 0
+  purchaseDate:
+  purchasePrice:
+  currencyCode: EUR
+  fuelTankSize:
+  firstRegistration:
+  isArchived: false
+  image:
+}

@@ -1,0 +1,28 @@
+meta {
+  name: Create Maintenance Record
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/maintenance
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "date": "2026-03-13",
+    "odo": 10000,
+    "type": "oil",
+    "description": "Engine oil change",
+    "cost": 45.00,
+    "currency": "EUR",
+    "oilType": "synthetic",
+    "viscosity": "10W-40"
+  }
+}

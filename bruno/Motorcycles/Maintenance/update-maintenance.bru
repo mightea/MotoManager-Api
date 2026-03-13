@@ -1,0 +1,22 @@
+meta {
+  name: Update Maintenance Record
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/maintenance/{{maintenanceId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "description": "Engine oil change - Motul 5100",
+    "cost": 50.00
+  }
+}

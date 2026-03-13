@@ -1,0 +1,15 @@
+meta {
+  name: Delete Location
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{baseUrl}}/api/locations/{{locationId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

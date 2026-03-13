@@ -1,0 +1,15 @@
+meta {
+  name: List Locations
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/locations
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

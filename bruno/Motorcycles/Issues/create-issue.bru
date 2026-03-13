@@ -1,0 +1,25 @@
+meta {
+  name: Create Issue
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/issues
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "odo": 10000,
+    "description": "Front brake pads worn",
+    "priority": "medium",
+    "status": "new",
+    "date": "2026-03-13"
+  }
+}

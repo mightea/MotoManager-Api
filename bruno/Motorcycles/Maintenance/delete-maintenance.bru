@@ -1,0 +1,15 @@
+meta {
+  name: Delete Maintenance Record
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/maintenance/{{maintenanceId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

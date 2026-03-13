@@ -1,0 +1,30 @@
+meta {
+  name: Create Previous Owner
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/previous-owners
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "name": "John",
+    "surname": "Doe",
+    "purchaseDate": "2022-06-15",
+    "email": "john.doe@example.com",
+    "phoneNumber": "+1234567890",
+    "address": "123 Main St",
+    "city": "Springfield",
+    "postcode": "12345",
+    "country": "US",
+    "comments": ""
+  }
+}

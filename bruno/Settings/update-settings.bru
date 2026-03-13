@@ -1,0 +1,38 @@
+meta {
+  name: Update Settings
+  type: http
+  seq: 2
+}
+
+put {
+  url: {{baseUrl}}/api/settings
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "tireInterval": 365,
+    "tireKmInterval": 20000,
+    "batteryLithiumInterval": 1825,
+    "batteryDefaultInterval": 730,
+    "engineOilInterval": 365,
+    "engineOilKmInterval": 10000,
+    "gearboxOilInterval": 730,
+    "gearboxOilKmInterval": 20000,
+    "finalDriveOilInterval": 730,
+    "finalDriveOilKmInterval": 20000,
+    "forkOilInterval": 730,
+    "forkOilKmInterval": 20000,
+    "brakeFluidInterval": 730,
+    "brakeFluidKmInterval": 20000,
+    "coolantInterval": 730,
+    "coolantKmInterval": 30000,
+    "chainInterval": 180,
+    "chainKmInterval": 5000
+  }
+}

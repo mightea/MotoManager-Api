@@ -1,0 +1,15 @@
+meta {
+  name: List Previous Owners
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/previous-owners
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

@@ -1,0 +1,22 @@
+meta {
+  name: Update Location
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/api/locations/{{locationId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "name": "City Moto Shop - Updated",
+    "countryCode": "DE"
+  }
+}

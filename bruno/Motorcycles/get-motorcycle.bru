@@ -1,0 +1,15 @@
+meta {
+  name: Get Motorcycle
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

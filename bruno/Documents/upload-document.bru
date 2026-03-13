@@ -1,0 +1,22 @@
+meta {
+  name: Upload Document
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/documents
+  body: multipart-form
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:multipart-form {
+  title: Service Manual
+  isPrivate: false
+  motorcycleIds: 1
+  file:
+}

@@ -1,0 +1,21 @@
+meta {
+  name: Import Torque Specs
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/torque-specs/import
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "fromMotorcycleId": 2
+  }
+}

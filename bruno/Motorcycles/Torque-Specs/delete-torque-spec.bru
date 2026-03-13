@@ -1,0 +1,15 @@
+meta {
+  name: Delete Torque Spec
+  type: http
+  seq: 5
+}
+
+delete {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/torque-specs/{{torqueSpecId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

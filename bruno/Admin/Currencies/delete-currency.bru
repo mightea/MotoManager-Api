@@ -1,0 +1,15 @@
+meta {
+  name: Delete Currency
+  type: http
+  seq: 4
+}
+
+delete {
+  url: {{baseUrl}}/api/admin/currencies/{{currencyId}}
+  body: none
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}

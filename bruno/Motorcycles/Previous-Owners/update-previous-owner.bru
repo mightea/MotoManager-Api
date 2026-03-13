@@ -1,0 +1,22 @@
+meta {
+  name: Update Previous Owner
+  type: http
+  seq: 3
+}
+
+put {
+  url: {{baseUrl}}/api/motorcycles/{{motorcycleId}}/previous-owners/{{previousOwnerId}}
+  body: json
+  auth: none
+}
+
+headers {
+  Cookie: mb_session={{sessionToken}}
+}
+
+body:json {
+  {
+    "email": "updated@example.com",
+    "comments": "Updated contact info"
+  }
+}
