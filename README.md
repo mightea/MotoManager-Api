@@ -32,6 +32,20 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
    cargo run
    ```
 
+## Testing
+
+The project includes a comprehensive test suite covering unit tests and integration tests for the HTTP layer.
+
+### Run all tests
+```sh
+cargo test
+```
+
+### Integration Tests
+Integration tests use an in-memory SQLite database and isolated `DATA_DIR` for file operations. They are located in the `tests/` directory:
+- `tests/motorcycles_test.rs`: Covers motorcycles, issues, and maintenance records lifecycle.
+- `tests/documents_test.rs`: Covers document listing and deletion.
+
 The server runs migrations on startup and creates the `data/` directories automatically.
 
 ## Authentication

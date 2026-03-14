@@ -39,7 +39,8 @@ Rust REST API for motorcycle management. Target client: React Router SPA.
 
 ```
 src/
-  main.rs          — router, AppState, CORS, server startup
+  lib.rs           — library entry point, AppState, build_app, build_cors
+  main.rs          — server startup (uses lib.rs)
   config.rs        — Config from env vars
   error.rs         — AppError, AppResult
   models.rs        — shared model structs (User, PublicUser, Session, etc.)
@@ -48,20 +49,12 @@ src/
     session.rs     — create/get/delete session tokens
     password.rs    — hash_password / verify_password (Argon2id)
   handlers/
-    auth.rs        — login, logout, register, me
-    motorcycles.rs — CRUD + multipart image upload; also exports maintenance_row_to_value, verify_motorcycle_ownership
-    maintenance.rs — maintenance record CRUD + fuel consumption calculation
-    issues.rs      — issue CRUD
-    torque_specs.rs — torque spec CRUD + import
-    previous_owners.rs
-    documents.rs   — document upload/CRUD with preview generation
-    locations.rs
-    settings.rs    — user settings + change password
-    admin.rs       — user management + currency management
-    stats.rs
-    files.rs       — static file serving with optional image resize
+    ...
+tests/             — integration tests
+  motorcycles_test.rs
+  documents_test.rs
 migrations/
-  001_initial_schema.sql  — CREATE TABLE IF NOT EXISTS for all tables
+  ...
 bruno/                    — Bruno API collection (use environment: local)
 ```
 
@@ -70,9 +63,10 @@ bruno/                    — Bruno API collection (use environment: local)
 ```sh
 cargo build
 cargo run
+cargo test
 ```
 
-No test suite currently. Verify changes by running the server and using the Bruno collection.
+Tests include unit tests in `src/` modules and integration tests in `tests/`. Integration tests use an in-memory database and isolated data directories.
 
 ## Environment variables
 
