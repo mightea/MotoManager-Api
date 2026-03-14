@@ -19,43 +19,43 @@ use crate::{
 fn settings_row_to_value(row: &sqlx::sqlite::SqliteRow) -> Value {
     json!({
         "id": row.get::<i64, _>("id"),
-        "userId": row.get::<i64, _>("user_id"),
-        "tireInterval": row.get::<i64, _>("tire_interval"),
-        "batteryLithiumInterval": row.get::<i64, _>("battery_lithium_interval"),
-        "batteryDefaultInterval": row.get::<i64, _>("battery_default_interval"),
-        "engineOilInterval": row.get::<i64, _>("engine_oil_interval"),
-        "gearboxOilInterval": row.get::<i64, _>("gearbox_oil_interval"),
-        "finalDriveOilInterval": row.get::<i64, _>("final_drive_oil_interval"),
-        "forkOilInterval": row.get::<i64, _>("fork_oil_interval"),
-        "brakeFluidInterval": row.get::<i64, _>("brake_fluid_interval"),
-        "coolantInterval": row.get::<i64, _>("coolant_interval"),
-        "chainInterval": row.get::<i64, _>("chain_interval"),
-        "tireKmInterval": row.get::<Option<i64>, _>("tire_km_interval"),
-        "engineOilKmInterval": row.get::<Option<i64>, _>("engine_oil_km_interval"),
-        "gearboxOilKmInterval": row.get::<Option<i64>, _>("gearbox_oil_km_interval"),
-        "finalDriveOilKmInterval": row.get::<Option<i64>, _>("final_drive_oil_km_interval"),
-        "forkOilKmInterval": row.get::<Option<i64>, _>("fork_oil_km_interval"),
-        "brakeFluidKmInterval": row.get::<Option<i64>, _>("brake_fluid_km_interval"),
-        "coolantKmInterval": row.get::<Option<i64>, _>("coolant_km_interval"),
-        "chainKmInterval": row.get::<Option<i64>, _>("chain_km_interval"),
-        "updatedAt": row.get::<Option<String>, _>("updated_at"),
+        "userId": row.get::<i64, _>("userId"),
+        "tireInterval": row.get::<i64, _>("tireInterval"),
+        "batteryLithiumInterval": row.get::<i64, _>("batteryLithiumInterval"),
+        "batteryDefaultInterval": row.get::<i64, _>("batteryDefaultInterval"),
+        "engineOilInterval": row.get::<i64, _>("engineOilInterval"),
+        "gearboxOilInterval": row.get::<i64, _>("gearboxOilInterval"),
+        "finalDriveOilInterval": row.get::<i64, _>("finalDriveOilInterval"),
+        "forkOilInterval": row.get::<i64, _>("forkOilInterval"),
+        "brakeFluidInterval": row.get::<i64, _>("brakeFluidInterval"),
+        "coolantInterval": row.get::<i64, _>("coolantInterval"),
+        "chainInterval": row.get::<i64, _>("chainInterval"),
+        "tireKmInterval": row.get::<Option<i64>, _>("tireKmInterval"),
+        "engineOilKmInterval": row.get::<Option<i64>, _>("engineOilKmInterval"),
+        "gearboxOilKmInterval": row.get::<Option<i64>, _>("gearboxOilKmInterval"),
+        "finalDriveOilKmInterval": row.get::<Option<i64>, _>("finalDriveOilKmInterval"),
+        "forkOilKmInterval": row.get::<Option<i64>, _>("forkOilKmInterval"),
+        "brakeFluidKmInterval": row.get::<Option<i64>, _>("brakeFluidKmInterval"),
+        "coolantKmInterval": row.get::<Option<i64>, _>("coolantKmInterval"),
+        "chainKmInterval": row.get::<Option<i64>, _>("chainKmInterval"),
+        "updatedAt": row.get::<Option<String>, _>("updatedAt"),
     })
 }
 
 const SETTINGS_SELECT: &str =
-    "id, user_id, tire_interval, battery_lithium_interval, battery_default_interval, \
-     engine_oil_interval, gearbox_oil_interval, final_drive_oil_interval, fork_oil_interval, \
-     brake_fluid_interval, coolant_interval, chain_interval, tire_km_interval, \
-     engine_oil_km_interval, gearbox_oil_km_interval, final_drive_oil_km_interval, \
-     fork_oil_km_interval, brake_fluid_km_interval, coolant_km_interval, chain_km_interval, \
-     updated_at";
+    "id, userId, tireInterval, batteryLithiumInterval, batteryDefaultInterval, \
+     engineOilInterval, gearboxOilInterval, finalDriveOilInterval, forkOilInterval, \
+     brakeFluidInterval, coolantInterval, chainInterval, tireKmInterval, \
+     engineOilKmInterval, gearboxOilKmInterval, finalDriveOilKmInterval, \
+     forkOilKmInterval, brakeFluidKmInterval, coolantKmInterval, chainKmInterval, \
+     updatedAt";
 
 pub async fn get_settings(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
     let settings_row = sqlx::query(&format!(
-        "SELECT {} FROM user_settings WHERE user_id = ?",
+        "SELECT {} FROM userSettings WHERE userId = ?",
         SETTINGS_SELECT
     ))
     .bind(user.id)
@@ -66,7 +66,7 @@ pub async fn get_settings(
         settings_row_to_value(&row)
     } else {
         let now = Utc::now().to_rfc3339();
-        sqlx::query("INSERT OR IGNORE INTO user_settings (user_id, updated_at) VALUES (?, ?)")
+        sqlx::query("INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)")
             .bind(user.id)
             .bind(&now)
             .execute(&pool)
@@ -131,14 +131,14 @@ pub async fn update_settings(
 ) -> AppResult<Json<Value>> {
     let now = Utc::now().to_rfc3339();
 
-    sqlx::query("INSERT OR IGNORE INTO user_settings (user_id, updated_at) VALUES (?, ?)")
+    sqlx::query("INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)")
         .bind(user.id)
         .bind(&now)
         .execute(&pool)
         .await?;
 
     let existing = sqlx::query(&format!(
-        "SELECT {} FROM user_settings WHERE user_id = ?",
+        "SELECT {} FROM userSettings WHERE userId = ?",
         SETTINGS_SELECT
     ))
     .bind(user.id)
@@ -147,68 +147,68 @@ pub async fn update_settings(
 
     let tire_interval = body
         .tire_interval
-        .unwrap_or_else(|| existing.get("tire_interval"));
+        .unwrap_or_else(|| existing.get("tireInterval"));
     let battery_lithium_interval = body
         .battery_lithium_interval
-        .unwrap_or_else(|| existing.get("battery_lithium_interval"));
+        .unwrap_or_else(|| existing.get("batteryLithiumInterval"));
     let battery_default_interval = body
         .battery_default_interval
-        .unwrap_or_else(|| existing.get("battery_default_interval"));
+        .unwrap_or_else(|| existing.get("batteryDefaultInterval"));
     let engine_oil_interval = body
         .engine_oil_interval
-        .unwrap_or_else(|| existing.get("engine_oil_interval"));
+        .unwrap_or_else(|| existing.get("engineOilInterval"));
     let gearbox_oil_interval = body
         .gearbox_oil_interval
-        .unwrap_or_else(|| existing.get("gearbox_oil_interval"));
+        .unwrap_or_else(|| existing.get("gearboxOilInterval"));
     let final_drive_oil_interval = body
         .final_drive_oil_interval
-        .unwrap_or_else(|| existing.get("final_drive_oil_interval"));
+        .unwrap_or_else(|| existing.get("finalDriveOilInterval"));
     let fork_oil_interval = body
         .fork_oil_interval
-        .unwrap_or_else(|| existing.get("fork_oil_interval"));
+        .unwrap_or_else(|| existing.get("forkOilInterval"));
     let brake_fluid_interval = body
         .brake_fluid_interval
-        .unwrap_or_else(|| existing.get("brake_fluid_interval"));
+        .unwrap_or_else(|| existing.get("brakeFluidInterval"));
     let coolant_interval = body
         .coolant_interval
-        .unwrap_or_else(|| existing.get("coolant_interval"));
+        .unwrap_or_else(|| existing.get("coolantInterval"));
     let chain_interval = body
         .chain_interval
-        .unwrap_or_else(|| existing.get("chain_interval"));
+        .unwrap_or_else(|| existing.get("chainInterval"));
     let tire_km_interval: Option<i64> = body
         .tire_km_interval
-        .or_else(|| existing.get("tire_km_interval"));
+        .or_else(|| existing.get("tireKmInterval"));
     let engine_oil_km_interval: Option<i64> = body
         .engine_oil_km_interval
-        .or_else(|| existing.get("engine_oil_km_interval"));
+        .or_else(|| existing.get("engineOilKmInterval"));
     let gearbox_oil_km_interval: Option<i64> = body
         .gearbox_oil_km_interval
-        .or_else(|| existing.get("gearbox_oil_km_interval"));
+        .or_else(|| existing.get("gearboxOilKmInterval"));
     let final_drive_oil_km_interval: Option<i64> = body
         .final_drive_oil_km_interval
-        .or_else(|| existing.get("final_drive_oil_km_interval"));
+        .or_else(|| existing.get("finalDriveOilKmInterval"));
     let fork_oil_km_interval: Option<i64> = body
         .fork_oil_km_interval
-        .or_else(|| existing.get("fork_oil_km_interval"));
+        .or_else(|| existing.get("forkOilKmInterval"));
     let brake_fluid_km_interval: Option<i64> = body
         .brake_fluid_km_interval
-        .or_else(|| existing.get("brake_fluid_km_interval"));
+        .or_else(|| existing.get("brakeFluidKmInterval"));
     let coolant_km_interval: Option<i64> = body
         .coolant_km_interval
-        .or_else(|| existing.get("coolant_km_interval"));
+        .or_else(|| existing.get("coolantKmInterval"));
     let chain_km_interval: Option<i64> = body
         .chain_km_interval
-        .or_else(|| existing.get("chain_km_interval"));
+        .or_else(|| existing.get("chainKmInterval"));
 
     sqlx::query(
-        "UPDATE user_settings SET \
-         tire_interval = ?, battery_lithium_interval = ?, battery_default_interval = ?, \
-         engine_oil_interval = ?, gearbox_oil_interval = ?, final_drive_oil_interval = ?, \
-         fork_oil_interval = ?, brake_fluid_interval = ?, coolant_interval = ?, chain_interval = ?, \
-         tire_km_interval = ?, engine_oil_km_interval = ?, gearbox_oil_km_interval = ?, \
-         final_drive_oil_km_interval = ?, fork_oil_km_interval = ?, brake_fluid_km_interval = ?, \
-         coolant_km_interval = ?, chain_km_interval = ?, updated_at = ? \
-         WHERE user_id = ?",
+        "UPDATE userSettings SET \
+         tireInterval = ?, batteryLithiumInterval = ?, batteryDefaultInterval = ?, \
+         engineOilInterval = ?, gearboxOilInterval = ?, finalDriveOilInterval = ?, \
+         forkOilInterval = ?, brakeFluidInterval = ?, coolantInterval = ?, chainInterval = ?, \
+         tireKmInterval = ?, engineOilKmInterval = ?, gearboxOilKmInterval = ?, \
+         finalDriveOilKmInterval = ?, forkOilKmInterval = ?, brakeFluidKmInterval = ?, \
+         coolantKmInterval = ?, chainKmInterval = ?, updatedAt = ? \
+         WHERE userId = ?",
     )
     .bind(tire_interval)
     .bind(battery_lithium_interval)
@@ -234,7 +234,7 @@ pub async fn update_settings(
     .await?;
 
     let row = sqlx::query(&format!(
-        "SELECT {} FROM user_settings WHERE user_id = ?",
+        "SELECT {} FROM userSettings WHERE userId = ?",
         SETTINGS_SELECT
     ))
     .bind(user.id)
@@ -276,7 +276,7 @@ pub async fn change_password(
     let new_hash = hash_password(&body.new_password)?;
     let now = Utc::now().to_rfc3339();
 
-    sqlx::query("UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET passwordHash = ?, updatedAt = ? WHERE id = ?")
         .bind(&new_hash)
         .bind(&now)
         .bind(user.id)
@@ -285,4 +285,3 @@ pub async fn change_password(
 
     Ok(Json(json!({ "message": "Password changed successfully" })))
 }
-

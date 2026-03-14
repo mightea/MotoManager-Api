@@ -25,7 +25,7 @@ pub async fn get_stats(
         .get("cnt");
 
     let maintenance_records: i64 =
-        sqlx::query("SELECT COUNT(*) as cnt FROM maintenance_records")
+        sqlx::query("SELECT COUNT(*) as cnt FROM maintenanceRecords")
             .fetch_one(&pool)
             .await?
             .get("cnt");
@@ -45,7 +45,7 @@ pub async fn get_stats(
         .await?
         .get("cnt");
 
-    let torque_specs: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM torque_specs")
+    let torque_specs: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM torqueSpecs")
         .fetch_one(&pool)
         .await?
         .get("cnt");

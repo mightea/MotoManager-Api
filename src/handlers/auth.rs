@@ -43,11 +43,11 @@ fn row_to_user(row: &sqlx::sqlite::SqliteRow) -> User {
         email: row.get("email"),
         username: row.get("username"),
         name: row.get("name"),
-        password_hash: row.get("password_hash"),
+        password_hash: row.get("passwordHash"),
         role: row.get("role"),
-        created_at: row.get("created_at"),
-        updated_at: row.get("updated_at"),
-        last_login_at: row.get("last_login_at"),
+        created_at: row.get("createdAt"),
+        updated_at: row.get("updatedAt"),
+        last_login_at: row.get("lastLoginAt"),
     }
 }
 
@@ -56,7 +56,7 @@ pub async fn login(
     Json(body): Json<LoginRequest>,
 ) -> AppResult<Response> {
     let row = sqlx::query(
-        "SELECT id, email, username, name, password_hash, role, created_at, updated_at, last_login_at \
+        "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
          FROM users WHERE ? IN (email, username)",
     )
     .bind(&body.identifier)
@@ -74,7 +74,7 @@ pub async fn login(
 
     let now = Utc::now().to_rfc3339();
 
-    sqlx::query("UPDATE users SET last_login_at = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET lastLoginAt = ? WHERE id = ?")
         .bind(&now)
         .bind(user.id)
         .execute(&pool)
@@ -144,7 +144,7 @@ pub async fn register(
     let role = if user_count == 0 { "admin" } else { "user" };
 
     let user_id = sqlx::query(
-        "INSERT INTO users (email, username, name, password_hash, role, created_at, updated_at) \
+        "INSERT INTO users (email, username, name, passwordHash, role, createdAt, updatedAt) \
          VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&body.email)
@@ -158,7 +158,7 @@ pub async fn register(
     .await?
     .last_insert_rowid();
 
-    sqlx::query("INSERT OR IGNORE INTO user_settings (user_id, updated_at) VALUES (?, ?)")
+    sqlx::query("INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)")
         .bind(user_id)
         .bind(&now)
         .execute(&pool)
@@ -167,7 +167,7 @@ pub async fn register(
     let token = create_session(&pool, user_id).await?;
 
     let user_row = sqlx::query(
-        "SELECT id, email, username, name, password_hash, role, created_at, updated_at, last_login_at \
+        "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
          FROM users WHERE id = ?",
     )
     .bind(user_id)

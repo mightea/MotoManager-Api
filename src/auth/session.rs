@@ -24,7 +24,7 @@ pub async fn create_session(pool: &SqlitePool, user_id: i64) -> AppResult<String
     let expires_at_str = expires_at.to_rfc3339();
 
     sqlx::query(
-        "INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
+        "INSERT INTO sessions (token, userId, expiresAt, createdAt) VALUES (?, ?, ?, ?)",
     )
     .bind(&token)
     .bind(user_id)
@@ -41,11 +41,11 @@ pub async fn get_user_from_token(pool: &SqlitePool, token: &str) -> AppResult<Us
     let now = Utc::now().to_rfc3339();
 
     let row = sqlx::query(
-        "SELECT u.id, u.email, u.username, u.name, u.password_hash, u.role, \
-         u.created_at, u.updated_at, u.last_login_at \
+        "SELECT u.id, u.email, u.username, u.name, u.passwordHash, u.role, \
+         u.createdAt, u.updatedAt, u.lastLoginAt \
          FROM sessions s \
-         JOIN users u ON u.id = s.user_id \
-         WHERE s.token = ? AND s.expires_at > ?",
+         JOIN users u ON u.id = s.userId \
+         WHERE s.token = ? AND s.expiresAt > ?",
     )
     .bind(token)
     .bind(&now)
@@ -58,11 +58,11 @@ pub async fn get_user_from_token(pool: &SqlitePool, token: &str) -> AppResult<Us
             email: r.get("email"),
             username: r.get("username"),
             name: r.get("name"),
-            password_hash: r.get("password_hash"),
+            password_hash: r.get("passwordHash"),
             role: r.get("role"),
-            created_at: r.get("created_at"),
-            updated_at: r.get("updated_at"),
-            last_login_at: r.get("last_login_at"),
+            created_at: r.get("createdAt"),
+            updated_at: r.get("updatedAt"),
+            last_login_at: r.get("lastLoginAt"),
         }),
         None => Err(AppError::Unauthorized),
     }

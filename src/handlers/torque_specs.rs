@@ -17,21 +17,21 @@ use crate::{
 fn row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
     json!({
         "id": r.get::<i64, _>("id"),
-        "motorcycleId": r.get::<i64, _>("motorcycle_id"),
+        "motorcycleId": r.get::<i64, _>("motorcycleId"),
         "category": r.get::<String, _>("category"),
         "name": r.get::<String, _>("name"),
         "torque": r.get::<f64, _>("torque"),
-        "torqueEnd": r.get::<Option<f64>, _>("torque_end"),
+        "torqueEnd": r.get::<Option<f64>, _>("torqueEnd"),
         "variation": r.get::<Option<f64>, _>("variation"),
-        "toolSize": r.get::<Option<String>, _>("tool_size"),
+        "toolSize": r.get::<Option<String>, _>("toolSize"),
         "description": r.get::<Option<String>, _>("description"),
-        "createdAt": r.get::<String, _>("created_at"),
+        "createdAt": r.get::<String, _>("createdAt"),
     })
 }
 
 const SELECT_COLS: &str =
-    "id, motorcycle_id, category, name, torque, torque_end, variation, tool_size, \
-     description, created_at";
+    "id, motorcycleId, category, name, torque, torqueEnd, variation, toolSize, \
+     description, createdAt";
 
 pub async fn list_torque_specs(
     State(pool): State<SqlitePool>,
@@ -41,7 +41,7 @@ pub async fn list_torque_specs(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let rows = sqlx::query(&format!(
-        "SELECT {} FROM torque_specs WHERE motorcycle_id = ? ORDER BY category ASC, name ASC",
+        "SELECT {} FROM torqueSpecs WHERE motorcycleId = ? ORDER BY category ASC, name ASC",
         SELECT_COLS
     ))
     .bind(motorcycle_id)
@@ -75,8 +75,8 @@ pub async fn create_torque_spec(
     let now = Utc::now().to_rfc3339();
 
     let id = sqlx::query(
-        "INSERT INTO torque_specs \
-         (motorcycle_id, category, name, torque, torque_end, variation, tool_size, description, created_at) \
+        "INSERT INTO torqueSpecs \
+         (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
@@ -93,7 +93,7 @@ pub async fn create_torque_spec(
     .last_insert_rowid();
 
     let row = sqlx::query(&format!(
-        "SELECT {} FROM torque_specs WHERE id = ?",
+        "SELECT {} FROM torqueSpecs WHERE id = ?",
         SELECT_COLS
     ))
     .bind(id)
@@ -122,8 +122,8 @@ pub async fn import_torque_specs(
     verify_motorcycle_ownership(&pool, body.from_motorcycle_id, user.id).await?;
 
     let source_rows = sqlx::query(
-        "SELECT category, name, torque, torque_end, variation, tool_size, description \
-         FROM torque_specs WHERE motorcycle_id = ?",
+        "SELECT category, name, torque, torqueEnd, variation, toolSize, description \
+         FROM torqueSpecs WHERE motorcycleId = ?",
     )
     .bind(body.from_motorcycle_id)
     .fetch_all(&pool)
@@ -136,14 +136,14 @@ pub async fn import_torque_specs(
         let category: String = row.get("category");
         let name: String = row.get("name");
         let torque: f64 = row.get("torque");
-        let torque_end: Option<f64> = row.get("torque_end");
+        let torque_end: Option<f64> = row.get("torqueEnd");
         let variation: Option<f64> = row.get("variation");
-        let tool_size: Option<String> = row.get("tool_size");
+        let tool_size: Option<String> = row.get("toolSize");
         let description: Option<String> = row.get("description");
 
         sqlx::query(
-            "INSERT INTO torque_specs \
-             (motorcycle_id, category, name, torque, torque_end, variation, tool_size, description, created_at) \
+            "INSERT INTO torqueSpecs \
+             (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(motorcycle_id)
@@ -188,7 +188,7 @@ pub async fn update_torque_spec(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let existing = sqlx::query(&format!(
-        "SELECT {} FROM torque_specs WHERE id = ? AND motorcycle_id = ?",
+        "SELECT {} FROM torqueSpecs WHERE id = ? AND motorcycleId = ?",
         SELECT_COLS
     ))
     .bind(tid)
@@ -200,15 +200,15 @@ pub async fn update_torque_spec(
     let category = body.category.unwrap_or_else(|| existing.get("category"));
     let name = body.name.unwrap_or_else(|| existing.get("name"));
     let torque = body.torque.unwrap_or_else(|| existing.get("torque"));
-    let torque_end: Option<f64> = body.torque_end.or_else(|| existing.get("torque_end"));
+    let torque_end: Option<f64> = body.torque_end.or_else(|| existing.get("torqueEnd"));
     let variation: Option<f64> = body.variation.or_else(|| existing.get("variation"));
-    let tool_size: Option<String> = body.tool_size.or_else(|| existing.get("tool_size"));
+    let tool_size: Option<String> = body.tool_size.or_else(|| existing.get("toolSize"));
     let description: Option<String> = body.description.or_else(|| existing.get("description"));
 
     sqlx::query(
-        "UPDATE torque_specs SET \
-         category = ?, name = ?, torque = ?, torque_end = ?, variation = ?, \
-         tool_size = ?, description = ? \
+        "UPDATE torqueSpecs SET \
+         category = ?, name = ?, torque = ?, torqueEnd = ?, variation = ?, \
+         toolSize = ?, description = ? \
          WHERE id = ?",
     )
     .bind(&category)
@@ -223,7 +223,7 @@ pub async fn update_torque_spec(
     .await?;
 
     let row = sqlx::query(&format!(
-        "SELECT {} FROM torque_specs WHERE id = ?",
+        "SELECT {} FROM torqueSpecs WHERE id = ?",
         SELECT_COLS
     ))
     .bind(tid)
@@ -240,7 +240,7 @@ pub async fn delete_torque_spec(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let result = sqlx::query("DELETE FROM torque_specs WHERE id = ? AND motorcycle_id = ?")
+    let result = sqlx::query("DELETE FROM torqueSpecs WHERE id = ? AND motorcycleId = ?")
         .bind(tid)
         .bind(motorcycle_id)
         .execute(&pool)

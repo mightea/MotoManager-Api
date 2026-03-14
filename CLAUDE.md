@@ -12,10 +12,10 @@ Rust REST API for motorcycle management. Target client: React Router SPA.
 ## Key conventions
 
 ### Database
-- The DB was originally created by Drizzle ORM. All table and column names are **snake_case**.
-- Exception: `motorcycles` table has two mixed-case columns that must stay as-is: `firstRegistration` and `initialOdo`. Always quote them in SQL: `"firstRegistration"`, `"initialOdo"`.
-- Always query the actual tables. Never reference the old camelCase table names (`maintenanceRecords`, `torqueSpecs`, etc.).
+- All table and column names are **camelCase** throughout (e.g. `maintenanceRecords`, `motorcycleId`, `passwordHash`).
+- The `motorcycles` table has two columns that happen to be camelCase from the original Drizzle schema: `firstRegistration` and `initialOdo`. No special treatment needed — they follow the same camelCase convention as everything else.
 - Migrations live in `migrations/`. SQLx runs them at startup via `sqlx::migrate!("./migrations")`.
+- The existing `db.sqlite` must be deleted and recreated when the schema changes (no migration upgrade path from the old Drizzle snake_case schema).
 
 ### Auth
 - `AuthUser` and `AdminUser` are Axum extractors in `src/auth/mod.rs`. Add them as handler parameters to require auth.
@@ -27,7 +27,8 @@ Rust REST API for motorcycle management. Target client: React Router SPA.
 - `AppError` variants: `Unauthorized`, `Forbidden`, `NotFound(String)`, `BadRequest(String)`, `Conflict(String)`, `Internal(String)`, `Database`, `Io`, `Image`.
 
 ### JSON responses
-- JSON keys are camelCase (the API contract with the frontend). DB column names are snake_case. Map between them in `row_to_*` functions using `r.get("snake_case_col")` and `json!({ "camelCaseKey": value })`.
+- JSON keys are camelCase (the API contract with the frontend). DB column names are also camelCase. Map in `row_to_*` functions using `r.get("camelCaseCol")` and `json!({ "camelCaseKey": value })`.
+- One exception: `motorcycles.modelYear` is exposed as `fabricationDate` in the JSON API for historical compatibility with the frontend.
 
 ### File uploads
 - Motorcycle images: multipart → `data/images/`

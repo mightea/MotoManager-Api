@@ -17,7 +17,7 @@ use crate::{
 fn row_to_issue(r: &sqlx::sqlite::SqliteRow) -> Value {
     json!({
         "id": r.get::<i64, _>("id"),
-        "motorcycleId": r.get::<i64, _>("motorcycle_id"),
+        "motorcycleId": r.get::<i64, _>("motorcycleId"),
         "odo": r.get::<i64, _>("odo"),
         "description": r.get::<Option<String>, _>("description"),
         "priority": r.get::<String, _>("priority"),
@@ -34,8 +34,8 @@ pub async fn list_issues(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let rows = sqlx::query(
-        "SELECT id, motorcycle_id, odo, description, priority, status, date \
-         FROM issues WHERE motorcycle_id = ? ORDER BY date DESC, id DESC",
+        "SELECT id, motorcycleId, odo, description, priority, status, date \
+         FROM issues WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
     )
     .bind(motorcycle_id)
     .fetch_all(&pool)
@@ -69,7 +69,7 @@ pub async fn create_issue(
     let status = body.status.unwrap_or_else(|| "new".to_string());
 
     let id = sqlx::query(
-        "INSERT INTO issues (motorcycle_id, odo, description, priority, status, date) \
+        "INSERT INTO issues (motorcycleId, odo, description, priority, status, date) \
          VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
@@ -116,8 +116,8 @@ pub async fn update_issue(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let row = sqlx::query(
-        "SELECT id, motorcycle_id, odo, description, priority, status, date \
-         FROM issues WHERE id = ? AND motorcycle_id = ?",
+        "SELECT id, motorcycleId, odo, description, priority, status, date \
+         FROM issues WHERE id = ? AND motorcycleId = ?",
     )
     .bind(issue_id)
     .bind(motorcycle_id)
@@ -164,7 +164,7 @@ pub async fn delete_issue(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let result = sqlx::query("DELETE FROM issues WHERE id = ? AND motorcycle_id = ?")
+    let result = sqlx::query("DELETE FROM issues WHERE id = ? AND motorcycleId = ?")
         .bind(issue_id)
         .bind(motorcycle_id)
         .execute(&pool)

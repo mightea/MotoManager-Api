@@ -14,10 +14,10 @@ use crate::{
 };
 
 const SELECT_COLS: &str =
-    "id, date, odo, motorcycle_id, cost, normalized_cost, currency, description, type, \
-     brand, model, tire_position, tire_size, dot_code, battery_type, fluid_type, viscosity, \
-     oil_type, inspection_location, location_id, fuel_type, fuel_amount, price_per_unit, \
-     latitude, longitude, location_name, fuel_consumption, trip_distance";
+    "id, date, odo, motorcycleId, cost, normalizedCost, currency, description, type, \
+     brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
+     oilType, inspectionLocation, locationId, fuelType, fuelAmount, pricePerUnit, \
+     latitude, longitude, locationName, fuelConsumption, tripDistance";
 
 async fn recalculate_fuel_consumption(
     pool: &SqlitePool,
@@ -28,8 +28,8 @@ async fn recalculate_fuel_consumption(
     provided_trip_distance: Option<f64>,
 ) -> AppResult<()> {
     let prev_row = sqlx::query(
-        "SELECT odo FROM maintenance_records \
-         WHERE motorcycle_id = ? AND type = 'fuel' AND odo < ? AND id != ? \
+        "SELECT odo FROM maintenanceRecords \
+         WHERE motorcycleId = ? AND type = 'fuel' AND odo < ? AND id != ? \
          ORDER BY odo DESC LIMIT 1",
     )
     .bind(motorcycle_id)
@@ -54,7 +54,7 @@ async fn recalculate_fuel_consumption(
     let fuel_consumption = (fuel_amount / trip_distance) * 100.0;
 
     sqlx::query(
-        "UPDATE maintenance_records SET fuel_consumption = ?, trip_distance = ? WHERE id = ?",
+        "UPDATE maintenanceRecords SET fuelConsumption = ?, tripDistance = ? WHERE id = ?",
     )
     .bind(fuel_consumption)
     .bind(trip_distance)
@@ -73,7 +73,7 @@ pub async fn list_maintenance(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let rows = sqlx::query(&format!(
-        "SELECT {} FROM maintenance_records WHERE motorcycle_id = ? ORDER BY date DESC, id DESC",
+        "SELECT {} FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
         SELECT_COLS
     ))
     .bind(motorcycle_id)
@@ -135,11 +135,11 @@ pub async fn create_maintenance(
         .ok_or_else(|| AppError::BadRequest("type is required".to_string()))?;
 
     let id = sqlx::query(
-        "INSERT INTO maintenance_records \
-         (date, odo, motorcycle_id, cost, normalized_cost, currency, description, type, \
-          brand, model, tire_position, tire_size, dot_code, battery_type, fluid_type, viscosity, \
-          oil_type, inspection_location, location_id, fuel_type, fuel_amount, price_per_unit, \
-          latitude, longitude, location_name, fuel_consumption, trip_distance) \
+        "INSERT INTO maintenanceRecords \
+         (date, odo, motorcycleId, cost, normalizedCost, currency, description, type, \
+          brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
+          oilType, inspectionLocation, locationId, fuelType, fuelAmount, pricePerUnit, \
+          latitude, longitude, locationName, fuelConsumption, tripDistance) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&date)
@@ -188,7 +188,7 @@ pub async fn create_maintenance(
     }
 
     let row = sqlx::query(&format!(
-        "SELECT {} FROM maintenance_records WHERE id = ?",
+        "SELECT {} FROM maintenanceRecords WHERE id = ?",
         SELECT_COLS
     ))
     .bind(id)
@@ -210,7 +210,7 @@ pub async fn update_maintenance(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let existing = sqlx::query(&format!(
-        "SELECT {} FROM maintenance_records WHERE id = ? AND motorcycle_id = ?",
+        "SELECT {} FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?",
         SELECT_COLS
     ))
     .bind(mid)
@@ -227,48 +227,48 @@ pub async fn update_maintenance(
     let cost = body.cost.or_else(|| existing.get("cost"));
     let normalized_cost = body
         .normalized_cost
-        .or_else(|| existing.get("normalized_cost"));
+        .or_else(|| existing.get("normalizedCost"));
     let currency: Option<String> = body.currency.or_else(|| existing.get("currency"));
     let description: Option<String> = body.description.or_else(|| existing.get("description"));
     let brand: Option<String> = body.brand.or_else(|| existing.get("brand"));
     let model: Option<String> = body.model.or_else(|| existing.get("model"));
     let tire_position: Option<String> = body
         .tire_position
-        .or_else(|| existing.get("tire_position"));
-    let tire_size: Option<String> = body.tire_size.or_else(|| existing.get("tire_size"));
-    let dot_code: Option<String> = body.dot_code.or_else(|| existing.get("dot_code"));
-    let battery_type: Option<String> = body.battery_type.or_else(|| existing.get("battery_type"));
-    let fluid_type: Option<String> = body.fluid_type.or_else(|| existing.get("fluid_type"));
+        .or_else(|| existing.get("tirePosition"));
+    let tire_size: Option<String> = body.tire_size.or_else(|| existing.get("tireSize"));
+    let dot_code: Option<String> = body.dot_code.or_else(|| existing.get("dotCode"));
+    let battery_type: Option<String> = body.battery_type.or_else(|| existing.get("batteryType"));
+    let fluid_type: Option<String> = body.fluid_type.or_else(|| existing.get("fluidType"));
     let viscosity: Option<String> = body.viscosity.or_else(|| existing.get("viscosity"));
-    let oil_type: Option<String> = body.oil_type.or_else(|| existing.get("oil_type"));
+    let oil_type: Option<String> = body.oil_type.or_else(|| existing.get("oilType"));
     let inspection_location: Option<String> = body
         .inspection_location
-        .or_else(|| existing.get("inspection_location"));
-    let location_id: Option<i64> = body.location_id.or_else(|| existing.get("location_id"));
-    let fuel_type: Option<String> = body.fuel_type.or_else(|| existing.get("fuel_type"));
-    let fuel_amount: Option<f64> = body.fuel_amount.or_else(|| existing.get("fuel_amount"));
+        .or_else(|| existing.get("inspectionLocation"));
+    let location_id: Option<i64> = body.location_id.or_else(|| existing.get("locationId"));
+    let fuel_type: Option<String> = body.fuel_type.or_else(|| existing.get("fuelType"));
+    let fuel_amount: Option<f64> = body.fuel_amount.or_else(|| existing.get("fuelAmount"));
     let price_per_unit: Option<f64> = body
         .price_per_unit
-        .or_else(|| existing.get("price_per_unit"));
+        .or_else(|| existing.get("pricePerUnit"));
     let latitude: Option<f64> = body.latitude.or_else(|| existing.get("latitude"));
     let longitude: Option<f64> = body.longitude.or_else(|| existing.get("longitude"));
     let location_name: Option<String> = body
         .location_name
-        .or_else(|| existing.get("location_name"));
+        .or_else(|| existing.get("locationName"));
     let fuel_consumption: Option<f64> = body
         .fuel_consumption
-        .or_else(|| existing.get("fuel_consumption"));
+        .or_else(|| existing.get("fuelConsumption"));
     let trip_distance: Option<f64> = body
         .trip_distance
-        .or_else(|| existing.get("trip_distance"));
+        .or_else(|| existing.get("tripDistance"));
 
     sqlx::query(
-        "UPDATE maintenance_records SET \
-         date = ?, odo = ?, cost = ?, normalized_cost = ?, currency = ?, description = ?, \
-         type = ?, brand = ?, model = ?, tire_position = ?, tire_size = ?, dot_code = ?, \
-         battery_type = ?, fluid_type = ?, viscosity = ?, oil_type = ?, inspection_location = ?, \
-         location_id = ?, fuel_type = ?, fuel_amount = ?, price_per_unit = ?, latitude = ?, \
-         longitude = ?, location_name = ?, fuel_consumption = ?, trip_distance = ? \
+        "UPDATE maintenanceRecords SET \
+         date = ?, odo = ?, cost = ?, normalizedCost = ?, currency = ?, description = ?, \
+         type = ?, brand = ?, model = ?, tirePosition = ?, tireSize = ?, dotCode = ?, \
+         batteryType = ?, fluidType = ?, viscosity = ?, oilType = ?, inspectionLocation = ?, \
+         locationId = ?, fuelType = ?, fuelAmount = ?, pricePerUnit = ?, latitude = ?, \
+         longitude = ?, locationName = ?, fuelConsumption = ?, tripDistance = ? \
          WHERE id = ?",
     )
     .bind(&date)
@@ -316,7 +316,7 @@ pub async fn update_maintenance(
     }
 
     let row = sqlx::query(&format!(
-        "SELECT {} FROM maintenance_records WHERE id = ?",
+        "SELECT {} FROM maintenanceRecords WHERE id = ?",
         SELECT_COLS
     ))
     .bind(mid)
@@ -334,7 +334,7 @@ pub async fn delete_maintenance(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let result =
-        sqlx::query("DELETE FROM maintenance_records WHERE id = ? AND motorcycle_id = ?")
+        sqlx::query("DELETE FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?")
             .bind(mid)
             .bind(motorcycle_id)
             .execute(&pool)

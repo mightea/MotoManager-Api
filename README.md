@@ -5,7 +5,7 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
 ## Stack
 
 - **Framework**: Axum 0.7
-- **Database**: SQLite via SQLx 0.7 (runtime queries)
+- **Database**: SQLite via SQLx 0.7 (runtime queries, camelCase table and column names)
 - **Auth**: Bearer token sessions (`Authorization: Bearer <token>`)
 - **Password hashing**: Argon2id (OWASP-recommended parameters)
 

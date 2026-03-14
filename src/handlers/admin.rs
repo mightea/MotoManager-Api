@@ -22,11 +22,11 @@ fn user_row_to_value(row: &sqlx::sqlite::SqliteRow) -> crate::models::User {
         email: row.get("email"),
         username: row.get("username"),
         name: row.get("name"),
-        password_hash: row.get("password_hash"),
+        password_hash: row.get("passwordHash"),
         role: row.get("role"),
-        created_at: row.get("created_at"),
-        updated_at: row.get("updated_at"),
-        last_login_at: row.get("last_login_at"),
+        created_at: row.get("createdAt"),
+        updated_at: row.get("updatedAt"),
+        last_login_at: row.get("lastLoginAt"),
     }
 }
 
@@ -35,8 +35,8 @@ pub async fn list_users(
     AdminUser(_admin): AdminUser,
 ) -> AppResult<Json<Value>> {
     let rows = sqlx::query(
-        "SELECT id, email, username, name, password_hash, role, created_at, updated_at, last_login_at \
-         FROM users ORDER BY created_at ASC",
+        "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
+         FROM users ORDER BY createdAt ASC",
     )
     .fetch_all(&pool)
     .await?;
@@ -45,12 +45,12 @@ pub async fn list_users(
     for row in &rows {
         let user_id: i64 = row.get("id");
         let settings_row = sqlx::query(
-            "SELECT id, user_id, tire_interval, battery_lithium_interval, battery_default_interval, \
-             engine_oil_interval, gearbox_oil_interval, final_drive_oil_interval, fork_oil_interval, \
-             brake_fluid_interval, coolant_interval, chain_interval, tire_km_interval, \
-             engine_oil_km_interval, gearbox_oil_km_interval, final_drive_oil_km_interval, \
-             fork_oil_km_interval, brake_fluid_km_interval, coolant_km_interval, chain_km_interval, \
-             updated_at FROM user_settings WHERE user_id = ?",
+            "SELECT id, userId, tireInterval, batteryLithiumInterval, batteryDefaultInterval, \
+             engineOilInterval, gearboxOilInterval, finalDriveOilInterval, forkOilInterval, \
+             brakeFluidInterval, coolantInterval, chainInterval, tireKmInterval, \
+             engineOilKmInterval, gearboxOilKmInterval, finalDriveOilKmInterval, \
+             forkOilKmInterval, brakeFluidKmInterval, coolantKmInterval, chainKmInterval, \
+             updatedAt FROM userSettings WHERE userId = ?",
         )
         .bind(user_id)
         .fetch_optional(&pool)
@@ -59,26 +59,26 @@ pub async fn list_users(
         let settings = settings_row.map(|sr| {
             json!({
                 "id": sr.get::<i64, _>("id"),
-                "userId": sr.get::<i64, _>("user_id"),
-                "tireInterval": sr.get::<i64, _>("tire_interval"),
-                "batteryLithiumInterval": sr.get::<i64, _>("battery_lithium_interval"),
-                "batteryDefaultInterval": sr.get::<i64, _>("battery_default_interval"),
-                "engineOilInterval": sr.get::<i64, _>("engine_oil_interval"),
-                "gearboxOilInterval": sr.get::<i64, _>("gearbox_oil_interval"),
-                "finalDriveOilInterval": sr.get::<i64, _>("final_drive_oil_interval"),
-                "forkOilInterval": sr.get::<i64, _>("fork_oil_interval"),
-                "brakeFluidInterval": sr.get::<i64, _>("brake_fluid_interval"),
-                "coolantInterval": sr.get::<i64, _>("coolant_interval"),
-                "chainInterval": sr.get::<i64, _>("chain_interval"),
-                "tireKmInterval": sr.get::<Option<i64>, _>("tire_km_interval"),
-                "engineOilKmInterval": sr.get::<Option<i64>, _>("engine_oil_km_interval"),
-                "gearboxOilKmInterval": sr.get::<Option<i64>, _>("gearbox_oil_km_interval"),
-                "finalDriveOilKmInterval": sr.get::<Option<i64>, _>("final_drive_oil_km_interval"),
-                "forkOilKmInterval": sr.get::<Option<i64>, _>("fork_oil_km_interval"),
-                "brakeFluidKmInterval": sr.get::<Option<i64>, _>("brake_fluid_km_interval"),
-                "coolantKmInterval": sr.get::<Option<i64>, _>("coolant_km_interval"),
-                "chainKmInterval": sr.get::<Option<i64>, _>("chain_km_interval"),
-                "updatedAt": sr.get::<Option<String>, _>("updated_at"),
+                "userId": sr.get::<i64, _>("userId"),
+                "tireInterval": sr.get::<i64, _>("tireInterval"),
+                "batteryLithiumInterval": sr.get::<i64, _>("batteryLithiumInterval"),
+                "batteryDefaultInterval": sr.get::<i64, _>("batteryDefaultInterval"),
+                "engineOilInterval": sr.get::<i64, _>("engineOilInterval"),
+                "gearboxOilInterval": sr.get::<i64, _>("gearboxOilInterval"),
+                "finalDriveOilInterval": sr.get::<i64, _>("finalDriveOilInterval"),
+                "forkOilInterval": sr.get::<i64, _>("forkOilInterval"),
+                "brakeFluidInterval": sr.get::<i64, _>("brakeFluidInterval"),
+                "coolantInterval": sr.get::<i64, _>("coolantInterval"),
+                "chainInterval": sr.get::<i64, _>("chainInterval"),
+                "tireKmInterval": sr.get::<Option<i64>, _>("tireKmInterval"),
+                "engineOilKmInterval": sr.get::<Option<i64>, _>("engineOilKmInterval"),
+                "gearboxOilKmInterval": sr.get::<Option<i64>, _>("gearboxOilKmInterval"),
+                "finalDriveOilKmInterval": sr.get::<Option<i64>, _>("finalDriveOilKmInterval"),
+                "forkOilKmInterval": sr.get::<Option<i64>, _>("forkOilKmInterval"),
+                "brakeFluidKmInterval": sr.get::<Option<i64>, _>("brakeFluidKmInterval"),
+                "coolantKmInterval": sr.get::<Option<i64>, _>("coolantKmInterval"),
+                "chainKmInterval": sr.get::<Option<i64>, _>("chainKmInterval"),
+                "updatedAt": sr.get::<Option<String>, _>("updatedAt"),
             })
         });
 
@@ -135,7 +135,7 @@ pub async fn create_user(
     let role = body.role.unwrap_or_else(|| "user".to_string());
 
     let user_id = sqlx::query(
-        "INSERT INTO users (email, username, name, password_hash, role, created_at, updated_at) \
+        "INSERT INTO users (email, username, name, passwordHash, role, createdAt, updatedAt) \
          VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&body.email)
@@ -149,14 +149,14 @@ pub async fn create_user(
     .await?
     .last_insert_rowid();
 
-    sqlx::query("INSERT OR IGNORE INTO user_settings (user_id, updated_at) VALUES (?, ?)")
+    sqlx::query("INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)")
         .bind(user_id)
         .bind(&now)
         .execute(&pool)
         .await?;
 
     let row = sqlx::query(
-        "SELECT id, email, username, name, password_hash, role, created_at, updated_at, last_login_at \
+        "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
          FROM users WHERE id = ?",
     )
     .bind(user_id)
@@ -186,7 +186,7 @@ pub async fn update_user(
     Json(body): Json<UpdateUserRequest>,
 ) -> AppResult<Json<Value>> {
     let existing = sqlx::query(
-        "SELECT id, email, username, name, password_hash, role, created_at, updated_at, last_login_at \
+        "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
          FROM users WHERE id = ?",
     )
     .bind(uid)
@@ -203,11 +203,11 @@ pub async fn update_user(
     let password_hash = if let Some(new_pw) = body.password {
         hash_password(&new_pw)?
     } else {
-        existing.get("password_hash")
+        existing.get("passwordHash")
     };
 
     sqlx::query(
-        "UPDATE users SET email = ?, username = ?, name = ?, password_hash = ?, role = ?, updated_at = ? \
+        "UPDATE users SET email = ?, username = ?, name = ?, passwordHash = ?, role = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&email)
@@ -221,7 +221,7 @@ pub async fn update_user(
     .await?;
 
     let row = sqlx::query(
-        "SELECT id, email, username, name, password_hash, role, created_at, updated_at, last_login_at \
+        "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
          FROM users WHERE id = ?",
     )
     .bind(uid)
@@ -256,8 +256,8 @@ fn currency_row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
         "code": r.get::<String, _>("code"),
         "symbol": r.get::<String, _>("symbol"),
         "label": r.get::<Option<String>, _>("label"),
-        "conversionFactor": r.get::<f64, _>("conversion_factor"),
-        "createdAt": r.get::<String, _>("created_at"),
+        "conversionFactor": r.get::<f64, _>("conversionFactor"),
+        "createdAt": r.get::<String, _>("createdAt"),
     })
 }
 
@@ -266,7 +266,7 @@ pub async fn list_currencies(
     AdminUser(_admin): AdminUser,
 ) -> AppResult<Json<Value>> {
     let rows = sqlx::query(
-        "SELECT id, code, symbol, label, conversion_factor, created_at \
+        "SELECT id, code, symbol, label, conversionFactor, createdAt \
          FROM currencies ORDER BY code ASC",
     )
     .fetch_all(&pool)
@@ -280,7 +280,7 @@ pub async fn list_currencies_public(
     State(pool): State<SqlitePool>,
 ) -> AppResult<Json<Value>> {
     let rows = sqlx::query(
-        "SELECT id, code, symbol, label, conversion_factor, created_at \
+        "SELECT id, code, symbol, label, conversionFactor, createdAt \
          FROM currencies ORDER BY code ASC",
     )
     .fetch_all(&pool)
@@ -320,7 +320,7 @@ pub async fn create_currency(
     let now = Utc::now().to_rfc3339();
 
     let id = sqlx::query(
-        "INSERT INTO currencies (code, symbol, label, conversion_factor, created_at) \
+        "INSERT INTO currencies (code, symbol, label, conversionFactor, createdAt) \
          VALUES (?, ?, ?, ?, ?)",
     )
     .bind(&body.code)
@@ -333,7 +333,7 @@ pub async fn create_currency(
     .last_insert_rowid();
 
     let row = sqlx::query(
-        "SELECT id, code, symbol, label, conversion_factor, created_at FROM currencies WHERE id = ?",
+        "SELECT id, code, symbol, label, conversionFactor, createdAt FROM currencies WHERE id = ?",
     )
     .bind(id)
     .fetch_one(&pool)
@@ -361,7 +361,7 @@ pub async fn update_currency(
     Json(body): Json<UpdateCurrencyRequest>,
 ) -> AppResult<Json<Value>> {
     let existing = sqlx::query(
-        "SELECT id, code, symbol, label, conversion_factor, created_at FROM currencies WHERE id = ?",
+        "SELECT id, code, symbol, label, conversionFactor, createdAt FROM currencies WHERE id = ?",
     )
     .bind(cid)
     .fetch_optional(&pool)
@@ -373,10 +373,10 @@ pub async fn update_currency(
     let label: Option<String> = body.label.or_else(|| existing.get("label"));
     let conversion_factor = body
         .conversion_factor
-        .unwrap_or_else(|| existing.get("conversion_factor"));
+        .unwrap_or_else(|| existing.get("conversionFactor"));
 
     sqlx::query(
-        "UPDATE currencies SET code = ?, symbol = ?, label = ?, conversion_factor = ? WHERE id = ?",
+        "UPDATE currencies SET code = ?, symbol = ?, label = ?, conversionFactor = ? WHERE id = ?",
     )
     .bind(&code)
     .bind(&symbol)
@@ -387,7 +387,7 @@ pub async fn update_currency(
     .await?;
 
     let row = sqlx::query(
-        "SELECT id, code, symbol, label, conversion_factor, created_at FROM currencies WHERE id = ?",
+        "SELECT id, code, symbol, label, conversionFactor, createdAt FROM currencies WHERE id = ?",
     )
     .bind(cid)
     .fetch_one(&pool)

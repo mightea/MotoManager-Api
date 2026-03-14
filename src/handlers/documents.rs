@@ -15,28 +15,28 @@ use crate::{
 };
 
 fn row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
-    let is_private_raw: i64 = r.get("is_private");
+    let is_private_raw: i64 = r.get("isPrivate");
     json!({
         "id": r.get::<i64, _>("id"),
         "title": r.get::<String, _>("title"),
-        "filePath": r.get::<String, _>("file_path"),
-        "previewPath": r.get::<Option<String>, _>("preview_path"),
-        "uploadedBy": r.get::<Option<String>, _>("uploaded_by"),
-        "ownerId": r.get::<Option<i64>, _>("owner_id"),
+        "filePath": r.get::<String, _>("filePath"),
+        "previewPath": r.get::<Option<String>, _>("previewPath"),
+        "uploadedBy": r.get::<Option<String>, _>("uploadedBy"),
+        "ownerId": r.get::<Option<i64>, _>("ownerId"),
         "isPrivate": is_private_raw != 0,
-        "createdAt": r.get::<String, _>("created_at"),
-        "updatedAt": r.get::<String, _>("updated_at"),
+        "createdAt": r.get::<String, _>("createdAt"),
+        "updatedAt": r.get::<String, _>("updatedAt"),
     })
 }
 
 async fn get_motorcycle_ids_for_doc(pool: &SqlitePool, doc_id: i64) -> AppResult<Vec<i64>> {
     let rows = sqlx::query(
-        "SELECT motorcycle_id FROM document_motorcycles WHERE document_id = ?",
+        "SELECT motorcycleId FROM documentMotorcycles WHERE documentId = ?",
     )
     .bind(doc_id)
     .fetch_all(pool)
     .await?;
-    Ok(rows.iter().map(|r| r.get::<i64, _>("motorcycle_id")).collect())
+    Ok(rows.iter().map(|r| r.get::<i64, _>("motorcycleId")).collect())
 }
 
 async fn save_document_file(
@@ -97,9 +97,9 @@ pub async fn list_documents(
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
     let rows = sqlx::query(
-        "SELECT id, title, file_path, preview_path, uploaded_by, owner_id, is_private, created_at, updated_at \
-         FROM documents WHERE is_private = 0 OR owner_id = ? \
-         ORDER BY created_at DESC",
+        "SELECT id, title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt \
+         FROM documents WHERE isPrivate = 0 OR ownerId = ? \
+         ORDER BY createdAt DESC",
     )
     .bind(user.id)
     .fetch_all(&pool)
@@ -191,7 +191,7 @@ pub async fn create_document(
     let is_private_i = if is_private { 1i64 } else { 0i64 };
 
     let doc_id = sqlx::query(
-        "INSERT INTO documents (title, file_path, preview_path, uploaded_by, owner_id, is_private, created_at, updated_at) \
+        "INSERT INTO documents (title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&title)
@@ -209,7 +209,7 @@ pub async fn create_document(
     // Associate with motorcycles (verifying ownership)
     for moto_id in &motorcycle_ids {
         let count: i64 =
-            sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND user_id = ?")
+            sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?")
                 .bind(moto_id)
                 .bind(user.id)
                 .fetch_one(&pool)
@@ -217,7 +217,7 @@ pub async fn create_document(
                 .get("cnt");
         if count > 0 {
             sqlx::query(
-                "INSERT OR IGNORE INTO document_motorcycles (document_id, motorcycle_id) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO documentMotorcycles (documentId, motorcycleId) VALUES (?, ?)",
             )
             .bind(doc_id)
             .bind(moto_id)
@@ -227,7 +227,7 @@ pub async fn create_document(
     }
 
     let row = sqlx::query(
-        "SELECT id, title, file_path, preview_path, uploaded_by, owner_id, is_private, created_at, updated_at \
+        "SELECT id, title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt \
          FROM documents WHERE id = ?",
     )
     .bind(doc_id)
@@ -252,7 +252,7 @@ pub async fn update_document(
 ) -> AppResult<Json<Value>> {
     // Check document exists and user has access
     let existing = sqlx::query(
-        "SELECT id, title, file_path, preview_path, uploaded_by, owner_id, is_private, created_at, updated_at \
+        "SELECT id, title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt \
          FROM documents WHERE id = ?",
     )
     .bind(doc_id)
@@ -260,10 +260,10 @@ pub async fn update_document(
     .await?
     .ok_or_else(|| AppError::NotFound("Document not found".to_string()))?;
 
-    let owner_id: Option<i64> = existing.get("owner_id");
+    let owner_id: Option<i64> = existing.get("ownerId");
     let is_owner = owner_id == Some(user.id);
 
-    let is_private_raw: i64 = existing.get("is_private");
+    let is_private_raw: i64 = existing.get("isPrivate");
     let is_private_existing = is_private_raw != 0;
 
     // If document is private and user is not owner, deny
@@ -351,10 +351,10 @@ pub async fn update_document(
 
         let (new_file_path, new_preview_path) = if let Some((file_bytes, original_name)) = file_data {
             // Delete old file
-            let old_file_path: String = existing.get("file_path");
+            let old_file_path: String = existing.get("filePath");
             let old_file = config.documents_dir().join(&old_file_path);
             let _ = tokio::fs::remove_file(old_file).await;
-            if let Some(old_preview) = existing.get::<Option<String>, _>("preview_path") {
+            if let Some(old_preview) = existing.get::<Option<String>, _>("previewPath") {
                 let old_preview_file = config.previews_dir().join(&old_preview);
                 let _ = tokio::fs::remove_file(old_preview_file).await;
             }
@@ -363,13 +363,13 @@ pub async fn update_document(
                 save_document_file(&config, file_bytes, &original_name).await?;
             (stored, preview)
         } else {
-            let file_path: String = existing.get("file_path");
-            let preview_path: Option<String> = existing.get("preview_path");
+            let file_path: String = existing.get("filePath");
+            let preview_path: Option<String> = existing.get("previewPath");
             (file_path, preview_path)
         };
 
         sqlx::query(
-            "UPDATE documents SET title = ?, file_path = ?, preview_path = ?, is_private = ?, updated_at = ? \
+            "UPDATE documents SET title = ?, filePath = ?, previewPath = ?, isPrivate = ?, updatedAt = ? \
              WHERE id = ?",
         )
         .bind(&title)
@@ -386,13 +386,13 @@ pub async fn update_document(
     if let Some(moto_ids) = new_motorcycle_ids {
         if is_owner {
             // Owner replaces all associations
-            sqlx::query("DELETE FROM document_motorcycles WHERE document_id = ?")
+            sqlx::query("DELETE FROM documentMotorcycles WHERE documentId = ?")
                 .bind(doc_id)
                 .execute(&pool)
                 .await?;
             for moto_id in &moto_ids {
                 let count: i64 =
-                    sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND user_id = ?")
+                    sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?")
                         .bind(moto_id)
                         .bind(user.id)
                         .fetch_one(&pool)
@@ -400,7 +400,7 @@ pub async fn update_document(
                         .get("cnt");
                 if count > 0 {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO document_motorcycles (document_id, motorcycle_id) VALUES (?, ?)",
+                        "INSERT OR IGNORE INTO documentMotorcycles (documentId, motorcycleId) VALUES (?, ?)",
                     )
                     .bind(doc_id)
                     .bind(moto_id)
@@ -411,7 +411,7 @@ pub async fn update_document(
         } else {
             // Non-owner: only manage their own motorcycle associations
             let user_motos = sqlx::query(
-                "SELECT id FROM motorcycles WHERE user_id = ?",
+                "SELECT id FROM motorcycles WHERE userId = ?",
             )
             .bind(user.id)
             .fetch_all(&pool)
@@ -420,7 +420,7 @@ pub async fn update_document(
             for moto_row in &user_motos {
                 let moto_id: i64 = moto_row.get("id");
                 sqlx::query(
-                    "DELETE FROM document_motorcycles WHERE document_id = ? AND motorcycle_id = ?",
+                    "DELETE FROM documentMotorcycles WHERE documentId = ? AND motorcycleId = ?",
                 )
                 .bind(doc_id)
                 .bind(moto_id)
@@ -431,7 +431,7 @@ pub async fn update_document(
             // Add the requested motorcycles (only ones belonging to user)
             for moto_id in &moto_ids {
                 let count: i64 =
-                    sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND user_id = ?")
+                    sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?")
                         .bind(moto_id)
                         .bind(user.id)
                         .fetch_one(&pool)
@@ -439,7 +439,7 @@ pub async fn update_document(
                         .get("cnt");
                 if count > 0 {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO document_motorcycles (document_id, motorcycle_id) VALUES (?, ?)",
+                        "INSERT OR IGNORE INTO documentMotorcycles (documentId, motorcycleId) VALUES (?, ?)",
                     )
                     .bind(doc_id)
                     .bind(moto_id)
@@ -451,7 +451,7 @@ pub async fn update_document(
     }
 
     let row = sqlx::query(
-        "SELECT id, title, file_path, preview_path, uploaded_by, owner_id, is_private, created_at, updated_at \
+        "SELECT id, title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt \
          FROM documents WHERE id = ?",
     )
     .bind(doc_id)
@@ -474,22 +474,22 @@ pub async fn delete_document(
     Path(doc_id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let row = sqlx::query(
-        "SELECT id, file_path, preview_path, owner_id FROM documents WHERE id = ?",
+        "SELECT id, filePath, previewPath, ownerId FROM documents WHERE id = ?",
     )
     .bind(doc_id)
     .fetch_optional(&pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Document not found".to_string()))?;
 
-    let owner_id: Option<i64> = row.get("owner_id");
+    let owner_id: Option<i64> = row.get("ownerId");
     if owner_id != Some(user.id) {
         return Err(AppError::Forbidden);
     }
 
-    let file_path: String = row.get("file_path");
-    let preview_path: Option<String> = row.get("preview_path");
+    let file_path: String = row.get("filePath");
+    let preview_path: Option<String> = row.get("previewPath");
 
-    // Delete from DB (cascades to document_motorcycles)
+    // Delete from DB (cascades to documentMotorcycles)
     sqlx::query("DELETE FROM documents WHERE id = ?")
         .bind(doc_id)
         .execute(&pool)

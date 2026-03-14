@@ -34,31 +34,31 @@ fn row_to_motorcycle(r: &sqlx::sqlite::SqliteRow) -> Value {
         "id": r.get::<i64, _>("id"),
         "make": r.get::<String, _>("make"),
         "model": r.get::<String, _>("model"),
-        "fabricationDate": r.get::<Option<String>, _>("model_year"),
-        "userId": r.get::<i64, _>("user_id"),
+        "fabricationDate": r.get::<Option<String>, _>("modelYear"),
+        "userId": r.get::<i64, _>("userId"),
         "vin": r.get::<Option<String>, _>("vin"),
-        "engineNumber": r.get::<Option<String>, _>("engine_number"),
-        "vehicleNr": r.get::<Option<String>, _>("vehicle_nr"),
-        "numberPlate": r.get::<Option<String>, _>("number_plate"),
+        "engineNumber": r.get::<Option<String>, _>("engineNumber"),
+        "vehicleNr": r.get::<Option<String>, _>("vehicleNr"),
+        "numberPlate": r.get::<Option<String>, _>("numberPlate"),
         "image": r.get::<Option<String>, _>("image"),
-        "isVeteran": r.get::<bool, _>("is_veteran"),
-        "isArchived": r.get::<bool, _>("is_archived"),
+        "isVeteran": r.get::<bool, _>("isVeteran"),
+        "isArchived": r.get::<bool, _>("isArchived"),
         "firstRegistration": r.get::<Option<String>, _>("firstRegistration"),
         "initialOdo": r.get::<i64, _>("initialOdo"),
-        "manualOdo": r.get::<Option<i64>, _>("manual_odo"),
-        "purchaseDate": r.get::<Option<String>, _>("purchase_date"),
-        "purchasePrice": r.get::<Option<f64>, _>("purchase_price"),
-        "normalizedPurchasePrice": r.get::<Option<f64>, _>("normalized_purchase_price"),
-        "currencyCode": r.get::<Option<String>, _>("currency_code"),
-        "fuelTankSize": r.get::<Option<f64>, _>("fuel_tank_size"),
+        "manualOdo": r.get::<Option<i64>, _>("manualOdo"),
+        "purchaseDate": r.get::<Option<String>, _>("purchaseDate"),
+        "purchasePrice": r.get::<Option<f64>, _>("purchasePrice"),
+        "normalizedPurchasePrice": r.get::<Option<f64>, _>("normalizedPurchasePrice"),
+        "currencyCode": r.get::<Option<String>, _>("currencyCode"),
+        "fuelTankSize": r.get::<Option<f64>, _>("fuelTankSize"),
     })
 }
 
 const MOTORCYCLE_SELECT: &str = r#"
-    SELECT id, make, model, model_year, user_id, vin, engine_number, vehicle_nr,
-           number_plate, image, is_veteran, is_archived, "firstRegistration", "initialOdo",
-           manual_odo, purchase_date, purchase_price, normalized_purchase_price,
-           currency_code, fuel_tank_size
+    SELECT id, make, model, modelYear, userId, vin, engineNumber, vehicleNr,
+           numberPlate, image, isVeteran, isArchived, firstRegistration, initialOdo,
+           manualOdo, purchaseDate, purchasePrice, normalizedPurchasePrice,
+           currencyCode, fuelTankSize
     FROM motorcycles
 "#;
 
@@ -66,7 +66,7 @@ pub async fn list_motorcycles(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
-    let rows = sqlx::query(&format!("{} WHERE user_id = ? ORDER BY id ASC", MOTORCYCLE_SELECT))
+    let rows = sqlx::query(&format!("{} WHERE userId = ? ORDER BY id ASC", MOTORCYCLE_SELECT))
         .bind(user.id)
         .fetch_all(&pool)
         .await?;
@@ -76,7 +76,7 @@ pub async fn list_motorcycles(
         let moto_id: i64 = r.get("id");
 
         let open_issues: i64 = sqlx::query(
-            "SELECT COUNT(*) as cnt FROM issues WHERE motorcycle_id = ? AND status != 'done'",
+            "SELECT COUNT(*) as cnt FROM issues WHERE motorcycleId = ? AND status != 'done'",
         )
         .bind(moto_id)
         .fetch_one(&pool)
@@ -84,14 +84,14 @@ pub async fn list_motorcycles(
         .get("cnt");
 
         let maintenance_count: i64 =
-            sqlx::query("SELECT COUNT(*) as cnt FROM maintenance_records WHERE motorcycle_id = ?")
+            sqlx::query("SELECT COUNT(*) as cnt FROM maintenanceRecords WHERE motorcycleId = ?")
                 .bind(moto_id)
                 .fetch_one(&pool)
                 .await?
                 .get("cnt");
 
         let latest_odo: Option<i64> =
-            sqlx::query("SELECT MAX(odo) as max_odo FROM maintenance_records WHERE motorcycle_id = ?")
+            sqlx::query("SELECT MAX(odo) as max_odo FROM maintenanceRecords WHERE motorcycleId = ?")
                 .bind(moto_id)
                 .fetch_one(&pool)
                 .await?
@@ -178,11 +178,11 @@ pub async fn create_motorcycle(
     let currency_code = fields.get("currencyCode").cloned();
 
     let id = sqlx::query(
-        r#"INSERT INTO motorcycles
-           (make, model, model_year, user_id, vin, engine_number, vehicle_nr, number_plate,
-            image, is_veteran, is_archived, "firstRegistration", "initialOdo", manual_odo,
-            purchase_date, purchase_price, normalized_purchase_price, currency_code, fuel_tank_size)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"#,
+        "INSERT INTO motorcycles
+           (make, model, modelYear, userId, vin, engineNumber, vehicleNr, numberPlate,
+            image, isVeteran, isArchived, firstRegistration, initialOdo, manualOdo,
+            purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&make)
     .bind(&model)
@@ -224,7 +224,7 @@ pub async fn get_motorcycle(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let row = sqlx::query(&format!(
-        "{} WHERE id = ? AND user_id = ?",
+        "{} WHERE id = ? AND userId = ?",
         MOTORCYCLE_SELECT
     ))
     .bind(id)
@@ -234,7 +234,7 @@ pub async fn get_motorcycle(
     .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
 
     let issues = sqlx::query(
-        "SELECT id, motorcycle_id, odo, description, priority, status, date FROM issues WHERE motorcycle_id = ? ORDER BY date DESC",
+        "SELECT id, motorcycleId, odo, description, priority, status, date FROM issues WHERE motorcycleId = ? ORDER BY date DESC",
     )
     .bind(id)
     .fetch_all(&pool)
@@ -245,7 +245,7 @@ pub async fn get_motorcycle(
         .map(|r| {
             json!({
                 "id": r.get::<i64, _>("id"),
-                "motorcycleId": r.get::<i64, _>("motorcycle_id"),
+                "motorcycleId": r.get::<i64, _>("motorcycleId"),
                 "odo": r.get::<i64, _>("odo"),
                 "description": r.get::<Option<String>, _>("description"),
                 "priority": r.get::<String, _>("priority"),
@@ -256,11 +256,11 @@ pub async fn get_motorcycle(
         .collect();
 
     let maintenance = sqlx::query(
-        r#"SELECT id, date, odo, motorcycle_id, cost, normalized_cost, currency, description, type,
-           brand, model, tire_position, tire_size, dot_code, battery_type, fluid_type, viscosity,
-           oil_type, inspection_location, location_id, fuel_type, fuel_amount, price_per_unit,
-           latitude, longitude, location_name, fuel_consumption, trip_distance
-           FROM maintenance_records WHERE motorcycle_id = ? ORDER BY date DESC, id DESC"#,
+        r#"SELECT id, date, odo, motorcycleId, cost, normalizedCost, currency, description, type,
+           brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity,
+           oilType, inspectionLocation, locationId, fuelType, fuelAmount, pricePerUnit,
+           latitude, longitude, locationName, fuelConsumption, tripDistance
+           FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC"#,
     )
     .bind(id)
     .fetch_all(&pool)
@@ -269,9 +269,9 @@ pub async fn get_motorcycle(
     let maintenance_json: Vec<Value> = maintenance.iter().map(maintenance_row_to_value).collect();
 
     let previous_owners = sqlx::query(
-        r#"SELECT id, motorcycle_id, name, surname, purchase_date, address, city, postcode,
-           country, phone_number, email, comments, created_at, updated_at
-           FROM previous_owners WHERE motorcycle_id = ? ORDER BY purchase_date DESC"#,
+        r#"SELECT id, motorcycleId, name, surname, purchaseDate, address, city, postcode,
+           country, phoneNumber, email, comments, createdAt, updatedAt
+           FROM previousOwners WHERE motorcycleId = ? ORDER BY purchaseDate DESC"#,
     )
     .bind(id)
     .fetch_all(&pool)
@@ -282,19 +282,19 @@ pub async fn get_motorcycle(
         .map(|r| {
             json!({
                 "id": r.get::<i64, _>("id"),
-                "motorcycleId": r.get::<i64, _>("motorcycle_id"),
+                "motorcycleId": r.get::<i64, _>("motorcycleId"),
                 "name": r.get::<String, _>("name"),
                 "surname": r.get::<String, _>("surname"),
-                "purchaseDate": r.get::<String, _>("purchase_date"),
+                "purchaseDate": r.get::<String, _>("purchaseDate"),
                 "address": r.get::<Option<String>, _>("address"),
                 "city": r.get::<Option<String>, _>("city"),
                 "postcode": r.get::<Option<String>, _>("postcode"),
                 "country": r.get::<Option<String>, _>("country"),
-                "phoneNumber": r.get::<Option<String>, _>("phone_number"),
+                "phoneNumber": r.get::<Option<String>, _>("phoneNumber"),
                 "email": r.get::<Option<String>, _>("email"),
                 "comments": r.get::<Option<String>, _>("comments"),
-                "createdAt": r.get::<String, _>("created_at"),
-                "updatedAt": r.get::<String, _>("updated_at"),
+                "createdAt": r.get::<String, _>("createdAt"),
+                "updatedAt": r.get::<String, _>("updatedAt"),
             })
         })
         .collect();
@@ -316,7 +316,7 @@ pub async fn update_motorcycle(
 ) -> AppResult<Json<Value>> {
     // Verify ownership
     let existing = sqlx::query(&format!(
-        "{} WHERE id = ? AND user_id = ?",
+        "{} WHERE id = ? AND userId = ?",
         MOTORCYCLE_SELECT
     ))
     .bind(id)
@@ -363,15 +363,15 @@ pub async fn update_motorcycle(
     let model_year: Option<String> = fields
         .get("fabricationDate")
         .cloned()
-        .or_else(|| existing.get("model_year"));
+        .or_else(|| existing.get("modelYear"));
     let is_veteran: bool = fields
         .get("isVeteran")
         .map(|v| v == "true")
-        .unwrap_or_else(|| existing.get("is_veteran"));
+        .unwrap_or_else(|| existing.get("isVeteran"));
     let is_archived: bool = fields
         .get("isArchived")
         .map(|v| v == "true")
-        .unwrap_or_else(|| existing.get("is_archived"));
+        .unwrap_or_else(|| existing.get("isArchived"));
     let initial_odo: i64 = fields
         .get("initialOdo")
         .and_then(|v| v.parse().ok())
@@ -379,32 +379,32 @@ pub async fn update_motorcycle(
     let purchase_price: Option<f64> = fields
         .get("purchasePrice")
         .and_then(|v| v.parse().ok())
-        .or_else(|| existing.get("purchase_price"));
+        .or_else(|| existing.get("purchasePrice"));
     let normalized_purchase_price: Option<f64> = fields
         .get("normalizedPurchasePrice")
         .and_then(|v| v.parse().ok())
-        .or_else(|| existing.get("normalized_purchase_price"));
+        .or_else(|| existing.get("normalizedPurchasePrice"));
     let fuel_tank_size: Option<f64> = fields
         .get("fuelTankSize")
         .and_then(|v| v.parse().ok())
-        .or_else(|| existing.get("fuel_tank_size"));
+        .or_else(|| existing.get("fuelTankSize"));
     let manual_odo: Option<i64> = fields
         .get("manualOdo")
         .and_then(|v| v.parse().ok())
-        .or_else(|| existing.get("manual_odo"));
+        .or_else(|| existing.get("manualOdo"));
     let vin: Option<String> = fields.get("vin").cloned().or_else(|| existing.get("vin"));
     let engine_number: Option<String> = fields
         .get("engineNumber")
         .cloned()
-        .or_else(|| existing.get("engine_number"));
+        .or_else(|| existing.get("engineNumber"));
     let vehicle_nr: Option<String> = fields
         .get("vehicleNr")
         .cloned()
-        .or_else(|| existing.get("vehicle_nr"));
+        .or_else(|| existing.get("vehicleNr"));
     let number_plate: Option<String> = fields
         .get("numberPlate")
         .cloned()
-        .or_else(|| existing.get("number_plate"));
+        .or_else(|| existing.get("numberPlate"));
     let first_registration: Option<String> = fields
         .get("firstRegistration")
         .cloned()
@@ -412,19 +412,19 @@ pub async fn update_motorcycle(
     let purchase_date: Option<String> = fields
         .get("purchaseDate")
         .cloned()
-        .or_else(|| existing.get("purchase_date"));
+        .or_else(|| existing.get("purchaseDate"));
     let currency_code: Option<String> = fields
         .get("currencyCode")
         .cloned()
-        .or_else(|| existing.get("currency_code"));
+        .or_else(|| existing.get("currencyCode"));
 
     sqlx::query(
-        r#"UPDATE motorcycles SET
-           make = ?, model = ?, model_year = ?, vin = ?, engine_number = ?,
-           vehicle_nr = ?, number_plate = ?, image = ?, is_veteran = ?, is_archived = ?,
-           "firstRegistration" = ?, "initialOdo" = ?, manual_odo = ?, purchase_date = ?,
-           purchase_price = ?, normalized_purchase_price = ?, currency_code = ?, fuel_tank_size = ?
-           WHERE id = ? AND user_id = ?"#,
+        "UPDATE motorcycles SET
+           make = ?, model = ?, modelYear = ?, vin = ?, engineNumber = ?,
+           vehicleNr = ?, numberPlate = ?, image = ?, isVeteran = ?, isArchived = ?,
+           firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
+           purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?
+           WHERE id = ? AND userId = ?",
     )
     .bind(&make)
     .bind(&model)
@@ -462,7 +462,7 @@ pub async fn delete_motorcycle(
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let result = sqlx::query("DELETE FROM motorcycles WHERE id = ? AND user_id = ?")
+    let result = sqlx::query("DELETE FROM motorcycles WHERE id = ? AND userId = ?")
         .bind(id)
         .bind(user.id)
         .execute(&pool)
@@ -480,31 +480,31 @@ pub fn maintenance_row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
         "id": r.get::<i64, _>("id"),
         "date": r.get::<String, _>("date"),
         "odo": r.get::<i64, _>("odo"),
-        "motorcycleId": r.get::<i64, _>("motorcycle_id"),
+        "motorcycleId": r.get::<i64, _>("motorcycleId"),
         "cost": r.get::<Option<f64>, _>("cost"),
-        "normalizedCost": r.get::<Option<f64>, _>("normalized_cost"),
+        "normalizedCost": r.get::<Option<f64>, _>("normalizedCost"),
         "currency": r.get::<Option<String>, _>("currency"),
         "description": r.get::<Option<String>, _>("description"),
         "type": r.get::<String, _>("type"),
         "brand": r.get::<Option<String>, _>("brand"),
         "model": r.get::<Option<String>, _>("model"),
-        "tirePosition": r.get::<Option<String>, _>("tire_position"),
-        "tireSize": r.get::<Option<String>, _>("tire_size"),
-        "dotCode": r.get::<Option<String>, _>("dot_code"),
-        "batteryType": r.get::<Option<String>, _>("battery_type"),
-        "fluidType": r.get::<Option<String>, _>("fluid_type"),
+        "tirePosition": r.get::<Option<String>, _>("tirePosition"),
+        "tireSize": r.get::<Option<String>, _>("tireSize"),
+        "dotCode": r.get::<Option<String>, _>("dotCode"),
+        "batteryType": r.get::<Option<String>, _>("batteryType"),
+        "fluidType": r.get::<Option<String>, _>("fluidType"),
         "viscosity": r.get::<Option<String>, _>("viscosity"),
-        "oilType": r.get::<Option<String>, _>("oil_type"),
-        "inspectionLocation": r.get::<Option<String>, _>("inspection_location"),
-        "locationId": r.get::<Option<i64>, _>("location_id"),
-        "fuelType": r.get::<Option<String>, _>("fuel_type"),
-        "fuelAmount": r.get::<Option<f64>, _>("fuel_amount"),
-        "pricePerUnit": r.get::<Option<f64>, _>("price_per_unit"),
+        "oilType": r.get::<Option<String>, _>("oilType"),
+        "inspectionLocation": r.get::<Option<String>, _>("inspectionLocation"),
+        "locationId": r.get::<Option<i64>, _>("locationId"),
+        "fuelType": r.get::<Option<String>, _>("fuelType"),
+        "fuelAmount": r.get::<Option<f64>, _>("fuelAmount"),
+        "pricePerUnit": r.get::<Option<f64>, _>("pricePerUnit"),
         "latitude": r.get::<Option<f64>, _>("latitude"),
         "longitude": r.get::<Option<f64>, _>("longitude"),
-        "locationName": r.get::<Option<String>, _>("location_name"),
-        "fuelConsumption": r.get::<Option<f64>, _>("fuel_consumption"),
-        "tripDistance": r.get::<Option<f64>, _>("trip_distance"),
+        "locationName": r.get::<Option<String>, _>("locationName"),
+        "fuelConsumption": r.get::<Option<f64>, _>("fuelConsumption"),
+        "tripDistance": r.get::<Option<f64>, _>("tripDistance"),
     })
 }
 
@@ -515,7 +515,7 @@ pub async fn verify_motorcycle_ownership(
     user_id: i64,
 ) -> AppResult<()> {
     let count: i64 =
-        sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND user_id = ?")
+        sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?")
             .bind(motorcycle_id)
             .bind(user_id)
             .fetch_one(pool)

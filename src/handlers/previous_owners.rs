@@ -17,25 +17,25 @@ use crate::{
 fn row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
     json!({
         "id": r.get::<i64, _>("id"),
-        "motorcycleId": r.get::<i64, _>("motorcycle_id"),
+        "motorcycleId": r.get::<i64, _>("motorcycleId"),
         "name": r.get::<String, _>("name"),
         "surname": r.get::<String, _>("surname"),
-        "purchaseDate": r.get::<String, _>("purchase_date"),
+        "purchaseDate": r.get::<String, _>("purchaseDate"),
         "address": r.get::<Option<String>, _>("address"),
         "city": r.get::<Option<String>, _>("city"),
         "postcode": r.get::<Option<String>, _>("postcode"),
         "country": r.get::<Option<String>, _>("country"),
-        "phoneNumber": r.get::<Option<String>, _>("phone_number"),
+        "phoneNumber": r.get::<Option<String>, _>("phoneNumber"),
         "email": r.get::<Option<String>, _>("email"),
         "comments": r.get::<Option<String>, _>("comments"),
-        "createdAt": r.get::<String, _>("created_at"),
-        "updatedAt": r.get::<String, _>("updated_at"),
+        "createdAt": r.get::<String, _>("createdAt"),
+        "updatedAt": r.get::<String, _>("updatedAt"),
     })
 }
 
 const SELECT_COLS: &str =
-    "id, motorcycle_id, name, surname, purchase_date, address, city, postcode, \
-     country, phone_number, email, comments, created_at, updated_at";
+    "id, motorcycleId, name, surname, purchaseDate, address, city, postcode, \
+     country, phoneNumber, email, comments, createdAt, updatedAt";
 
 pub async fn list_previous_owners(
     State(pool): State<SqlitePool>,
@@ -45,7 +45,7 @@ pub async fn list_previous_owners(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let rows = sqlx::query(&format!(
-        "SELECT {} FROM previous_owners WHERE motorcycle_id = ? ORDER BY purchase_date DESC, id DESC",
+        "SELECT {} FROM previousOwners WHERE motorcycleId = ? ORDER BY purchaseDate DESC, id DESC",
         SELECT_COLS
     ))
     .bind(motorcycle_id)
@@ -82,9 +82,9 @@ pub async fn create_previous_owner(
     let now = Utc::now().to_rfc3339();
 
     let id = sqlx::query(
-        "INSERT INTO previous_owners \
-         (motorcycle_id, name, surname, purchase_date, address, city, postcode, country, \
-          phone_number, email, comments, created_at, updated_at) \
+        "INSERT INTO previousOwners \
+         (motorcycleId, name, surname, purchaseDate, address, city, postcode, country, \
+          phoneNumber, email, comments, createdAt, updatedAt) \
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
@@ -105,7 +105,7 @@ pub async fn create_previous_owner(
     .last_insert_rowid();
 
     let row = sqlx::query(&format!(
-        "SELECT {} FROM previous_owners WHERE id = ?",
+        "SELECT {} FROM previousOwners WHERE id = ?",
         SELECT_COLS
     ))
     .bind(id)
@@ -142,7 +142,7 @@ pub async fn update_previous_owner(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let existing = sqlx::query(&format!(
-        "SELECT {} FROM previous_owners WHERE id = ? AND motorcycle_id = ?",
+        "SELECT {} FROM previousOwners WHERE id = ? AND motorcycleId = ?",
         SELECT_COLS
     ))
     .bind(oid)
@@ -155,20 +155,20 @@ pub async fn update_previous_owner(
     let surname = body.surname.unwrap_or_else(|| existing.get("surname"));
     let purchase_date = body
         .purchase_date
-        .unwrap_or_else(|| existing.get("purchase_date"));
+        .unwrap_or_else(|| existing.get("purchaseDate"));
     let address: Option<String> = body.address.or_else(|| existing.get("address"));
     let city: Option<String> = body.city.or_else(|| existing.get("city"));
     let postcode: Option<String> = body.postcode.or_else(|| existing.get("postcode"));
     let country: Option<String> = body.country.or_else(|| existing.get("country"));
-    let phone_number: Option<String> = body.phone_number.or_else(|| existing.get("phone_number"));
+    let phone_number: Option<String> = body.phone_number.or_else(|| existing.get("phoneNumber"));
     let email: Option<String> = body.email.or_else(|| existing.get("email"));
     let comments: Option<String> = body.comments.or_else(|| existing.get("comments"));
     let now = Utc::now().to_rfc3339();
 
     sqlx::query(
-        "UPDATE previous_owners SET \
-         name = ?, surname = ?, purchase_date = ?, address = ?, city = ?, postcode = ?, \
-         country = ?, phone_number = ?, email = ?, comments = ?, updated_at = ? \
+        "UPDATE previousOwners SET \
+         name = ?, surname = ?, purchaseDate = ?, address = ?, city = ?, postcode = ?, \
+         country = ?, phoneNumber = ?, email = ?, comments = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&name)
@@ -187,7 +187,7 @@ pub async fn update_previous_owner(
     .await?;
 
     let row = sqlx::query(&format!(
-        "SELECT {} FROM previous_owners WHERE id = ?",
+        "SELECT {} FROM previousOwners WHERE id = ?",
         SELECT_COLS
     ))
     .bind(oid)
@@ -205,7 +205,7 @@ pub async fn delete_previous_owner(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let result =
-        sqlx::query("DELETE FROM previous_owners WHERE id = ? AND motorcycle_id = ?")
+        sqlx::query("DELETE FROM previousOwners WHERE id = ? AND motorcycleId = ?")
             .bind(oid)
             .bind(motorcycle_id)
             .execute(&pool)

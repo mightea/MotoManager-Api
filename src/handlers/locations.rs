@@ -16,8 +16,8 @@ fn row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
     json!({
         "id": r.get::<i64, _>("id"),
         "name": r.get::<String, _>("name"),
-        "countryCode": r.get::<String, _>("country_code"),
-        "userId": r.get::<i64, _>("user_id"),
+        "countryCode": r.get::<String, _>("countryCode"),
+        "userId": r.get::<i64, _>("userId"),
     })
 }
 
@@ -26,7 +26,7 @@ pub async fn list_locations(
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
     let rows = sqlx::query(
-        "SELECT id, name, country_code, user_id FROM locations WHERE user_id = ? ORDER BY name ASC",
+        "SELECT id, name, countryCode, userId FROM locations WHERE userId = ? ORDER BY name ASC",
     )
     .bind(user.id)
     .fetch_all(&pool)
@@ -51,7 +51,7 @@ pub async fn create_location(
     let country_code = body.country_code.unwrap_or_else(|| "CH".to_string());
 
     let id = sqlx::query(
-        "INSERT INTO locations (name, country_code, user_id) VALUES (?, ?, ?)",
+        "INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)",
     )
     .bind(&body.name)
     .bind(&country_code)
@@ -61,7 +61,7 @@ pub async fn create_location(
     .last_insert_rowid();
 
     let row = sqlx::query(
-        "SELECT id, name, country_code, user_id FROM locations WHERE id = ?",
+        "SELECT id, name, countryCode, userId FROM locations WHERE id = ?",
     )
     .bind(id)
     .fetch_one(&pool)
@@ -87,7 +87,7 @@ pub async fn update_location(
     Json(body): Json<UpdateLocationRequest>,
 ) -> AppResult<Json<Value>> {
     let existing = sqlx::query(
-        "SELECT id, name, country_code, user_id FROM locations WHERE id = ? AND user_id = ?",
+        "SELECT id, name, countryCode, userId FROM locations WHERE id = ? AND userId = ?",
     )
     .bind(lid)
     .bind(user.id)
@@ -98,9 +98,9 @@ pub async fn update_location(
     let name = body.name.unwrap_or_else(|| existing.get("name"));
     let country_code = body
         .country_code
-        .unwrap_or_else(|| existing.get("country_code"));
+        .unwrap_or_else(|| existing.get("countryCode"));
 
-    sqlx::query("UPDATE locations SET name = ?, country_code = ? WHERE id = ?")
+    sqlx::query("UPDATE locations SET name = ?, countryCode = ? WHERE id = ?")
         .bind(&name)
         .bind(&country_code)
         .bind(lid)
@@ -108,7 +108,7 @@ pub async fn update_location(
         .await?;
 
     let row = sqlx::query(
-        "SELECT id, name, country_code, user_id FROM locations WHERE id = ?",
+        "SELECT id, name, countryCode, userId FROM locations WHERE id = ?",
     )
     .bind(lid)
     .fetch_one(&pool)
@@ -122,7 +122,7 @@ pub async fn delete_location(
     AuthUser(user): AuthUser,
     Path(lid): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let result = sqlx::query("DELETE FROM locations WHERE id = ? AND user_id = ?")
+    let result = sqlx::query("DELETE FROM locations WHERE id = ? AND userId = ?")
         .bind(lid)
         .bind(user.id)
         .execute(&pool)
