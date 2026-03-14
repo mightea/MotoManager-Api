@@ -1,3 +1,31 @@
+-- Drop all tables (both camelCase and legacy snake_case names) to ensure a clean slate.
+-- Disable FK checks so drops succeed regardless of dependency order.
+PRAGMA foreign_keys = OFF;
+
+DROP TABLE IF EXISTS previousOwners;
+DROP TABLE IF EXISTS previous_owners;
+DROP TABLE IF EXISTS documentMotorcycles;
+DROP TABLE IF EXISTS document_motorcycles;
+DROP TABLE IF EXISTS documents;
+DROP TABLE IF EXISTS userSettings;
+DROP TABLE IF EXISTS user_settings;
+DROP TABLE IF EXISTS torqueSpecs;
+DROP TABLE IF EXISTS torque_specs;
+DROP TABLE IF EXISTS locationRecords;
+DROP TABLE IF EXISTS location_records;
+DROP TABLE IF EXISTS maintenanceRecords;
+DROP TABLE IF EXISTS maintenance_records;
+DROP TABLE IF EXISTS issues;
+DROP TABLE IF EXISTS locations;
+DROP TABLE IF EXISTS motorcycles;
+DROP TABLE IF EXISTS currencies;
+DROP TABLE IF EXISTS challenges;
+DROP TABLE IF EXISTS authenticators;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS users;
+
+PRAGMA foreign_keys = ON;
+
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     email TEXT UNIQUE NOT NULL,
