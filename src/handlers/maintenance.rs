@@ -70,6 +70,7 @@ pub async fn list_maintenance(
     AuthUser(user): AuthUser,
     Path(motorcycle_id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    tracing::debug!("Listing maintenance records for motorcycle ID: {} for user: {}", motorcycle_id, user.id);
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let rows = sqlx::query(&format!(
@@ -122,6 +123,7 @@ pub async fn create_maintenance(
     Path(motorcycle_id): Path<i64>,
     Json(body): Json<MaintenanceRequest>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
+    tracing::info!("Creating maintenance record for motorcycle ID: {} for user: {}", motorcycle_id, user.id);
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let date = body
@@ -195,6 +197,7 @@ pub async fn create_maintenance(
     .fetch_one(&pool)
     .await?;
 
+    tracing::info!("Maintenance record created ID: {} for motorcycle ID: {}", id, motorcycle_id);
     Ok((
         StatusCode::CREATED,
         Json(json!({ "maintenanceRecord": maintenance_row_to_value(&row) })),
@@ -207,6 +210,7 @@ pub async fn update_maintenance(
     Path((motorcycle_id, mid)): Path<(i64, i64)>,
     Json(body): Json<MaintenanceRequest>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Updating maintenance record ID: {} for motorcycle ID: {} for user: {}", mid, motorcycle_id, user.id);
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let existing = sqlx::query(&format!(
@@ -323,6 +327,7 @@ pub async fn update_maintenance(
     .fetch_one(&pool)
     .await?;
 
+    tracing::info!("Maintenance record updated ID: {}", mid);
     Ok(Json(json!({ "maintenanceRecord": maintenance_row_to_value(&row) })))
 }
 
@@ -331,6 +336,7 @@ pub async fn delete_maintenance(
     AuthUser(user): AuthUser,
     Path((motorcycle_id, mid)): Path<(i64, i64)>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Deleting maintenance record ID: {} for motorcycle ID: {} for user: {}", mid, motorcycle_id, user.id);
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let result =
@@ -341,8 +347,10 @@ pub async fn delete_maintenance(
             .await?;
 
     if result.rows_affected() == 0 {
+        tracing::warn!("Delete failed: maintenance record ID: {} not found for motorcycle ID: {}", mid, motorcycle_id);
         return Err(AppError::NotFound("Maintenance record not found".to_string()));
     }
 
+    tracing::info!("Maintenance record deleted ID: {}", mid);
     Ok(Json(json!({ "message": "Maintenance record deleted" })))
 }

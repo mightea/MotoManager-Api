@@ -45,6 +45,7 @@ pub fn build_app(state: AppState) -> Router {
             }),
         )
         // Auth routes
+        .route("/api/auth/status", get(handlers::auth::status))
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/logout", post(handlers::auth::logout))
         .route("/api/auth/register", post(handlers::auth::register))

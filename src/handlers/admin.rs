@@ -112,9 +112,10 @@ pub struct CreateUserRequest {
 
 pub async fn create_user(
     State(pool): State<SqlitePool>,
-    AdminUser(_admin): AdminUser,
+    AdminUser(admin): AdminUser,
     Json(body): Json<CreateUserRequest>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
+    tracing::info!("Admin {} (ID: {}) creating user: {}", admin.username, admin.id, body.email);
     let existing: i64 = sqlx::query(
         "SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?",
     )
@@ -163,6 +164,7 @@ pub async fn create_user(
     .fetch_one(&pool)
     .await?;
 
+    tracing::info!("User created by admin: {} (ID: {})", body.email, user_id);
     Ok((
         StatusCode::CREATED,
         Json(json!({ "user": PublicUser::from(user_row_to_value(&row)) })),
@@ -181,10 +183,11 @@ pub struct UpdateUserRequest {
 
 pub async fn update_user(
     State(pool): State<SqlitePool>,
-    AdminUser(_admin): AdminUser,
+    AdminUser(admin): AdminUser,
     Path(uid): Path<i64>,
     Json(body): Json<UpdateUserRequest>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Admin {} (ID: {}) updating user ID: {}", admin.username, admin.id, uid);
     let existing = sqlx::query(
         "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
          FROM users WHERE id = ?",
@@ -228,23 +231,27 @@ pub async fn update_user(
     .fetch_one(&pool)
     .await?;
 
+    tracing::info!("User updated by admin ID: {}", uid);
     Ok(Json(json!({ "user": PublicUser::from(user_row_to_value(&row)) })))
 }
 
 pub async fn delete_user(
     State(pool): State<SqlitePool>,
-    AdminUser(_admin): AdminUser,
+    AdminUser(admin): AdminUser,
     Path(uid): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Admin {} (ID: {}) deleting user ID: {}", admin.username, admin.id, uid);
     let result = sqlx::query("DELETE FROM users WHERE id = ?")
         .bind(uid)
         .execute(&pool)
         .await?;
 
     if result.rows_affected() == 0 {
+        tracing::warn!("Admin delete failed: user ID: {} not found", uid);
         return Err(AppError::NotFound("User not found".to_string()));
     }
 
+    tracing::info!("User deleted by admin ID: {}", uid);
     Ok(Json(json!({ "message": "User deleted" })))
 }
 

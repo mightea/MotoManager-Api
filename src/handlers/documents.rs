@@ -96,6 +96,7 @@ pub async fn list_documents(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
+    tracing::debug!("Listing documents for user: {} (ID: {})", user.username, user.id);
     let rows = sqlx::query(
         "SELECT id, title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt \
          FROM documents WHERE isPrivate = 0 OR ownerId = ? \
@@ -125,6 +126,7 @@ pub async fn create_document(
     AuthUser(user): AuthUser,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<Value>)> {
+    tracing::info!("Creating document for user: {} (ID: {})", user.username, user.id);
     let mut title: Option<String> = None;
     let mut is_private = false;
     let mut motorcycle_ids: Vec<i64> = Vec::new();
@@ -240,6 +242,7 @@ pub async fn create_document(
         obj.insert("motorcycleIds".to_string(), json!(saved_moto_ids));
     }
 
+    tracing::info!("Document created: {} (ID: {})", title, doc_id);
     Ok((StatusCode::CREATED, Json(json!({ "document": doc_val }))))
 }
 
@@ -250,6 +253,7 @@ pub async fn update_document(
     Path(doc_id): Path<i64>,
     mut multipart: Multipart,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Updating document ID: {} for user: {}", doc_id, user.id);
     // Check document exists and user has access
     let existing = sqlx::query(
         "SELECT id, title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt \
@@ -464,6 +468,7 @@ pub async fn update_document(
         obj.insert("motorcycleIds".to_string(), json!(saved_moto_ids));
     }
 
+    tracing::info!("Document updated ID: {}", doc_id);
     Ok(Json(json!({ "document": doc_val })))
 }
 
@@ -473,6 +478,7 @@ pub async fn delete_document(
     AuthUser(user): AuthUser,
     Path(doc_id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Deleting document ID: {} for user: {}", doc_id, user.id);
     let row = sqlx::query(
         "SELECT id, filePath, previewPath, ownerId FROM documents WHERE id = ?",
     )
@@ -483,6 +489,7 @@ pub async fn delete_document(
 
     let owner_id: Option<i64> = row.get("ownerId");
     if owner_id != Some(user.id) {
+        tracing::warn!("Delete failed: user {} (ID: {}) is not owner of document {}", user.username, user.id, doc_id);
         return Err(AppError::Forbidden);
     }
 
@@ -503,5 +510,6 @@ pub async fn delete_document(
         let _ = tokio::fs::remove_file(preview_full).await;
     }
 
+    tracing::info!("Document deleted ID: {}", doc_id);
     Ok(Json(json!({ "message": "Document deleted" })))
 }

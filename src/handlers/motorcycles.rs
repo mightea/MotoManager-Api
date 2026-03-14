@@ -65,6 +65,7 @@ pub async fn list_motorcycles(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
+    tracing::debug!("Listing motorcycles for user: {} (ID: {})", user.username, user.id);
     let rows = sqlx::query(&format!("{} WHERE userId = ? ORDER BY id ASC", MOTORCYCLE_SELECT))
         .bind(user.id)
         .fetch_all(&pool)
@@ -114,6 +115,7 @@ pub async fn create_motorcycle(
     AuthUser(user): AuthUser,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<Value>)> {
+    tracing::info!("Creating motorcycle for user: {} (ID: {})", user.username, user.id);
     let mut fields = std::collections::HashMap::<String, String>::new();
     let mut image_filename: Option<String> = None;
 
@@ -211,6 +213,7 @@ pub async fn create_motorcycle(
         .fetch_one(&pool)
         .await?;
 
+    tracing::info!("Motorcycle created: {} {} (ID: {})", make, model, id);
     Ok((
         StatusCode::CREATED,
         Json(json!({ "motorcycle": row_to_motorcycle(&row) })),
@@ -222,6 +225,7 @@ pub async fn get_motorcycle(
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    tracing::debug!("Fetching motorcycle ID: {} for user: {}", id, user.id);
     let row = sqlx::query(&format!(
         "{} WHERE id = ? AND userId = ?",
         MOTORCYCLE_SELECT
@@ -313,6 +317,7 @@ pub async fn update_motorcycle(
     Path(id): Path<i64>,
     mut multipart: Multipart,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Updating motorcycle ID: {} for user: {}", id, user.id);
     // Verify ownership
     let existing = sqlx::query(&format!(
         "{} WHERE id = ? AND userId = ?",
@@ -453,6 +458,7 @@ pub async fn update_motorcycle(
         .fetch_one(&pool)
         .await?;
 
+    tracing::info!("Motorcycle updated ID: {}", id);
     Ok(Json(json!({ "motorcycle": row_to_motorcycle(&row) })))
 }
 
@@ -461,6 +467,7 @@ pub async fn delete_motorcycle(
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Deleting motorcycle ID: {} for user: {}", id, user.id);
     let result = sqlx::query("DELETE FROM motorcycles WHERE id = ? AND userId = ?")
         .bind(id)
         .bind(user.id)
@@ -468,9 +475,11 @@ pub async fn delete_motorcycle(
         .await?;
 
     if result.rows_affected() == 0 {
+        tracing::warn!("Delete failed: motorcycle ID: {} not found or not owned by user: {}", id, user.id);
         return Err(AppError::NotFound("Motorcycle not found".to_string()));
     }
 
+    tracing::info!("Motorcycle deleted ID: {}", id);
     Ok(Json(json!({ "message": "Motorcycle deleted" })))
 }
 
