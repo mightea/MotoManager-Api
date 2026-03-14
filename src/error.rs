@@ -70,6 +70,8 @@ impl IntoResponse for AppError {
     }
 }
 
+pub type AppResult<T> = Result<T, AppError>;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +100,3 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::CONFLICT);
     }
 }
-
-pub type AppResult<T> = Result<T, AppError>;

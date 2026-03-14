@@ -8,8 +8,8 @@ use moto_manager_api::{
     config::Config,
     AppState,
 };
-use serde_json::{json, Value};
-use sqlx::{sqlite::SqlitePoolOptions, Row};
+use serde_json::Value;
+use sqlx::sqlite::SqlitePoolOptions;
 use tower::ServiceExt;
 
 async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {

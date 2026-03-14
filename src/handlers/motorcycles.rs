@@ -3,7 +3,6 @@ use axum::{
     http::StatusCode,
     Json,
 };
-use chrono::Utc;
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -197,7 +196,7 @@ pub async fn create_motorcycle(
     .bind(is_archived)
     .bind(&first_registration)
     .bind(initial_odo)
-    .bind(&manual_odo)
+    .bind(manual_odo)
     .bind(&purchase_date)
     .bind(purchase_price)
     .bind(normalized_purchase_price)
@@ -438,7 +437,7 @@ pub async fn update_motorcycle(
     .bind(is_archived)
     .bind(&first_registration)
     .bind(initial_odo)
-    .bind(&manual_odo)
+    .bind(manual_odo)
     .bind(&purchase_date)
     .bind(purchase_price)
     .bind(normalized_purchase_price)
@@ -525,22 +524,4 @@ pub async fn verify_motorcycle_ownership(
         return Err(AppError::NotFound("Motorcycle not found".to_string()));
     }
     Ok(())
-}
-
-/// Helper used by Utc::now() in other modules
-pub fn now_str() -> String {
-    Utc::now().to_rfc3339()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_now_str_format() {
-        let now = now_str();
-        // RFC3339 format check (basic)
-        assert!(now.contains('T'));
-        assert!(now.contains('Z') || now.contains('+') || now.contains('-'));
-    }
 }
