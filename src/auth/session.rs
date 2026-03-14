@@ -76,3 +76,21 @@ pub async fn delete_session(pool: &SqlitePool, token: &str) -> AppResult<()> {
         .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_generate_session_token_length() {
+        let token = generate_session_token();
+        assert_eq!(token.len(), 80); // 40 bytes * 2 hex chars
+    }
+
+    #[test]
+    fn test_generate_session_token_uniqueness() {
+        let t1 = generate_session_token();
+        let t2 = generate_session_token();
+        assert_ne!(t1, t2);
+    }
+}

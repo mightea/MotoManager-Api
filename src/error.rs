@@ -70,4 +70,33 @@ impl IntoResponse for AppError {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    #[test]
+    fn test_error_status_codes() {
+        let err = AppError::NotFound("test".to_string());
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        let err = AppError::Unauthorized;
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+
+        let err = AppError::Forbidden;
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+
+        let err = AppError::BadRequest("test".to_string());
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+        let err = AppError::Conflict("test".to_string());
+        let resp = err.into_response();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+    }
+}
+
 pub type AppResult<T> = Result<T, AppError>;

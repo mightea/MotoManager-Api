@@ -531,3 +531,16 @@ pub async fn verify_motorcycle_ownership(
 pub fn now_str() -> String {
     Utc::now().to_rfc3339()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_now_str_format() {
+        let now = now_str();
+        // RFC3339 format check (basic)
+        assert!(now.contains('T'));
+        assert!(now.contains('Z') || now.contains('+') || now.contains('-'));
+    }
+}
