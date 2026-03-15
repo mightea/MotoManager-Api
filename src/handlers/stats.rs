@@ -3,7 +3,7 @@ use axum::Json;
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
-use chrono::Datelike;
+use chrono::{Datelike, Utc, NaiveDate, DateTime};
 
 use crate::{
     auth::AuthUser,
@@ -11,6 +11,21 @@ use crate::{
     error::AppResult,
     handlers::motorcycles::maintenance_row_to_value,
 };
+
+fn parse_year(date_str: &str) -> Option<i32> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+        return Some(dt.year());
+    }
+    if let Ok(d) = NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+        return Some(d.year());
+    }
+    // Fallback: first 4 digits
+    if date_str.len() >= 4 {
+        date_str[0..4].parse::<i32>().ok()
+    } else {
+        None
+    }
+}
 
 pub async fn get_stats(
     State(pool): State<SqlitePool>,
@@ -46,27 +61,35 @@ pub async fn get_stats(
         .fetch_all(&pool)
         .await?;
 
-    let location_history = sqlx::query("SELECT * FROM locationRecords WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)")
-        .bind(user.id)
-        .fetch_all(&pool)
-        .await?;
-
-    let locations = sqlx::query("SELECT * FROM locations WHERE userId = ?")
-        .bind(user.id)
-        .fetch_all(&pool)
-        .await?;
-
-    let settings_row = sqlx::query("SELECT * FROM userSettings WHERE userId = ?").bind(user.id).fetch_optional(&pool).await?;
-
     // 3. Perform Aggregations
     let current_year = Utc::now().year();
-    let mut yearly_stats: HashMap<i32, Value> = HashMap::new();
+    let mut yearly_map: HashMap<i32, Value> = HashMap::new();
     let mut total_km_overall = 0i64;
     let mut total_km_this_year = 0i64;
+    let mut total_cost_overall = 0.0f64;
     let mut total_cost_this_year = 0.0f64;
     let mut veteran_count = 0i64;
     let mut total_active_issues = 0i64;
-    let mut moto_yearly_distance: HashMap<i64, i64> = HashMap::new();
+
+    // Pre-process yearly structure
+    let mut start_year = current_year;
+    for r in &motorcycles {
+        if let Some(date_str) = r.get::<Option<String>, _>("purchaseDate") {
+            if let Some(y) = parse_year(&date_str) {
+                if y < start_year { start_year = y; }
+            }
+        }
+    }
+    for y in start_year..=current_year {
+        yearly_map.insert(y, json!({
+            "year": y,
+            "distance": 0,
+            "cost": 0.0,
+            "motorcycleCount": 0,
+            "motorcycles": [],
+            "records": []
+        }));
+    }
 
     // Process each motorcycle
     let mut motorcycles_json = Vec::new();
@@ -76,40 +99,61 @@ pub async fn get_stats(
         let is_veteran: bool = r.get("isVeteran");
         if is_veteran { veteran_count += 1; }
         
-        // Find max ODO from all sources
-        let mut max_odo = initial_odo;
-        let mut max_odo_prev_year = initial_odo;
+        let purchase_year = r.get::<Option<String>, _>("purchaseDate")
+            .and_then(|d| parse_year(&d))
+            .unwrap_or(start_year);
+
+        // Map max ODO per year for this bike
+        let mut odo_by_year: HashMap<i32, i64> = HashMap::new();
+        odo_by_year.insert(purchase_year - 1, initial_odo); // Baseline
 
         for m in maintenance.iter().filter(|m| m.get::<i64, _>("motorcycleId") == moto_id) {
             let odo: i64 = m.get("odo");
-            if odo > max_odo { max_odo = odo; }
-            
-            if let Ok(date) = chrono::DateTime::parse_from_rfc3339(&m.get::<String, _>("date")) {
-                if date.year() < current_year && odo > max_odo_prev_year {
-                    max_odo_prev_year = odo;
-                }
+            if let Some(y) = parse_year(&m.get::<String, _>("date")) {
+                let current = odo_by_year.get(&y).cloned().unwrap_or(0);
+                if odo > current { odo_by_year.insert(y, odo); }
             }
         }
 
-        for i in issues.iter().filter(|i| i.get::<i64, _>("motorcycleId") == moto_id) {
-            let odo: i64 = i.get("odo");
-            let status: String = i.get("status");
-            if status != "done" { total_active_issues += 1; }
+        // Calculate yearly metrics for this bike
+        let mut last_odo = initial_odo;
+        let mut bike_max_odo = initial_odo;
 
-            if odo > max_odo { max_odo = odo; }
-            if let Some(date_str) = i.get::<Option<String>, _>("date") {
-                if let Ok(date) = chrono::DateTime::parse_from_rfc3339(&date_str) {
-                    if date.year() < current_year && odo > max_odo_prev_year {
-                        max_odo_prev_year = odo;
+        for y in start_year..=current_year {
+            if y >= purchase_year {
+                let yearly_max = odo_by_year.get(&y).cloned().unwrap_or(last_odo);
+                let distance = yearly_max - last_odo;
+                
+                let yearly_cost = maintenance.iter()
+                    .filter(|m| m.get::<i64, _>("motorcycleId") == moto_id)
+                    .filter(|m| parse_year(&m.get::<String, _>("date")) == Some(y))
+                    .map(|m| m.get::<Option<f64>, _>("normalizedCost").or_else(|| m.get::<Option<f64>, _>("cost")).unwrap_or(0.0))
+                    .sum::<f64>();
+
+                if let Some(y_stats) = yearly_map.get_mut(&y) {
+                    if let Some(obj) = y_stats.as_object_mut() {
+                        obj["motorcycleCount"] = json!(obj["motorcycleCount"].as_i64().unwrap_or(0) + 1);
+                        obj["distance"] = json!(obj["distance"].as_i64().unwrap_or(0) + distance);
+                        obj["cost"] = json!(obj["cost"].as_f64().unwrap_or(0.0) + yearly_cost);
+                        
+                        let moto_list = obj["motorcycles"].as_array_mut().unwrap();
+                        moto_list.push(json!({
+                            "id": moto_id,
+                            "make": r.get::<String, _>("make"),
+                            "model": r.get::<String, _>("model"),
+                            "distance": distance,
+                            "cost": yearly_cost
+                        }));
                     }
                 }
+
+                if y == current_year { total_km_this_year += distance; }
+                last_odo = yearly_max;
+                if yearly_max > bike_max_odo { bike_max_odo = yearly_max; }
             }
         }
 
-        let distance_this_year = max_odo - max_odo_prev_year;
-        total_km_this_year += distance_this_year;
-        total_km_overall += max_odo - initial_odo;
-        moto_yearly_distance.insert(moto_id, distance_this_year);
+        total_km_overall += bike_max_odo - initial_odo;
 
         motorcycles_json.push(json!({
             "id": moto_id,
@@ -121,106 +165,82 @@ pub async fn get_stats(
             "isVeteran": is_veteran,
             "isArchived": r.get::<bool, _>("isArchived"),
             "initialOdo": initial_odo,
-            "odometer": max_odo,
-            "odometerThisYear": distance_this_year,
+            "odometer": bike_max_odo,
+            "odometerThisYear": odo_by_year.get(&current_year).map(|&v| v - odo_by_year.get(&(current_year - 1)).cloned().unwrap_or(initial_odo)).unwrap_or(0),
         }));
     }
 
-    // Process costs and yearly fleet stats
+    // Process costs and yearly fleet stats (attach records)
     for m in &maintenance {
-        if let Ok(date) = chrono::DateTime::parse_from_rfc3339(&m.get::<String, _>("date")) {
-            let year = date.year();
+        if let Some(y) = parse_year(&m.get::<String, _>("date")) {
             let cost = m.get::<Option<f64>, _>("normalizedCost").or_else(|| m.get::<Option<f64>, _>("cost")).unwrap_or(0.0);
-            
-            if year == current_year {
-                total_cost_this_year += cost;
-            }
+            total_cost_overall += cost;
+            if y == current_year { total_cost_this_year += cost; }
 
-            let entry = yearly_stats.entry(year).or_insert(json!({
-                "year": year,
-                "distance": 0,
-                "cost": 0.0,
-                "motorcycleCount": 0,
-            }));
-            
-            if let Some(obj) = entry.as_object_mut() {
-                let current_cost = obj.get("cost").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                obj.insert("cost".to_string(), json!(current_cost + cost));
+            if let Some(y_stats) = yearly_map.get_mut(&y) {
+                if let Some(obj) = y_stats.as_object_mut() {
+                    let records = obj["records"].as_array_mut().unwrap();
+                    records.push(maintenance_row_to_value(m));
+                }
             }
         }
     }
 
-    // Top Rider calculation
-    let top_rider = motorcycles.iter()
-        .filter(|r| moto_yearly_distance.get(&r.get::<i64, _>("id")).cloned().unwrap_or(0) > 0)
-        .max_by_key(|r| moto_yearly_distance.get(&r.get::<i64, _>("id")).cloned().unwrap_or(0))
-        .map(|r| {
-            let id: i64 = r.get("id");
-            json!({
-                "id": id,
-                "make": r.get::<String, _>("make"),
-                "model": r.get::<String, _>("model"),
-                "odometerThisYear": moto_yearly_distance.get(&id).unwrap_or(&0),
-            })
-        });
+    for i in &issues {
+        let status: String = i.get("status");
+        if status != "done" { total_active_issues += 1; }
+    }
 
-    let mut yearly_vec: Vec<Value> = yearly_stats.into_values().collect();
+    let mut yearly_vec: Vec<Value> = yearly_map.into_values().collect();
     yearly_vec.sort_by_key(|v| v["year"].as_i64().unwrap_or(0) * -1);
 
-    let avg_moto_per_user = if users_count > 0 { motorcycles_count_global as f64 / users_count as f64 } else { 0.0 };
-    let avg_docs_per_user = if users_count > 0 { docs_count_global as f64 / users_count as f64 } else { 0.0 };
+    // Max values for charts
+    let max_yearly_distance = yearly_vec.iter().map(|v| v["distance"].as_i64().unwrap_or(0)).max().unwrap_or(0);
+    let max_yearly_cost = yearly_vec.iter().map(|v| v["cost"].as_f64().unwrap_or(0.0)).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
+    let max_yearly_count = yearly_vec.iter().map(|v| v["motorcycleCount"].as_i64().unwrap_or(0)).max().unwrap_or(0);
+
+    // Top Rider
+    let top_rider = yearly_vec.first()
+        .and_then(|y| y["motorcycles"].as_array())
+        .and_then(|motos| motos.iter().max_by_key(|m| m["distance"].as_i64().unwrap_or(0)))
+        .cloned();
+
+    let stats_data = json!({
+        "year": current_year,
+        "totalMotorcycles": motorcycles.len(),
+        "totalKmThisYear": total_km_this_year,
+        "totalKmOverall": total_km_overall,
+        "totalActiveIssues": total_active_issues,
+        "totalMaintenanceCostThisYear": total_cost_this_year,
+        "veteranCount": veteran_count,
+        "topRider": top_rider,
+        "yearly": yearly_vec,
+        "overall": {
+            "totalDistance": total_km_overall,
+            "totalCost": total_cost_overall,
+            "maxYearlyDistance": max_yearly_distance,
+            "maxYearlyCost": max_yearly_cost,
+            "maxYearlyCount": max_yearly_count,
+        },
+        "global": {
+            "users": users_count,
+            "motorcycles": motorcycles_count_global,
+            "archivedMotorcycles": archived_count_global,
+            "documents": docs_count_global,
+            "documentAssignments": doc_assignments_count_global,
+            "maintenance": maintenance_count_total_global,
+            "issues": issues_count_total_global,
+            "openIssues": open_issues_count_total_global,
+            "locations": locations_count_total_global,
+            "locationHistory": location_history_count_total_global,
+            "torqueSpecs": torque_specs_count_total_global,
+        }
+    });
 
     Ok(Json(json!({
-        "stats": {
-            "year": current_year,
-            "totalMotorcycles": motorcycles.len(),
-            "totalKmThisYear": total_km_this_year,
-            "totalKmOverall": total_km_overall,
-            "totalActiveIssues": total_active_issues,
-            "totalMaintenanceCostThisYear": total_cost_this_year,
-            "veteranCount": veteran_count,
-            "topRider": top_rider,
-            "yearly": yearly_vec,
-            // Instance-wide stats for admin view
-            "global": {
-                "users": users_count,
-                "motorcycles": motorcycles_count_global,
-                "archivedMotorcycles": archived_count_global,
-                "documents": docs_count_global,
-                "documentAssignments": doc_assignments_count_global,
-                "maintenance": maintenance_count_total_global,
-                "issues": issues_count_total_global,
-                "openIssues": open_issues_count_total_global,
-                "locations": locations_count_total_global,
-                "locationHistory": location_history_count_total_global,
-                "torqueSpecs": torque_specs_count_total_global,
-            }
-        },
-        "avgMotoPerUser": avg_moto_per_user,
-        "avgDocsPerUser": avg_docs_per_user,
+        "stats": stats_data,
+        "fleetStats": stats_data,
         "motorcycles": motorcycles_json,
-        "issues": issues.iter().map(|r| json!({
-            "id": r.get::<i64, _>("id"),
-            "motorcycleId": r.get::<i64, _>("motorcycleId"),
-            "status": r.get::<String, _>("status"),
-            "odo": r.get::<i64, _>("odo"),
-            "date": r.get::<Option<String>, _>("date"),
-        })).collect::<Vec<Value>>(),
-        "maintenance": maintenance.iter().map(maintenance_row_to_value).collect::<Vec<Value>>(),
-        "locationHistory": location_history.iter().map(|r| json!({
-            "motorcycleId": r.get::<i64, _>("motorcycleId"),
-            "odometer": r.get::<Option<i64>, _>("odometer"),
-            "date": r.get::<String, _>("date"),
-        })).collect::<Vec<Value>>(),
-        "locations": locations.iter().map(|r| json!({
-            "id": r.get::<i64, _>("id"),
-            "name": r.get::<String, _>("name"),
-            "countryCode": r.get::<String, _>("countryCode"),
-        })).collect::<Vec<Value>>(),
-        "settings": settings_row.map(|r| json!({
-            "userId": r.get::<i64, _>("userId"),
-        })),
         "version": config.app_version,
     })))
 }
-use chrono::Utc;

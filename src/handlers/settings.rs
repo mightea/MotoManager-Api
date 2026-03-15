@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{State, Path},
     Json,
 };
 use chrono::Utc;
@@ -242,6 +242,43 @@ pub async fn update_settings(
     .await?;
 
     Ok(Json(json!({ "settings": settings_row_to_value(&row) })))
+}
+
+pub async fn get_authenticators(
+    State(pool): State<SqlitePool>,
+    AuthUser(user): AuthUser,
+) -> AppResult<Json<Value>> {
+    let rows = sqlx::query("SELECT id, userId, deviceType, createdAt FROM authenticators WHERE userId = ? ORDER BY createdAt DESC")
+        .bind(user.id)
+        .fetch_all(&pool)
+        .await?;
+
+    let authenticators: Vec<Value> = rows.iter().map(|r| json!({
+        "id": r.get::<String, _>("id"),
+        "userId": r.get::<i64, _>("userId"),
+        "deviceType": r.get::<String, _>("deviceType"),
+        "createdAt": r.get::<String, _>("createdAt"),
+    })).collect();
+
+    Ok(Json(json!(authenticators)))
+}
+
+pub async fn delete_authenticator(
+    State(pool): State<SqlitePool>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<String>,
+) -> AppResult<Json<Value>> {
+    let result = sqlx::query("DELETE FROM authenticators WHERE id = ? AND userId = ?")
+        .bind(&id)
+        .bind(user.id)
+        .execute(&pool)
+        .await?;
+
+    if result.rows_affected() == 0 {
+        return Err(AppError::NotFound("Authenticator not found".to_string()));
+    }
+
+    Ok(Json(json!({ "message": "Authenticator deleted" })))
 }
 
 #[derive(Debug, Deserialize)]
