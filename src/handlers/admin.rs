@@ -7,9 +7,11 @@ use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
+use uuid::Uuid;
 
 use crate::{
     auth::{password::hash_password, AdminUser},
+    config::Config,
     error::{AppError, AppResult},
     models::PublicUser,
 };
@@ -253,6 +255,130 @@ pub async fn delete_user(
 
     tracing::info!("User deleted by admin ID: {}", uid);
     Ok(Json(json!({ "message": "User deleted" })))
+}
+
+pub async fn regenerate_previews(
+    State(pool): State<SqlitePool>,
+    State(config): State<Config>,
+    AdminUser(_admin): AdminUser,
+) -> AppResult<Json<Value>> {
+    tracing::info!("Regenerating all document previews and motorcycle resized images...");
+    
+    let mut doc_count = 0;
+    let mut moto_count = 0;
+
+    // 1. Process Documents
+    let doc_rows = sqlx::query("SELECT id, filePath FROM documents")
+        .fetch_all(&pool)
+        .await?;
+
+    for row in doc_rows {
+        let id: i64 = row.get("id");
+        let file_path: String = row.get("filePath");
+        
+        // Strip prefixes like /data/documents/ or data/documents/
+        let filename = file_path
+            .replace("/data/documents/", "")
+            .replace("data/documents/", "");
+            
+        let ext = std::path::Path::new(&filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if ["jpg", "jpeg", "png", "webp", "gif"].contains(&ext.as_str()) {
+            let full_path = config.documents_dir().join(&filename);
+            tracing::debug!("Processing doc preview for {}: {:?}", id, full_path);
+            
+            if let Ok(file_data) = tokio::fs::read(&full_path).await {
+                let uuid = Uuid::new_v4().to_string();
+                match generate_image_preview_internal(&config, &file_data, &uuid).await {
+                    Ok(preview_filename) => {
+                        sqlx::query("UPDATE documents SET previewPath = ? WHERE id = ?")
+                            .bind(&preview_filename)
+                            .bind(id)
+                            .execute(&pool)
+                            .await?;
+                        doc_count += 1;
+                    }
+                    Err(e) => tracing::warn!("Failed to generate preview for doc {}: {}", id, e),
+                }
+            } else {
+                tracing::warn!("Could not read doc file at {:?}", full_path);
+            }
+        }
+    }
+
+    // 2. Process Motorcycles (pre-generate 400x400 thumbnails in resized cache)
+    let moto_rows = sqlx::query("SELECT id, image FROM motorcycles WHERE image IS NOT NULL")
+        .fetch_all(&pool)
+        .await?;
+
+    for row in moto_rows {
+        let _id: i64 = row.get("id");
+        let image_path: String = row.get("image");
+        
+        let filename = image_path
+            .replace("/data/images/", "")
+            .replace("data/images/", "");
+            
+        let ext = std::path::Path::new(&filename)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        if ["jpg", "jpeg", "png", "webp", "gif"].contains(&ext.as_str()) {
+            let full_path = config.images_dir().join(&filename);
+            
+            if let Ok(file_data) = tokio::fs::read(&full_path).await {
+                // Generate a standard 400x400 thumbnail in the resized cache
+                let format = if ext == "webp" { image::ImageFormat::WebP }
+                            else if ext == "png" { image::ImageFormat::Png }
+                            else { image::ImageFormat::Jpeg };
+                
+                let cache_ext = if ext == "webp" { "webp" } else if ext == "png" { "png" } else { "jpg" };
+                let cache_filename = format!("{}_400x400.{}", filename, cache_ext);
+                let cache_path = config.resized_images_dir().join(&cache_filename);
+
+                // Import resize_image if it were public, but we can just use generate_image_preview_internal-like logic
+                // or just call it if we move it to a shared place. For now, let's just do it here.
+                let img_res = image::load_from_memory(&file_data);
+                if let Ok(img) = img_res {
+                    let thumbnail = img.thumbnail(400, 400);
+                    if let Ok(_) = thumbnail.save_with_format(&cache_path, format) {
+                        moto_count += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(Json(json!({ 
+        "message": format!("Regenerated {} document previews and {} motorcycle thumbnails", doc_count, moto_count), 
+        "docCount": doc_count,
+        "motoCount": moto_count
+    })))
+}
+
+async fn generate_image_preview_internal(
+    config: &Config,
+    data: &[u8],
+    uuid: &str,
+) -> AppResult<String> {
+    let img = image::load_from_memory(data)
+        .map_err(|e| AppError::Image(format!("Failed to load image: {}", e)))?;
+
+    let thumbnail = img.thumbnail(400, 400);
+    let preview_filename = format!("{}.jpg", uuid);
+    let preview_path = config.previews_dir().join(&preview_filename);
+
+    thumbnail
+        .save_with_format(&preview_path, image::ImageFormat::Jpeg)
+        .map_err(|e| AppError::Image(format!("Failed to save preview: {}", e)))?;
+
+    Ok(preview_filename)
 }
 
 // ─── Currency Management ──────────────────────────────────────────────────────

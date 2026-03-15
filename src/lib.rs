@@ -162,6 +162,10 @@ pub fn build_app(state: AppState) -> Router {
             "/api/admin/currencies/:cid",
             put(handlers::admin::update_currency).delete(handlers::admin::delete_currency),
         )
+        .route(
+            "/api/admin/regenerate-previews",
+            post(handlers::admin::regenerate_previews),
+        )
         .route("/api/currencies", get(handlers::admin::list_currencies_public))
         .route("/api/stats", get(handlers::stats::get_stats))
         .route("/images/:filename", get(handlers::files::serve_image))
