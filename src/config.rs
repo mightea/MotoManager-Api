@@ -24,7 +24,7 @@ impl Config {
             rp_id: env::var("RP_ID").unwrap_or_else(|_| "localhost".to_string()),
             rp_name: env::var("RP_NAME").unwrap_or_else(|_| "MotoManager".to_string()),
             origin: env::var("ORIGIN")
-                .unwrap_or_else(|_| "http://localhost:3001".to_string()),
+                .unwrap_or_else(|_| "http://localhost:5173".to_string()),
             enable_registration: env::var("ENABLE_REGISTRATION")
                 .unwrap_or_else(|_| "false".to_string())
                 .to_lowercase()

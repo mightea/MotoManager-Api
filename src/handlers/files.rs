@@ -29,11 +29,27 @@ pub async fn serve_image(
             if query.width.is_some() || query.height.is_some() {
                 let w = query.width.unwrap_or(0);
                 let h = query.height.unwrap_or(0);
-                match resize_image(&data, w, h) {
+
+                let format = if filename.to_lowercase().ends_with(".webp") {
+                    image::ImageFormat::WebP
+                } else if filename.to_lowercase().ends_with(".png") {
+                    image::ImageFormat::Png
+                } else {
+                    image::ImageFormat::Jpeg
+                };
+
+                let content_type = match format {
+                    image::ImageFormat::WebP => "image/webp",
+                    image::ImageFormat::Png => "image/png",
+                    _ => "image/jpeg",
+                };
+
+                match resize_image(&data, w, h, format) {
                     Ok(resized) => {
+                        tracing::info!("Resized image {} to {}x{} (format: {:?})", filename, w, h, format);
                         let response = Response::builder()
                             .status(StatusCode::OK)
-                            .header(header::CONTENT_TYPE, "image/jpeg")
+                            .header(header::CONTENT_TYPE, content_type)
                             .header(
                                 header::CACHE_CONTROL,
                                 "public, max-age=31536000",
@@ -121,7 +137,7 @@ fn serve_raw(data: Vec<u8>, filename: &str) -> impl IntoResponse {
         .unwrap()
 }
 
-fn resize_image(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+fn resize_image(data: &[u8], width: u32, height: u32, format: image::ImageFormat) -> Result<Vec<u8>, String> {
     let img = image::load_from_memory(data)
         .map_err(|e| format!("Failed to load image: {}", e))?;
 
@@ -137,7 +153,7 @@ fn resize_image(data: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String>
 
     let mut buf = std::io::Cursor::new(Vec::new());
     resized
-        .write_to(&mut buf, image::ImageFormat::Jpeg)
+        .write_to(&mut buf, format)
         .map_err(|e| format!("Failed to encode image: {}", e))?;
 
     Ok(buf.into_inner())

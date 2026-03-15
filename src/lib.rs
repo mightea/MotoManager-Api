@@ -159,17 +159,18 @@ pub fn build_app(state: AppState) -> Router {
         // File serving
         .route("/images/:filename", get(handlers::files::serve_image))
         .route(
-            "/data/documents/:filename",
+            "/documents/:filename",
             get(handlers::files::serve_document),
         )
         .route(
-            "/data/previews/:filename",
+            "/previews/:filename",
             get(handlers::files::serve_preview),
         )
         .with_state(state)
 }
 
 pub fn build_cors(origin: &str) -> CorsLayer {
+    tracing::info!("Building CORS layer with allowed origin: {}", origin);
     let allowed_origin = origin
         .parse::<HeaderValue>()
         .unwrap_or_else(|_| HeaderValue::from_static("*"));

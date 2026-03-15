@@ -64,16 +64,24 @@ pub async fn login(
     .fetch_optional(&pool)
     .await?;
 
+    tracing::info!("Login request for user: {}", body.identifier);
+
     let user = match row {
         Some(r) => row_to_user(&r),
         None => {
-            tracing::warn!("Login failed: user not found for identifier: {}", body.identifier);
+            tracing::warn!(
+                "Login failed: user not found for identifier: {}",
+                body.identifier
+            );
             return Err(AppError::Unauthorized);
         }
     };
 
     if !verify_password(&body.password, &user.password_hash)? {
-        tracing::warn!("Login failed: incorrect password for user: {}", user.username);
+        tracing::warn!(
+            "Login failed: incorrect password for user: {}",
+            user.username
+        );
         return Err(AppError::Unauthorized);
     }
 
@@ -88,23 +96,35 @@ pub async fn login(
     let token = create_session(&pool, user.id).await?;
     let public_user = PublicUser::from(user);
 
-    tracing::info!("User logged in: {} (ID: {})", public_user.username, public_user.id);
-    Ok((StatusCode::OK, Json(json!({ "user": public_user, "token": token }))).into_response())
+    tracing::info!(
+        "User logged in: {} (ID: {})",
+        public_user.username,
+        public_user.id
+    );
+    Ok((
+        StatusCode::OK,
+        Json(json!({ "user": public_user, "token": token })),
+    )
+        .into_response())
 }
 
-pub async fn logout(
-    State(pool): State<SqlitePool>,
-    headers: HeaderMap,
-) -> AppResult<Response> {
+pub async fn logout(State(pool): State<SqlitePool>, headers: HeaderMap) -> AppResult<Response> {
     if let Some(token) = extract_bearer_token(&headers) {
-        tracing::info!("Logout attempt with token prefix: {}", &token[..std::cmp::min(token.len(), 8)]);
+        tracing::info!(
+            "Logout attempt with token prefix: {}",
+            &token[..std::cmp::min(token.len(), 8)]
+        );
         let _ = delete_session(&pool, &token).await;
     }
     Ok((StatusCode::OK, Json(json!({ "message": "Logged out" }))).into_response())
 }
 
 pub async fn me(AuthUser(user): AuthUser) -> AppResult<Json<serde_json::Value>> {
-    tracing::debug!("User info requested for: {} (ID: {})", user.username, user.id);
+    tracing::debug!(
+        "User info requested for: {} (ID: {})",
+        user.username,
+        user.id
+    );
     Ok(Json(json!({ "user": PublicUser::from(user) })))
 }
 
@@ -113,7 +133,11 @@ pub async fn register(
     State(config): State<Config>,
     Json(body): Json<RegisterRequest>,
 ) -> AppResult<Response> {
-    tracing::info!("Registration attempt for email: {}, username: {}", body.email, body.username);
+    tracing::info!(
+        "Registration attempt for email: {}, username: {}",
+        body.email,
+        body.username
+    );
     let user_count: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM users")
         .fetch_one(&pool)
         .await?
@@ -134,14 +158,13 @@ pub async fn register(
         ));
     }
 
-    let existing: i64 = sqlx::query(
-        "SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?",
-    )
-    .bind(&body.email)
-    .bind(&body.username)
-    .fetch_one(&pool)
-    .await?
-    .get("cnt");
+    let existing: i64 =
+        sqlx::query("SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?")
+            .bind(&body.email)
+            .bind(&body.username)
+            .fetch_one(&pool)
+            .await?
+            .get("cnt");
 
     if existing > 0 {
         return Err(AppError::Conflict(
@@ -186,7 +209,12 @@ pub async fn register(
 
     let public_user = PublicUser::from(row_to_user(&user_row));
 
-    tracing::info!("User registered: {} (ID: {}, role: {})", public_user.username, public_user.id, role);
+    tracing::info!(
+        "User registered: {} (ID: {}, role: {})",
+        public_user.username,
+        public_user.id,
+        role
+    );
     Ok((
         StatusCode::CREATED,
         Json(json!({ "user": public_user, "token": token })),
@@ -194,9 +222,7 @@ pub async fn register(
         .into_response())
 }
 
-pub async fn status(
-    State(pool): State<SqlitePool>,
-) -> AppResult<Json<serde_json::Value>> {
+pub async fn status(State(pool): State<SqlitePool>) -> AppResult<Json<serde_json::Value>> {
     let user_count: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM users")
         .fetch_one(&pool)
         .await?

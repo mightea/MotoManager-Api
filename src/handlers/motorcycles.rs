@@ -16,6 +16,8 @@ use crate::{
 async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppResult<String> {
     let ext = if content_type.contains("png") {
         "png"
+    } else if content_type.contains("webp") {
+        "webp"
     } else if content_type.contains("gif") {
         "gif"
     } else {
