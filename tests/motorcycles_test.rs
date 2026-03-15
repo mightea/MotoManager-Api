@@ -164,6 +164,7 @@ async fn test_list_motorcycles_unauthorized() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["motorcycle"]["model"], "R1250GS");
+    assert!(body["torqueSpecs"].is_array());
 
     // 4. Delete motorcycle
     let response = app

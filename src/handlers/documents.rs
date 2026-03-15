@@ -106,7 +106,7 @@ pub async fn list_documents(
     .fetch_all(&pool)
     .await?;
 
-    let mut documents = Vec::new();
+    let mut docs = Vec::new();
     for row in &rows {
         let doc_id: i64 = row.get("id");
         let motorcycle_ids = get_motorcycle_ids_for_doc(&pool, doc_id).await?;
@@ -114,10 +114,38 @@ pub async fn list_documents(
         if let Some(obj) = doc_val.as_object_mut() {
             obj.insert("motorcycleIds".to_string(), json!(motorcycle_ids));
         }
-        documents.push(doc_val);
+        docs.push(doc_val);
     }
 
-    Ok(Json(json!({ "documents": documents })))
+    let motorcycles = sqlx::query(
+        "SELECT id, make, model FROM motorcycles WHERE userId = ?"
+    )
+    .bind(user.id)
+    .fetch_all(&pool)
+    .await?;
+
+    let all_motorcycles: Vec<Value> = motorcycles.iter().map(|r| json!({
+        "id": r.get::<i64, _>("id"),
+        "make": r.get::<String, _>("make"),
+        "model": r.get::<String, _>("model"),
+    })).collect();
+
+    let assignments_rows = sqlx::query(
+        "SELECT documentId, motorcycleId FROM documentMotorcycles"
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let assignments: Vec<Value> = assignments_rows.iter().map(|r| json!({
+        "documentId": r.get::<i64, _>("documentId"),
+        "motorcycleId": r.get::<i64, _>("motorcycleId"),
+    })).collect();
+
+    Ok(Json(json!({ 
+        "docs": docs,
+        "allMotorcycles": all_motorcycles,
+        "assignments": assignments
+    })))
 }
 
 pub async fn create_document(

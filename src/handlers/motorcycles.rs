@@ -304,11 +304,39 @@ pub async fn get_motorcycle(
         })
         .collect();
 
+    let torque_specs = sqlx::query(
+        "SELECT id, motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt \
+         FROM torqueSpecs WHERE motorcycleId = ? ORDER BY category ASC, name ASC",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+
+    let specs_json: Vec<Value> = torque_specs
+        .iter()
+        .map(|r| {
+            json!({
+                "id": r.get::<i64, _>("id"),
+                "motorcycleId": r.get::<i64, _>("motorcycleId"),
+                "category": r.get::<String, _>("category"),
+                "name": r.get::<String, _>("name"),
+                "torque": r.get::<f64, _>("torque"),
+                "torqueEnd": r.get::<Option<f64>, _>("torqueEnd"),
+                "variation": r.get::<Option<f64>, _>("variation"),
+                "toolSize": r.get::<Option<String>, _>("toolSize"),
+                "description": r.get::<Option<String>, _>("description"),
+                "createdAt": r.get::<String, _>("createdAt"),
+            })
+        })
+        .collect();
+
     Ok(Json(json!({
         "motorcycle": row_to_motorcycle(&row),
         "issues": issues_json,
         "maintenanceRecords": maintenance_json,
         "previousOwners": owners_json,
+        "torqueSpecs": specs_json,
+        "torqueSpecifications": specs_json,
     })))
 }
 

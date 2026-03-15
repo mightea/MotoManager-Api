@@ -49,7 +49,10 @@ pub async fn list_torque_specs(
     .await?;
 
     let specs: Vec<Value> = rows.iter().map(row_to_value).collect();
-    Ok(Json(json!({ "torqueSpecs": specs })))
+    Ok(Json(json!({
+        "torqueSpecs": specs,
+        "torqueSpecifications": specs
+    })))
 }
 
 #[derive(Debug, Deserialize)]
