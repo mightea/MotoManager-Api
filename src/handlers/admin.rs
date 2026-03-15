@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use chrono::Utc;
+use pdfium_render::prelude::*;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
@@ -307,6 +308,26 @@ pub async fn regenerate_previews(
             } else {
                 tracing::warn!("Could not read doc file at {:?}", full_path);
             }
+        } else if ext == "pdf" {
+            let full_path = config.documents_dir().join(&filename);
+            tracing::debug!("Processing PDF preview for {}: {:?}", id, full_path);
+            
+            if let Ok(file_data) = tokio::fs::read(&full_path).await {
+                let uuid = Uuid::new_v4().to_string();
+                match generate_pdf_preview_internal(&config, &file_data, &uuid).await {
+                    Ok(preview_filename) => {
+                        sqlx::query("UPDATE documents SET previewPath = ? WHERE id = ?")
+                            .bind(&preview_filename)
+                            .bind(id)
+                            .execute(&pool)
+                            .await?;
+                        doc_count += 1;
+                    }
+                    Err(e) => tracing::warn!("Failed to generate PDF preview for doc {}: {}", id, e),
+                }
+            } else {
+                tracing::warn!("Could not read PDF file at {:?}", full_path);
+            }
         }
     }
 
@@ -377,6 +398,47 @@ async fn generate_image_preview_internal(
     thumbnail
         .save_with_format(&preview_path, image::ImageFormat::Jpeg)
         .map_err(|e| AppError::Image(format!("Failed to save preview: {}", e)))?;
+
+    Ok(preview_filename)
+}
+
+async fn generate_pdf_preview_internal(
+    config: &Config,
+    data: &[u8],
+    uuid: &str,
+) -> AppResult<String> {
+    let pdfium = Pdfium::new(
+        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
+            .or_else(|_| Pdfium::bind_to_system_library())
+            .map_err(|e| AppError::Image(format!("Could not bind to Pdfium library: {}", e)))?,
+    );
+
+    let document = pdfium
+        .load_pdf_from_byte_slice(data, None)
+        .map_err(|e| AppError::Image(format!("Failed to load PDF: {:?}", e)))?;
+
+    let first_page = document
+        .pages()
+        .get(0)
+        .map_err(|e| AppError::Image(format!("Failed to get first page of PDF: {:?}", e)))?;
+
+    let render_config = PdfRenderConfig::new()
+        .set_target_width(800)
+        .set_maximum_height(1200);
+
+    let bitmap = first_page
+        .render_with_config(&render_config)
+        .map_err(|e| AppError::Image(format!("Failed to render PDF page: {:?}", e)))?;
+
+    let preview_filename = format!("{}.jpg", uuid);
+    let preview_path = config.previews_dir().join(&preview_filename);
+
+    let img = bitmap.as_image();
+    let thumbnail = img.thumbnail(400, 400);
+
+    thumbnail
+        .save_with_format(&preview_path, image::ImageFormat::Jpeg)
+        .map_err(|e| AppError::Image(format!("Failed to save PDF preview: {}", e)))?;
 
     Ok(preview_filename)
 }

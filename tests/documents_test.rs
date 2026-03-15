@@ -25,15 +25,21 @@ async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {
         port: 3001,
         rp_id: "localhost".to_string(),
         rp_name: "Test".to_string(),
-        origin: "http://localhost:3001".to_string(),
+        origin: "http://localhost:5173".to_string(),
         enable_registration: true,
         app_version: "test".to_string(),
         data_dir: "./test_data".to_string(),
+        cache_dir: "./cache".to_string(),
     };
+
+    let rp_origin = url::Url::parse("http://localhost:5173").unwrap();
+    let builder = webauthn_rs::WebauthnBuilder::new("localhost", &rp_origin).unwrap();
+    let webauthn = std::sync::Arc::new(builder.build().unwrap());
 
     let state = AppState {
         pool: pool.clone(),
         config,
+        webauthn,
     };
 
     // Create a test user
@@ -75,8 +81,8 @@ async fn test_list_documents_empty() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
-    assert!(body["documents"].is_array());
-    assert_eq!(body["documents"].as_array().unwrap().len(), 0);
+    assert!(body["docs"].is_array());
+    assert_eq!(body["docs"].as_array().unwrap().len(), 0);
 }
 
 #[tokio::test]
@@ -111,8 +117,8 @@ async fn test_document_lifecycle() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(body["documents"].as_array().unwrap().len(), 1);
-    assert_eq!(body["documents"][0]["title"], "Manual");
+    assert_eq!(body["docs"].as_array().unwrap().len(), 1);
+    assert_eq!(body["docs"][0]["title"], "Manual");
 
     // 3. Delete document (Note: delete_document also tries to delete files from disk)
     // In setup_test_app, data_dir is ./test_data. We should ensure the files exist or mock it.

@@ -31,6 +31,7 @@ async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppRe
 }
 
 fn row_to_motorcycle(r: &sqlx::sqlite::SqliteRow) -> Value {
+    let image: Option<String> = r.get("image");
     json!({
         "id": r.get::<i64, _>("id"),
         "make": r.get::<String, _>("make"),
@@ -41,7 +42,7 @@ fn row_to_motorcycle(r: &sqlx::sqlite::SqliteRow) -> Value {
         "engineNumber": r.get::<Option<String>, _>("engineNumber"),
         "vehicleNr": r.get::<Option<String>, _>("vehicleNr"),
         "numberPlate": r.get::<Option<String>, _>("numberPlate"),
-        "image": r.get::<Option<String>, _>("image"),
+        "image": image.map(|i| format!("/images/{}", i.replace("/data/images/", "").replace("data/images/", ""))),
         "isVeteran": r.get::<bool, _>("isVeteran"),
         "isArchived": r.get::<bool, _>("isArchived"),
         "firstRegistration": r.get::<Option<String>, _>("firstRegistration"),
@@ -494,10 +495,24 @@ pub async fn update_motorcycle(
 
 pub async fn delete_motorcycle(
     State(pool): State<SqlitePool>,
+    State(config): State<Config>,
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     tracing::info!("Deleting motorcycle ID: {} for user: {}", id, user.id);
+    
+    // Get image path before deleting
+    let row = sqlx::query("SELECT image FROM motorcycles WHERE id = ? AND userId = ?")
+        .bind(id)
+        .bind(user.id)
+        .fetch_optional(&pool)
+        .await?;
+
+    let image_path: Option<String> = match row {
+        Some(r) => r.get("image"),
+        None => return Err(AppError::NotFound("Motorcycle not found".to_string())),
+    };
+
     let result = sqlx::query("DELETE FROM motorcycles WHERE id = ? AND userId = ?")
         .bind(id)
         .bind(user.id)
@@ -507,6 +522,28 @@ pub async fn delete_motorcycle(
     if result.rows_affected() == 0 {
         tracing::warn!("Delete failed: motorcycle ID: {} not found or not owned by user: {}", id, user.id);
         return Err(AppError::NotFound("Motorcycle not found".to_string()));
+    }
+
+    // Delete image and resized cache
+    if let Some(path_str) = image_path {
+        let filename = path_str
+            .replace("/data/images/", "")
+            .replace("data/images/", "");
+        
+        // Delete original
+        let full_path = config.images_dir().join(&filename);
+        let _ = tokio::fs::remove_file(full_path).await;
+
+        // Delete resized versions (look for anything starting with filename_)
+        if let Ok(mut entries) = tokio::fs::read_dir(config.resized_images_dir()).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                if let Some(entry_name) = entry.file_name().to_str() {
+                    if entry_name.starts_with(&filename) {
+                        let _ = tokio::fs::remove_file(entry.path()).await;
+                    }
+                }
+            }
+        }
     }
 
     tracing::info!("Motorcycle deleted ID: {}", id);

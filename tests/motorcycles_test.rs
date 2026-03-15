@@ -25,15 +25,21 @@ async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {
         port: 3001,
         rp_id: "localhost".to_string(),
         rp_name: "Test".to_string(),
-        origin: "http://localhost:3001".to_string(),
+        origin: "http://localhost:5173".to_string(),
         enable_registration: true,
         app_version: "test".to_string(),
         data_dir: "./test_data".to_string(),
+        cache_dir: "./cache".to_string(),
     };
+
+    let rp_origin = url::Url::parse("http://localhost:5173").unwrap();
+    let builder = webauthn_rs::WebauthnBuilder::new("localhost", &rp_origin).unwrap();
+    let webauthn = std::sync::Arc::new(builder.build().unwrap());
 
     let state = AppState {
         pool: pool.clone(),
         config,
+        webauthn,
     };
 
     // Create a test user
@@ -191,6 +197,55 @@ async fn test_list_motorcycles_unauthorized() {
     assert_eq!(count, 0);
     }
 
+    #[tokio::test]
+    async fn test_motorcycle_deletion_file_cleanup() {
+    let (app, pool, token) = setup_test_app().await;
+
+    // 1. Create a dummy image file
+    tokio::fs::create_dir_all("./test_data/images").await.unwrap();
+    tokio::fs::create_dir_all("./cache/resized").await.unwrap();
+
+    let filename = "test_bike.webp";
+    tokio::fs::write("./test_data/images/test_bike.webp", b"original").await.unwrap();
+    tokio::fs::write("./cache/resized/test_bike.webp_400x400.webp", b"resized").await.unwrap();
+
+    // 2. Seed motorcycle with that image
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo, image) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("Suzuki")
+    .bind("DR650")
+    .bind(1)
+    .bind(10000)
+    .bind(filename)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // 3. Delete motorcycle
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/motorcycles/{}", moto_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 4. Verify files are gone
+    assert!(!std::path::Path::new("./test_data/images/test_bike.webp").exists());
+    assert!(!std::path::Path::new("./cache/resized/test_bike.webp_400x400.webp").exists());
+
+    // Cleanup
+    let _ = tokio::fs::remove_dir_all("./test_data").await;
+    let _ = tokio::fs::remove_dir_all("./cache").await;
+    }
     #[tokio::test]
     async fn test_issue_lifecycle() {
     let (app, pool, token) = setup_test_app().await;

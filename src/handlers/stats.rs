@@ -161,7 +161,7 @@ pub async fn get_stats(
             "model": r.get::<String, _>("model"),
             "fabricationDate": r.get::<Option<String>, _>("modelYear"),
             "userId": r.get::<i64, _>("userId"),
-            "image": r.get::<Option<String>, _>("image"),
+            "image": r.get::<Option<String>, _>("image").map(|i| format!("/images/{}", i.replace("/data/images/", "").replace("data/images/", ""))),
             "isVeteran": is_veteran,
             "isArchived": r.get::<bool, _>("isArchived"),
             "initialOdo": initial_odo,

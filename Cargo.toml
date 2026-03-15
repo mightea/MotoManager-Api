@@ -34,3 +34,4 @@ anyhow = "1"
 webauthn-rs = { version = "0.5.4", features = ["danger-allow-state-serialisation"] }
 base64 = "0.22.1"
 url = "2.5.8"
+pdfium-render = "0.8.37"

@@ -1,0 +1,15 @@
+target/
+.git/
+.env
+.envrc
+cache/
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+.direnv/
+CLAUDE.md
+GEMINI.md
+README.md
+bruno/
+tests/

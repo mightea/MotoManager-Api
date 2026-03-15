@@ -4,6 +4,7 @@ use axum::{
     Json,
 };
 use chrono::Utc;
+use pdfium_render::prelude::*;
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -16,11 +17,14 @@ use crate::{
 
 fn row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
     let is_private_raw: i64 = r.get("isPrivate");
+    let file_path: String = r.get("filePath");
+    let preview_path: Option<String> = r.get("previewPath");
+
     json!({
         "id": r.get::<i64, _>("id"),
         "title": r.get::<String, _>("title"),
-        "filePath": r.get::<String, _>("filePath"),
-        "previewPath": r.get::<Option<String>, _>("previewPath"),
+        "filePath": format!("/documents/{}", file_path.replace("/data/documents/", "").replace("data/documents/", "")),
+        "previewPath": preview_path.map(|p| format!("/previews/{}", p.replace("/data/previews/", "").replace("data/previews/", ""))),
         "uploadedBy": r.get::<Option<String>, _>("uploadedBy"),
         "ownerId": r.get::<Option<i64>, _>("ownerId"),
         "isPrivate": is_private_raw != 0,
@@ -54,22 +58,87 @@ async fn save_document_file(
     let stored_filename = format!("{}.{}", uuid, ext);
     let file_path = config.documents_dir().join(&stored_filename);
 
+    tracing::info!("Saving document file: {} as {}", filename, stored_filename);
     tokio::fs::write(&file_path, &data).await?;
 
-    // Generate preview for images (not PDFs)
-    let preview_filename = if ext != "pdf" && (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "webp" || ext == "gif") {
+    // Generate preview for images or PDFs
+    let image_extensions = ["jpg", "jpeg", "png", "webp", "gif"];
+    let preview_filename = if image_extensions.contains(&ext.as_str()) {
+        tracing::info!("Generating preview for image document: {}", stored_filename);
         match generate_image_preview(config, &data, &uuid).await {
-            Ok(pf) => Some(pf),
+            Ok(pf) => {
+                tracing::info!("Preview generated successfully: {}", pf);
+                Some(pf)
+            },
             Err(e) => {
-                tracing::warn!("Failed to generate preview: {}", e);
+                tracing::error!("Failed to generate preview for {}: {}", stored_filename, e);
+                None
+            }
+        }
+    } else if ext == "pdf" {
+        tracing::info!("Generating preview for PDF document: {}", stored_filename);
+        match generate_pdf_preview(config, &data, &uuid).await {
+            Ok(pf) => {
+                tracing::info!("PDF preview generated successfully: {}", pf);
+                Some(pf)
+            },
+            Err(e) => {
+                tracing::error!("Failed to generate PDF preview for {}: {}", stored_filename, e);
                 None
             }
         }
     } else {
+        tracing::debug!("Skipping preview generation for extension: {}", ext);
         None
     };
 
     Ok((stored_filename, preview_filename))
+}
+
+async fn generate_pdf_preview(
+    config: &Config,
+    data: &[u8],
+    uuid: &str,
+) -> AppResult<String> {
+    // We attempt to bind to a local pdfium library if available, otherwise fallback to system
+    let pdfium = Pdfium::new(
+        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
+            .or_else(|_| Pdfium::bind_to_system_library())
+            .map_err(|e| AppError::Image(format!("Could not bind to Pdfium library: {}", e)))?,
+    );
+
+    let document = pdfium
+        .load_pdf_from_byte_slice(data, None)
+        .map_err(|e| AppError::Image(format!("Failed to load PDF: {:?}", e)))?;
+
+    let first_page = document
+        .pages()
+        .get(0)
+        .map_err(|e| AppError::Image(format!("Failed to get first page of PDF: {:?}", e)))?;
+
+    // Render the first page to an image
+    let render_config = PdfRenderConfig::new()
+        .set_target_width(800) // Decent width for preview
+        .set_maximum_height(1200);
+
+    let bitmap = first_page
+        .render_with_config(&render_config)
+        .map_err(|e| AppError::Image(format!("Failed to render PDF page: {:?}", e)))?;
+
+    let preview_filename = format!("{}.jpg", uuid);
+    let preview_path = config.previews_dir().join(&preview_filename);
+
+    // Convert pdfium bitmap to image crate DynamicImage
+    let img = bitmap.as_image(); 
+    
+    // Resize to standard thumbnail size
+    let thumbnail = img.thumbnail(400, 400);
+
+    thumbnail
+        .save_with_format(&preview_path, image::ImageFormat::Jpeg)
+        .map_err(|e| AppError::Image(format!("Failed to save PDF preview: {}", e)))?;
+
+    Ok(preview_filename)
 }
 
 async fn generate_image_preview(
@@ -78,13 +147,16 @@ async fn generate_image_preview(
     uuid: &str,
 ) -> AppResult<String> {
     let data = data.to_vec();
+    tracing::debug!("Loading image from memory ({} bytes)", data.len());
     let img = image::load_from_memory(&data)
         .map_err(|e| AppError::Image(format!("Failed to load image: {}", e)))?;
 
+    tracing::debug!("Creating 400x400 thumbnail");
     let thumbnail = img.thumbnail(400, 400);
     let preview_filename = format!("{}.jpg", uuid);
     let preview_path = config.previews_dir().join(&preview_filename);
 
+    tracing::debug!("Saving preview to {:?}", preview_path);
     thumbnail
         .save_with_format(&preview_path, image::ImageFormat::Jpeg)
         .map_err(|e| AppError::Image(format!("Failed to save preview: {}", e)))?;
@@ -143,7 +215,6 @@ pub async fn list_documents(
 
     Ok(Json(json!({ 
         "docs": docs,
-        "documents": docs,
         "allMotorcycles": all_motorcycles,
         "assignments": assignments
     })))
@@ -532,10 +603,17 @@ pub async fn delete_document(
         .await?;
 
     // Delete files
-    let full_path = config.documents_dir().join(&file_path);
+    let filename = file_path
+        .replace("/data/documents/", "")
+        .replace("data/documents/", "");
+    let full_path = config.documents_dir().join(&filename);
     let _ = tokio::fs::remove_file(full_path).await;
+
     if let Some(preview) = preview_path {
-        let preview_full = config.previews_dir().join(&preview);
+        let preview_filename = preview
+            .replace("/data/previews/", "")
+            .replace("data/previews/", "");
+        let preview_full = config.previews_dir().join(&preview_filename);
         let _ = tokio::fs::remove_file(preview_full).await;
     }
 
