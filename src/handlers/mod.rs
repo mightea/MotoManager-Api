@@ -10,3 +10,4 @@ pub mod previous_owners;
 pub mod settings;
 pub mod stats;
 pub mod torque_specs;
+pub mod passkey;

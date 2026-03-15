@@ -1,5 +1,8 @@
 use sqlx::sqlite::SqlitePoolOptions;
 use tower_http::trace::TraceLayer;
+use std::sync::Arc;
+use webauthn_rs::WebauthnBuilder;
+use url::Url;
 
 use moto_manager_api::{build_app, build_cors, AppState, config::Config};
 
@@ -30,9 +33,16 @@ async fn main() -> anyhow::Result<()> {
     // Run migrations
     sqlx::migrate!("./migrations").run(&pool).await?;
 
+    // Initialize WebAuthn
+    let rp_id = &config.rp_id;
+    let rp_origin = Url::parse(&config.origin)?;
+    let builder = WebauthnBuilder::new(rp_id, &rp_origin)?;
+    let webauthn = Arc::new(builder.build()?);
+
     let state = AppState {
         pool: pool.clone(),
         config: config.clone(),
+        webauthn,
     };
 
     // Build CORS layer

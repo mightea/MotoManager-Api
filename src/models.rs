@@ -306,3 +306,32 @@ pub struct PreviousOwner {
     pub updated_at: String,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Authenticator {
+    pub id: String,
+    #[serde(rename = "userId")]
+    pub user_id: i64,
+    #[serde(rename = "publicKey")]
+    pub public_key: Vec<u8>,
+    pub counter: i64,
+    #[serde(rename = "deviceType")]
+    pub device_type: String,
+    #[serde(rename = "backedUp")]
+    pub backed_up: bool,
+    pub transports: Option<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Challenge {
+    pub id: String,
+    #[serde(rename = "userId")]
+    pub user_id: Option<i64>,
+    pub challenge: String,
+    #[serde(rename = "expiresAt")]
+    pub expires_at: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: String,
+}

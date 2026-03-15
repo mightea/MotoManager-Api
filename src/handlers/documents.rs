@@ -143,6 +143,7 @@ pub async fn list_documents(
 
     Ok(Json(json!({ 
         "docs": docs,
+        "documents": docs,
         "allMotorcycles": all_motorcycles,
         "assignments": assignments
     })))
