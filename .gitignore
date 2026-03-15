@@ -12,6 +12,7 @@ Cargo.lock
 
 # Runtime data
 /data/
+/cache/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal

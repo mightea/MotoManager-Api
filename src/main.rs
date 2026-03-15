@@ -22,7 +22,10 @@ async fn main() -> anyhow::Result<()> {
     // Create data directories
     tokio::fs::create_dir_all(config.images_dir()).await?;
     tokio::fs::create_dir_all(config.documents_dir()).await?;
+    
+    // Create cache directories
     tokio::fs::create_dir_all(config.previews_dir()).await?;
+    tokio::fs::create_dir_all(config.resized_images_dir()).await?;
 
     // Connect to database
     let pool = SqlitePoolOptions::new()

@@ -44,9 +44,34 @@ pub async fn serve_image(
                     _ => "image/jpeg",
                 };
 
+                // Check cache
+                let cache_filename = format!("{}_{}x{}.{}", filename, w, h, if matches!(format, image::ImageFormat::WebP) { "webp" } else if matches!(format, image::ImageFormat::Png) { "png" } else { "jpg" });
+                let cache_path = config.resized_images_dir().join(&cache_filename);
+
+                if let Ok(cached_data) = tokio::fs::read(&cache_path).await {
+                    tracing::debug!("Serving cached resized image: {}", cache_filename);
+                    return Response::builder()
+                        .status(StatusCode::OK)
+                        .header(header::CONTENT_TYPE, content_type)
+                        .header(header::CACHE_CONTROL, "public, max-age=31536000")
+                        .body(Body::from(cached_data))
+                        .unwrap()
+                        .into_response();
+                }
+
                 match resize_image(&data, w, h, format) {
                     Ok(resized) => {
                         tracing::info!("Resized image {} to {}x{} (format: {:?})", filename, w, h, format);
+                        
+                        // Save to cache (fire and forget)
+                        let cache_path_clone = cache_path.clone();
+                        let resized_clone = resized.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = tokio::fs::write(cache_path_clone, resized_clone).await {
+                                tracing::warn!("Failed to write resized image to cache: {}", e);
+                            }
+                        });
+
                         let response = Response::builder()
                             .status(StatusCode::OK)
                             .header(header::CONTENT_TYPE, content_type)

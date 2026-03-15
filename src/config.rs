@@ -10,6 +10,7 @@ pub struct Config {
     pub enable_registration: bool,
     pub app_version: String,
     pub data_dir: String,
+    pub cache_dir: String,
 }
 
 impl Config {
@@ -32,6 +33,7 @@ impl Config {
             app_version: env::var("APP_VERSION")
                 .unwrap_or_else(|_| "2026.1.0".to_string()),
             data_dir: env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string()),
+            cache_dir: env::var("CACHE_DIR").unwrap_or_else(|_| "./cache".to_string()),
         })
     }
 
@@ -44,6 +46,11 @@ impl Config {
     }
 
     pub fn previews_dir(&self) -> std::path::PathBuf {
-        std::path::Path::new(&self.data_dir).join("previews")
+        std::path::Path::new(&self.cache_dir).join("previews")
+    }
+
+    pub fn resized_images_dir(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.cache_dir).join("resized")
     }
 }
+
