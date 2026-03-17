@@ -6,36 +6,14 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::motorcycles::verify_motorcycle_ownership,
+    models::PreviousOwner,
 };
-
-fn row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
-    json!({
-        "id": r.get::<i64, _>("id"),
-        "motorcycleId": r.get::<i64, _>("motorcycleId"),
-        "name": r.get::<String, _>("name"),
-        "surname": r.get::<String, _>("surname"),
-        "purchaseDate": r.get::<String, _>("purchaseDate"),
-        "address": r.get::<Option<String>, _>("address"),
-        "city": r.get::<Option<String>, _>("city"),
-        "postcode": r.get::<Option<String>, _>("postcode"),
-        "country": r.get::<Option<String>, _>("country"),
-        "phoneNumber": r.get::<Option<String>, _>("phoneNumber"),
-        "email": r.get::<Option<String>, _>("email"),
-        "comments": r.get::<Option<String>, _>("comments"),
-        "createdAt": r.get::<String, _>("createdAt"),
-        "updatedAt": r.get::<String, _>("updatedAt"),
-    })
-}
-
-const SELECT_COLS: &str =
-    "id, motorcycleId, name, surname, purchaseDate, address, city, postcode, \
-     country, phoneNumber, email, comments, createdAt, updatedAt";
 
 pub async fn list_previous_owners(
     State(pool): State<SqlitePool>,
@@ -44,15 +22,13 @@ pub async fn list_previous_owners(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let rows = sqlx::query(&format!(
-        "SELECT {} FROM previousOwners WHERE motorcycleId = ? ORDER BY purchaseDate DESC, id DESC",
-        SELECT_COLS
-    ))
+    let owners = sqlx::query_as::<_, PreviousOwner>(
+        "SELECT * FROM previousOwners WHERE motorcycleId = ? ORDER BY purchaseDate DESC, id DESC",
+    )
     .bind(motorcycle_id)
     .fetch_all(&pool)
     .await?;
 
-    let owners: Vec<Value> = rows.iter().map(row_to_value).collect();
     Ok(Json(json!({ "previousOwners": owners })))
 }
 
@@ -104,17 +80,14 @@ pub async fn create_previous_owner(
     .await?
     .last_insert_rowid();
 
-    let row = sqlx::query(&format!(
-        "SELECT {} FROM previousOwners WHERE id = ?",
-        SELECT_COLS
-    ))
-    .bind(id)
-    .fetch_one(&pool)
-    .await?;
+    let owner = sqlx::query_as::<_, PreviousOwner>("SELECT * FROM previousOwners WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "previousOwner": row_to_value(&row) })),
+        Json(json!({ "previousOwner": owner })),
     ))
 }
 
@@ -141,28 +114,25 @@ pub async fn update_previous_owner(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let existing = sqlx::query(&format!(
-        "SELECT {} FROM previousOwners WHERE id = ? AND motorcycleId = ?",
-        SELECT_COLS
-    ))
+    let existing = sqlx::query_as::<_, PreviousOwner>(
+        "SELECT * FROM previousOwners WHERE id = ? AND motorcycleId = ?",
+    )
     .bind(oid)
     .bind(motorcycle_id)
     .fetch_optional(&pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Previous owner not found".to_string()))?;
 
-    let name = body.name.unwrap_or_else(|| existing.get("name"));
-    let surname = body.surname.unwrap_or_else(|| existing.get("surname"));
-    let purchase_date = body
-        .purchase_date
-        .unwrap_or_else(|| existing.get("purchaseDate"));
-    let address: Option<String> = body.address.or_else(|| existing.get("address"));
-    let city: Option<String> = body.city.or_else(|| existing.get("city"));
-    let postcode: Option<String> = body.postcode.or_else(|| existing.get("postcode"));
-    let country: Option<String> = body.country.or_else(|| existing.get("country"));
-    let phone_number: Option<String> = body.phone_number.or_else(|| existing.get("phoneNumber"));
-    let email: Option<String> = body.email.or_else(|| existing.get("email"));
-    let comments: Option<String> = body.comments.or_else(|| existing.get("comments"));
+    let name = body.name.unwrap_or(existing.name);
+    let surname = body.surname.unwrap_or(existing.surname);
+    let purchase_date = body.purchase_date.unwrap_or(existing.purchase_date);
+    let address = body.address.or(existing.address);
+    let city = body.city.or(existing.city);
+    let postcode = body.postcode.or(existing.postcode);
+    let country = body.country.or(existing.country);
+    let phone_number = body.phone_number.or(existing.phone_number);
+    let email = body.email.or(existing.email);
+    let comments = body.comments.or(existing.comments);
     let now = Utc::now().to_rfc3339();
 
     sqlx::query(
@@ -186,15 +156,12 @@ pub async fn update_previous_owner(
     .execute(&pool)
     .await?;
 
-    let row = sqlx::query(&format!(
-        "SELECT {} FROM previousOwners WHERE id = ?",
-        SELECT_COLS
-    ))
-    .bind(oid)
-    .fetch_one(&pool)
-    .await?;
+    let owner = sqlx::query_as::<_, PreviousOwner>("SELECT * FROM previousOwners WHERE id = ?")
+        .bind(oid)
+        .fetch_one(&pool)
+        .await?;
 
-    Ok(Json(json!({ "previousOwner": row_to_value(&row) })))
+    Ok(Json(json!({ "previousOwner": owner })))
 }
 
 pub async fn delete_previous_owner(

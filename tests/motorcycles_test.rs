@@ -446,3 +446,78 @@ async fn test_get_motorcycle_not_found() {
 
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn test_get_home_data() {
+    let (app, pool, token) = setup_test_app().await;
+
+    // 1. Seed data
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo, firstRegistration) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("Ducati")
+    .bind("Monster")
+    .bind(1)
+    .bind(1000)
+    .bind("2020-01-01")
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // Add an inspection record
+    sqlx::query(
+        "INSERT INTO maintenanceRecords (motorcycleId, date, odo, type, description) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(moto_id)
+    .bind("2024-03-01")
+    .bind(2500)
+    .bind("inspection")
+    .bind("Regular MFK")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Add an issue
+    sqlx::query(
+        "INSERT INTO issues (motorcycleId, date, odo, description, priority, status) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(moto_id)
+    .bind("2026-03-10")
+    .bind(3000)
+    .bind("Tire low pressure")
+    .bind("medium")
+    .bind("open")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // 2. Fetch home data
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/home")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    
+    assert!(body["motorcycles"].is_array());
+    let motos = body["motorcycles"].as_array().unwrap();
+    assert_eq!(motos.len(), 1);
+    
+    let moto = &motos[0];
+    assert_eq!(moto["make"], "Ducati");
+    assert_eq!(moto["numberOfIssues"], 1);
+    assert_eq!(moto["odometer"], 3000);
+    assert!(moto["nextInspection"].is_object());
+    assert_eq!(moto["nextInspection"]["dueDateISO"], "2026-03-01");
+    assert_eq!(moto["nextInspection"]["isOverdue"], true);
+}

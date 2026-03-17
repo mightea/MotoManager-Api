@@ -168,6 +168,7 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route("/api/currencies", get(handlers::admin::list_currencies_public))
         .route("/api/stats", get(handlers::stats::get_stats))
+        .route("/api/home", get(handlers::home::get_home_data))
         .route("/images/:filename", get(handlers::files::serve_image))
         .route(
             "/documents/:filename",

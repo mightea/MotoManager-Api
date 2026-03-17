@@ -1,7 +1,7 @@
 use axum::extract::State;
 use axum::Json;
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 use std::collections::HashMap;
 use chrono::{Datelike, Utc, NaiveDate, DateTime};
 
@@ -9,7 +9,7 @@ use crate::{
     auth::AuthUser,
     config::Config,
     error::AppResult,
-    handlers::motorcycles::maintenance_row_to_value,
+    models::{Motorcycle, MaintenanceRecord, Issue},
 };
 
 fn parse_year(date_str: &str) -> Option<i32> {
@@ -33,30 +33,30 @@ pub async fn get_stats(
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
     // 1. Global / Instance Counts
-    let users_count: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM users").fetch_one(&pool).await?.get("cnt");
-    let motorcycles_count_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles").fetch_one(&pool).await?.get("cnt");
-    let archived_count_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM motorcycles WHERE isArchived = 1").fetch_one(&pool).await?.get("cnt");
-    let docs_count_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM documents").fetch_one(&pool).await?.get("cnt");
-    let doc_assignments_count_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM documentMotorcycles").fetch_one(&pool).await?.get("cnt");
-    let maintenance_count_total_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM maintenanceRecords").fetch_one(&pool).await?.get("cnt");
-    let issues_count_total_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM issues").fetch_one(&pool).await?.get("cnt");
-    let open_issues_count_total_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM issues WHERE status != 'done'").fetch_one(&pool).await?.get("cnt");
-    let locations_count_total_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM locations").fetch_one(&pool).await?.get("cnt");
-    let location_history_count_total_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM locationRecords").fetch_one(&pool).await?.get("cnt");
-    let torque_specs_count_total_global: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM torqueSpecs").fetch_one(&pool).await?.get("cnt");
+    let users_count = sqlx::query!("SELECT COUNT(*) as cnt FROM users").fetch_one(&pool).await?.cnt;
+    let motorcycles_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles").fetch_one(&pool).await?.cnt;
+    let archived_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles WHERE isArchived = 1").fetch_one(&pool).await?.cnt;
+    let docs_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM documents").fetch_one(&pool).await?.cnt;
+    let doc_assignments_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM documentMotorcycles").fetch_one(&pool).await?.cnt;
+    let maintenance_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM maintenanceRecords").fetch_one(&pool).await?.cnt;
+    let issues_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM issues").fetch_one(&pool).await?.cnt;
+    let open_issues_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM issues WHERE status != 'done'").fetch_one(&pool).await?.cnt;
+    let locations_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM locations").fetch_one(&pool).await?.cnt;
+    let location_history_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM locationRecords").fetch_one(&pool).await?.cnt;
+    let torque_specs_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM torqueSpecs").fetch_one(&pool).await?.cnt;
 
     // 2. Fetch all user data for computation
-    let motorcycles = sqlx::query("SELECT * FROM motorcycles WHERE userId = ?")
+    let motorcycles = sqlx::query_as::<_, Motorcycle>("SELECT * FROM motorcycles WHERE userId = ?")
         .bind(user.id)
         .fetch_all(&pool)
         .await?;
     
-    let maintenance = sqlx::query("SELECT * FROM maintenanceRecords WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)")
+    let maintenance = sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)")
         .bind(user.id)
         .fetch_all(&pool)
         .await?;
 
-    let issues = sqlx::query("SELECT * FROM issues WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)")
+    let issues = sqlx::query_as::<_, Issue>("SELECT * FROM issues WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)")
         .bind(user.id)
         .fetch_all(&pool)
         .await?;
@@ -73,9 +73,9 @@ pub async fn get_stats(
 
     // Pre-process yearly structure
     let mut start_year = current_year;
-    for r in &motorcycles {
-        if let Some(date_str) = r.get::<Option<String>, _>("purchaseDate") {
-            if let Some(y) = parse_year(&date_str) {
+    for moto in &motorcycles {
+        if let Some(date_str) = &moto.purchase_date {
+            if let Some(y) = parse_year(date_str) {
                 if y < start_year { start_year = y; }
             }
         }
@@ -93,23 +93,21 @@ pub async fn get_stats(
 
     // Process each motorcycle
     let mut motorcycles_json = Vec::new();
-    for r in &motorcycles {
-        let moto_id: i64 = r.get("id");
-        let initial_odo: i64 = r.get("initialOdo");
-        let is_veteran: bool = r.get("isVeteran");
-        if is_veteran { veteran_count += 1; }
+    for moto in &motorcycles {
+        let initial_odo = moto.initial_odo;
+        if moto.is_veteran { veteran_count += 1; }
         
-        let purchase_year = r.get::<Option<String>, _>("purchaseDate")
-            .and_then(|d| parse_year(&d))
+        let purchase_year = moto.purchase_date.as_ref()
+            .and_then(|d| parse_year(d))
             .unwrap_or(start_year);
 
         // Map max ODO per year for this bike
         let mut odo_by_year: HashMap<i32, i64> = HashMap::new();
         odo_by_year.insert(purchase_year - 1, initial_odo); // Baseline
 
-        for m in maintenance.iter().filter(|m| m.get::<i64, _>("motorcycleId") == moto_id) {
-            let odo: i64 = m.get("odo");
-            if let Some(y) = parse_year(&m.get::<String, _>("date")) {
+        for m in maintenance.iter().filter(|m| m.motorcycle_id == moto.id) {
+            let odo = m.odo;
+            if let Some(y) = parse_year(&m.date) {
                 let current = odo_by_year.get(&y).cloned().unwrap_or(0);
                 if odo > current { odo_by_year.insert(y, odo); }
             }
@@ -125,9 +123,9 @@ pub async fn get_stats(
                 let distance = yearly_max - last_odo;
                 
                 let yearly_cost = maintenance.iter()
-                    .filter(|m| m.get::<i64, _>("motorcycleId") == moto_id)
-                    .filter(|m| parse_year(&m.get::<String, _>("date")) == Some(y))
-                    .map(|m| m.get::<Option<f64>, _>("normalizedCost").or_else(|| m.get::<Option<f64>, _>("cost")).unwrap_or(0.0))
+                    .filter(|m| m.motorcycle_id == moto.id)
+                    .filter(|m| parse_year(&m.date) == Some(y))
+                    .map(|m| m.normalized_cost.or(m.cost).unwrap_or(0.0))
                     .sum::<f64>();
 
                 if let Some(y_stats) = yearly_map.get_mut(&y) {
@@ -138,9 +136,9 @@ pub async fn get_stats(
                         
                         let moto_list = obj["motorcycles"].as_array_mut().unwrap();
                         moto_list.push(json!({
-                            "id": moto_id,
-                            "make": r.get::<String, _>("make"),
-                            "model": r.get::<String, _>("model"),
+                            "id": moto.id,
+                            "make": moto.make,
+                            "model": moto.model,
                             "distance": distance,
                             "cost": yearly_cost
                         }));
@@ -156,14 +154,14 @@ pub async fn get_stats(
         total_km_overall += bike_max_odo - initial_odo;
 
         motorcycles_json.push(json!({
-            "id": moto_id,
-            "make": r.get::<String, _>("make"),
-            "model": r.get::<String, _>("model"),
-            "fabricationDate": r.get::<Option<String>, _>("modelYear"),
-            "userId": r.get::<i64, _>("userId"),
-            "image": r.get::<Option<String>, _>("image").map(|i| format!("/images/{}", i.replace("/data/images/", "").replace("data/images/", ""))),
-            "isVeteran": is_veteran,
-            "isArchived": r.get::<bool, _>("isArchived"),
+            "id": moto.id,
+            "make": moto.make,
+            "model": moto.model,
+            "fabricationDate": moto.model_year,
+            "userId": moto.user_id,
+            "image": moto.image.as_ref().map(|i| format!("/images/{}", i.replace("/data/images/", "").replace("data/images/", ""))),
+            "isVeteran": moto.is_veteran,
+            "isArchived": moto.is_archived,
             "initialOdo": initial_odo,
             "odometer": bike_max_odo,
             "odometerThisYear": odo_by_year.get(&current_year).map(|&v| v - odo_by_year.get(&(current_year - 1)).cloned().unwrap_or(initial_odo)).unwrap_or(0),
@@ -172,23 +170,22 @@ pub async fn get_stats(
 
     // Process costs and yearly fleet stats (attach records)
     for m in &maintenance {
-        if let Some(y) = parse_year(&m.get::<String, _>("date")) {
-            let cost = m.get::<Option<f64>, _>("normalizedCost").or_else(|| m.get::<Option<f64>, _>("cost")).unwrap_or(0.0);
+        if let Some(y) = parse_year(&m.date) {
+            let cost = m.normalized_cost.or(m.cost).unwrap_or(0.0);
             total_cost_overall += cost;
             if y == current_year { total_cost_this_year += cost; }
 
             if let Some(y_stats) = yearly_map.get_mut(&y) {
                 if let Some(obj) = y_stats.as_object_mut() {
                     let records = obj["records"].as_array_mut().unwrap();
-                    records.push(maintenance_row_to_value(m));
+                    records.push(serde_json::to_value(m).unwrap_or(Value::Null));
                 }
             }
         }
     }
 
     for i in &issues {
-        let status: String = i.get("status");
-        if status != "done" { total_active_issues += 1; }
+        if i.status != "done" { total_active_issues += 1; }
     }
 
     let mut yearly_vec: Vec<Value> = yearly_map.into_values().collect();

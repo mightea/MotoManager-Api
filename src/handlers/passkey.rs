@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::{Deserialize};
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 use std::sync::Arc;
 use uuid::Uuid;
 use webauthn_rs::prelude::*;
@@ -50,13 +50,10 @@ pub async fn register_options(
     let expires_at = (Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
     let challenge_id = Uuid::new_v4().to_string();
 
-    sqlx::query(
-        "INSERT INTO challenges (id, userId, challenge, expiresAt) VALUES (?, ?, ?, ?)"
+    sqlx::query!(
+        "INSERT INTO challenges (id, userId, challenge, expiresAt) VALUES (?, ?, ?, ?)",
+        challenge_id, user.id, challenge_json, expires_at
     )
-    .bind(&challenge_id)
-    .bind(user.id)
-    .bind(&challenge_json)
-    .bind(&expires_at)
     .execute(&pool)
     .await?;
 
@@ -97,21 +94,15 @@ pub async fn register_verify(
     let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, passkey.cred_id().as_slice());
     let public_key = passkey.cred_id().as_slice().to_vec();
     
-    sqlx::query(
-        "INSERT INTO authenticators (id, userId, public_key, counter, deviceType, backedUp, transports) 
-         VALUES (?, ?, ?, ?, ?, ?, ?)"
+    sqlx::query!(
+        "INSERT INTO authenticators (id, userId, publicKey, counter, deviceType, backedUp, transports) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        auth_id, user.id, public_key, 0i64, "passkey", true, None::<String>
     )
-    .bind(&auth_id)
-    .bind(user.id)
-    .bind(&public_key)
-    .bind(0i64)
-    .bind("passkey")
-    .bind(true)
-    .bind(None::<String>)
     .execute(&pool)
     .await?;
 
-    sqlx::query("DELETE FROM challenges WHERE id = ?").bind(&body.challenge_id).execute(&pool).await?;
+    sqlx::query!("DELETE FROM challenges WHERE id = ?", body.challenge_id).execute(&pool).await?;
 
     Ok(Json(json!({ "verified": true })))
 }
@@ -128,12 +119,10 @@ pub async fn login_options(
     let expires_at = (Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
     let challenge_id = Uuid::new_v4().to_string();
 
-    sqlx::query(
-        "INSERT INTO challenges (id, challenge, expiresAt) VALUES (?, ?, ?)"
+    sqlx::query!(
+        "INSERT INTO challenges (id, challenge, expiresAt) VALUES (?, ?, ?)",
+        challenge_id, challenge_json, expires_at
     )
-    .bind(&challenge_id)
-    .bind(&challenge_json)
-    .bind(&expires_at)
     .execute(&_pool)
     .await?;
 
@@ -172,19 +161,19 @@ pub async fn login_verify(
     let cred_id = auth_result.cred_id();
     let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, cred_id.as_slice());
 
-    let auth_row = sqlx::query(
-        "SELECT userId FROM authenticators WHERE id = ?"
+    let auth_row = sqlx::query!(
+        "SELECT userId FROM authenticators WHERE id = ?",
+        auth_id
     )
-    .bind(&auth_id)
     .fetch_optional(&pool)
     .await?;
 
     let auth_data = auth_row.ok_or_else(|| AppError::Unauthorized)?;
-    let user_id: i64 = auth_data.get("userId");
+    let user_id = auth_data.userId;
 
     let token = session::create_session(&pool, user_id).await?;
 
-    sqlx::query("DELETE FROM challenges WHERE id = ?").bind(&body.challenge_id).execute(&pool).await?;
+    sqlx::query!("DELETE FROM challenges WHERE id = ?", body.challenge_id).execute(&pool).await?;
 
     Ok(Json(json!({
         "verified": true,

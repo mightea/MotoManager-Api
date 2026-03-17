@@ -5,19 +5,14 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
-    handlers::motorcycles::{maintenance_row_to_value, verify_motorcycle_ownership},
+    handlers::motorcycles::verify_motorcycle_ownership,
+    models::MaintenanceRecord,
 };
-
-const SELECT_COLS: &str =
-    "id, date, odo, motorcycleId, cost, normalizedCost, currency, description, type, \
-     brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
-     oilType, inspectionLocation, locationId, fuelType, fuelAmount, pricePerUnit, \
-     latitude, longitude, locationName, fuelConsumption, tripDistance";
 
 async fn recalculate_fuel_consumption(
     pool: &SqlitePool,
@@ -27,22 +22,21 @@ async fn recalculate_fuel_consumption(
     fuel_amount: f64,
     provided_trip_distance: Option<f64>,
 ) -> AppResult<()> {
-    let prev_row = sqlx::query(
+    let prev_row = sqlx::query!(
         "SELECT odo FROM maintenanceRecords \
          WHERE motorcycleId = ? AND type = 'fuel' AND odo < ? AND id != ? \
          ORDER BY odo DESC LIMIT 1",
+        motorcycle_id,
+        current_odo,
+        record_id
     )
-    .bind(motorcycle_id)
-    .bind(current_odo)
-    .bind(record_id)
     .fetch_optional(pool)
     .await?;
 
     let trip_distance = if let Some(d) = provided_trip_distance {
         d
     } else if let Some(prev) = prev_row {
-        let prev_odo: i64 = prev.get("odo");
-        (current_odo - prev_odo) as f64
+        (current_odo - prev.odo) as f64
     } else {
         return Ok(());
     };
@@ -53,12 +47,12 @@ async fn recalculate_fuel_consumption(
 
     let fuel_consumption = (fuel_amount / trip_distance) * 100.0;
 
-    sqlx::query(
+    sqlx::query!(
         "UPDATE maintenanceRecords SET fuelConsumption = ?, tripDistance = ? WHERE id = ?",
+        fuel_consumption,
+        trip_distance,
+        record_id
     )
-    .bind(fuel_consumption)
-    .bind(trip_distance)
-    .bind(record_id)
     .execute(pool)
     .await?;
 
@@ -73,15 +67,13 @@ pub async fn list_maintenance(
     tracing::debug!("Listing maintenance records for motorcycle ID: {} for user: {}", motorcycle_id, user.id);
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let rows = sqlx::query(&format!(
-        "SELECT {} FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
-        SELECT_COLS
-    ))
+    let records = sqlx::query_as::<_, MaintenanceRecord>(
+        "SELECT * FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC"
+    )
     .bind(motorcycle_id)
     .fetch_all(&pool)
     .await?;
 
-    let records: Vec<Value> = rows.iter().map(maintenance_row_to_value).collect();
     Ok(Json(json!({ "maintenanceRecords": records })))
 }
 
@@ -189,18 +181,15 @@ pub async fn create_maintenance(
         }
     }
 
-    let row = sqlx::query(&format!(
-        "SELECT {} FROM maintenanceRecords WHERE id = ?",
-        SELECT_COLS
-    ))
-    .bind(id)
-    .fetch_one(&pool)
-    .await?;
+    let record = sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
 
     tracing::info!("Maintenance record created ID: {} for motorcycle ID: {}", id, motorcycle_id);
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "maintenanceRecord": maintenance_row_to_value(&row) })),
+        Json(json!({ "maintenanceRecord": record })),
     ))
 }
 
@@ -213,58 +202,41 @@ pub async fn update_maintenance(
     tracing::info!("Updating maintenance record ID: {} for motorcycle ID: {} for user: {}", mid, motorcycle_id, user.id);
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let existing = sqlx::query(&format!(
-        "SELECT {} FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?",
-        SELECT_COLS
-    ))
+    let existing = sqlx::query_as::<_, MaintenanceRecord>(
+        "SELECT * FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?"
+    )
     .bind(mid)
     .bind(motorcycle_id)
     .fetch_optional(&pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Maintenance record not found".to_string()))?;
 
-    let date = body.date.unwrap_or_else(|| existing.get("date"));
-    let odo = body.odo.unwrap_or_else(|| existing.get("odo"));
-    let record_type = body
-        .record_type
-        .unwrap_or_else(|| existing.get::<String, _>("type"));
-    let cost = body.cost.or_else(|| existing.get("cost"));
-    let normalized_cost = body
-        .normalized_cost
-        .or_else(|| existing.get("normalizedCost"));
-    let currency: Option<String> = body.currency.or_else(|| existing.get("currency"));
-    let description: Option<String> = body.description.or_else(|| existing.get("description"));
-    let brand: Option<String> = body.brand.or_else(|| existing.get("brand"));
-    let model: Option<String> = body.model.or_else(|| existing.get("model"));
-    let tire_position: Option<String> = body
-        .tire_position
-        .or_else(|| existing.get("tirePosition"));
-    let tire_size: Option<String> = body.tire_size.or_else(|| existing.get("tireSize"));
-    let dot_code: Option<String> = body.dot_code.or_else(|| existing.get("dotCode"));
-    let battery_type: Option<String> = body.battery_type.or_else(|| existing.get("batteryType"));
-    let fluid_type: Option<String> = body.fluid_type.or_else(|| existing.get("fluidType"));
-    let viscosity: Option<String> = body.viscosity.or_else(|| existing.get("viscosity"));
-    let oil_type: Option<String> = body.oil_type.or_else(|| existing.get("oilType"));
-    let inspection_location: Option<String> = body
-        .inspection_location
-        .or_else(|| existing.get("inspectionLocation"));
-    let location_id: Option<i64> = body.location_id.or_else(|| existing.get("locationId"));
-    let fuel_type: Option<String> = body.fuel_type.or_else(|| existing.get("fuelType"));
-    let fuel_amount: Option<f64> = body.fuel_amount.or_else(|| existing.get("fuelAmount"));
-    let price_per_unit: Option<f64> = body
-        .price_per_unit
-        .or_else(|| existing.get("pricePerUnit"));
-    let latitude: Option<f64> = body.latitude.or_else(|| existing.get("latitude"));
-    let longitude: Option<f64> = body.longitude.or_else(|| existing.get("longitude"));
-    let location_name: Option<String> = body
-        .location_name
-        .or_else(|| existing.get("locationName"));
-    let fuel_consumption: Option<f64> = body
-        .fuel_consumption
-        .or_else(|| existing.get("fuelConsumption"));
-    let trip_distance: Option<f64> = body
-        .trip_distance
-        .or_else(|| existing.get("tripDistance"));
+    let date = body.date.unwrap_or(existing.date);
+    let odo = body.odo.unwrap_or(existing.odo);
+    let record_type = body.record_type.unwrap_or(existing.record_type);
+    let cost = body.cost.or(existing.cost);
+    let normalized_cost = body.normalized_cost.or(existing.normalized_cost);
+    let currency: Option<String> = body.currency.or(existing.currency);
+    let description: Option<String> = body.description.or(existing.description);
+    let brand: Option<String> = body.brand.or(existing.brand);
+    let model: Option<String> = body.model.or(existing.model);
+    let tire_position: Option<String> = body.tire_position.or(existing.tire_position);
+    let tire_size: Option<String> = body.tire_size.or(existing.tire_size);
+    let dot_code: Option<String> = body.dot_code.or(existing.dot_code);
+    let battery_type: Option<String> = body.battery_type.or(existing.battery_type);
+    let fluid_type: Option<String> = body.fluid_type.or(existing.fluid_type);
+    let viscosity: Option<String> = body.viscosity.or(existing.viscosity);
+    let oil_type: Option<String> = body.oil_type.or(existing.oil_type);
+    let inspection_location: Option<String> = body.inspection_location.or(existing.inspection_location);
+    let location_id: Option<i64> = body.location_id.or(existing.location_id);
+    let fuel_type: Option<String> = body.fuel_type.or(existing.fuel_type);
+    let fuel_amount: Option<f64> = body.fuel_amount.or(existing.fuel_amount);
+    let price_per_unit: Option<f64> = body.price_per_unit.or(existing.price_per_unit);
+    let latitude: Option<f64> = body.latitude.or(existing.latitude);
+    let longitude: Option<f64> = body.longitude.or(existing.longitude);
+    let location_name: Option<String> = body.location_name.or(existing.location_name);
+    let fuel_consumption: Option<f64> = body.fuel_consumption.or(existing.fuel_consumption);
+    let trip_distance: Option<f64> = body.trip_distance.or(existing.trip_distance);
 
     sqlx::query(
         "UPDATE maintenanceRecords SET \
@@ -319,16 +291,13 @@ pub async fn update_maintenance(
         }
     }
 
-    let row = sqlx::query(&format!(
-        "SELECT {} FROM maintenanceRecords WHERE id = ?",
-        SELECT_COLS
-    ))
-    .bind(mid)
-    .fetch_one(&pool)
-    .await?;
+    let record = sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE id = ?")
+        .bind(mid)
+        .fetch_one(&pool)
+        .await?;
 
     tracing::info!("Maintenance record updated ID: {}", mid);
-    Ok(Json(json!({ "maintenanceRecord": maintenance_row_to_value(&row) })))
+    Ok(Json(json!({ "maintenanceRecord": record })))
 }
 
 pub async fn delete_maintenance(
@@ -347,7 +316,6 @@ pub async fn delete_maintenance(
             .await?;
 
     if result.rows_affected() == 0 {
-        tracing::warn!("Delete failed: maintenance record ID: {} not found for motorcycle ID: {}", mid, motorcycle_id);
         return Err(AppError::NotFound("Maintenance record not found".to_string()));
     }
 

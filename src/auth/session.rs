@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use rand::RngCore;
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 
 use crate::{
     auth::SESSION_DURATION_DAYS,
@@ -23,13 +23,10 @@ pub async fn create_session(pool: &SqlitePool, user_id: i64) -> AppResult<String
     let created_at = now.to_rfc3339();
     let expires_at_str = expires_at.to_rfc3339();
 
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO sessions (token, userId, expiresAt, createdAt) VALUES (?, ?, ?, ?)",
+        token, user_id, expires_at_str, created_at
     )
-    .bind(&token)
-    .bind(user_id)
-    .bind(&expires_at_str)
-    .bind(&created_at)
     .execute(pool)
     .await?;
 
@@ -40,9 +37,8 @@ pub async fn create_session(pool: &SqlitePool, user_id: i64) -> AppResult<String
 pub async fn get_user_from_token(pool: &SqlitePool, token: &str) -> AppResult<User> {
     let now = Utc::now().to_rfc3339();
 
-    let row = sqlx::query(
-        "SELECT u.id, u.email, u.username, u.name, u.passwordHash, u.role, \
-         u.createdAt, u.updatedAt, u.lastLoginAt \
+    let user = sqlx::query_as::<_, User>(
+        "SELECT u.* \
          FROM sessions s \
          JOIN users u ON u.id = s.userId \
          WHERE s.token = ? AND s.expiresAt > ?",
@@ -52,26 +48,12 @@ pub async fn get_user_from_token(pool: &SqlitePool, token: &str) -> AppResult<Us
     .fetch_optional(pool)
     .await?;
 
-    match row {
-        Some(r) => Ok(User {
-            id: r.get("id"),
-            email: r.get("email"),
-            username: r.get("username"),
-            name: r.get("name"),
-            password_hash: r.get("passwordHash"),
-            role: r.get("role"),
-            created_at: r.get("createdAt"),
-            updated_at: r.get("updatedAt"),
-            last_login_at: r.get("lastLoginAt"),
-        }),
-        None => Err(AppError::Unauthorized),
-    }
+    user.ok_or(AppError::Unauthorized)
 }
 
 /// Delete a session (logout).
 pub async fn delete_session(pool: &SqlitePool, token: &str) -> AppResult<()> {
-    sqlx::query("DELETE FROM sessions WHERE token = ?")
-        .bind(token)
+    sqlx::query!("DELETE FROM sessions WHERE token = ?", token)
         .execute(pool)
         .await?;
     Ok(())

@@ -6,32 +6,14 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::motorcycles::verify_motorcycle_ownership,
+    models::TorqueSpec,
 };
-
-fn row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
-    json!({
-        "id": r.get::<i64, _>("id"),
-        "motorcycleId": r.get::<i64, _>("motorcycleId"),
-        "category": r.get::<String, _>("category"),
-        "name": r.get::<String, _>("name"),
-        "torque": r.get::<f64, _>("torque"),
-        "torqueEnd": r.get::<Option<f64>, _>("torqueEnd"),
-        "variation": r.get::<Option<f64>, _>("variation"),
-        "toolSize": r.get::<Option<String>, _>("toolSize"),
-        "description": r.get::<Option<String>, _>("description"),
-        "createdAt": r.get::<String, _>("createdAt"),
-    })
-}
-
-const SELECT_COLS: &str =
-    "id, motorcycleId, category, name, torque, torqueEnd, variation, toolSize, \
-     description, createdAt";
 
 pub async fn list_torque_specs(
     State(pool): State<SqlitePool>,
@@ -40,15 +22,13 @@ pub async fn list_torque_specs(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let rows = sqlx::query(&format!(
-        "SELECT {} FROM torqueSpecs WHERE motorcycleId = ? ORDER BY category ASC, name ASC",
-        SELECT_COLS
-    ))
+    let specs = sqlx::query_as::<_, TorqueSpec>(
+        "SELECT * FROM torqueSpecs WHERE motorcycleId = ? ORDER BY category ASC, name ASC",
+    )
     .bind(motorcycle_id)
     .fetch_all(&pool)
     .await?;
 
-    let specs: Vec<Value> = rows.iter().map(row_to_value).collect();
     Ok(Json(json!({
         "torqueSpecs": specs,
         "torqueSpecifications": specs
@@ -95,17 +75,14 @@ pub async fn create_torque_spec(
     .await?
     .last_insert_rowid();
 
-    let row = sqlx::query(&format!(
-        "SELECT {} FROM torqueSpecs WHERE id = ?",
-        SELECT_COLS
-    ))
-    .bind(id)
-    .fetch_one(&pool)
-    .await?;
+    let spec = sqlx::query_as::<_, TorqueSpec>("SELECT * FROM torqueSpecs WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "torqueSpec": row_to_value(&row) })),
+        Json(json!({ "torqueSpec": spec })),
     ))
 }
 
@@ -124,9 +101,8 @@ pub async fn import_torque_specs(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
     verify_motorcycle_ownership(&pool, body.from_motorcycle_id, user.id).await?;
 
-    let source_rows = sqlx::query(
-        "SELECT category, name, torque, torqueEnd, variation, toolSize, description \
-         FROM torqueSpecs WHERE motorcycleId = ?",
+    let source_specs = sqlx::query_as::<_, TorqueSpec>(
+        "SELECT * FROM torqueSpecs WHERE motorcycleId = ?",
     )
     .bind(body.from_motorcycle_id)
     .fetch_all(&pool)
@@ -135,28 +111,20 @@ pub async fn import_torque_specs(
     let now = Utc::now().to_rfc3339();
     let mut imported_count: i64 = 0;
 
-    for row in &source_rows {
-        let category: String = row.get("category");
-        let name: String = row.get("name");
-        let torque: f64 = row.get("torque");
-        let torque_end: Option<f64> = row.get("torqueEnd");
-        let variation: Option<f64> = row.get("variation");
-        let tool_size: Option<String> = row.get("toolSize");
-        let description: Option<String> = row.get("description");
-
+    for spec in &source_specs {
         sqlx::query(
             "INSERT INTO torqueSpecs \
              (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt) \
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(motorcycle_id)
-        .bind(&category)
-        .bind(&name)
-        .bind(torque)
-        .bind(torque_end)
-        .bind(variation)
-        .bind(&tool_size)
-        .bind(&description)
+        .bind(&spec.category)
+        .bind(&spec.name)
+        .bind(spec.torque)
+        .bind(spec.torque_end)
+        .bind(spec.variation)
+        .bind(&spec.tool_size)
+        .bind(&spec.description)
         .bind(&now)
         .execute(&pool)
         .await?;
@@ -190,23 +158,22 @@ pub async fn update_torque_spec(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let existing = sqlx::query(&format!(
-        "SELECT {} FROM torqueSpecs WHERE id = ? AND motorcycleId = ?",
-        SELECT_COLS
-    ))
+    let existing = sqlx::query_as::<_, TorqueSpec>(
+        "SELECT * FROM torqueSpecs WHERE id = ? AND motorcycleId = ?",
+    )
     .bind(tid)
     .bind(motorcycle_id)
     .fetch_optional(&pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Torque spec not found".to_string()))?;
 
-    let category = body.category.unwrap_or_else(|| existing.get("category"));
-    let name = body.name.unwrap_or_else(|| existing.get("name"));
-    let torque = body.torque.unwrap_or_else(|| existing.get("torque"));
-    let torque_end: Option<f64> = body.torque_end.or_else(|| existing.get("torqueEnd"));
-    let variation: Option<f64> = body.variation.or_else(|| existing.get("variation"));
-    let tool_size: Option<String> = body.tool_size.or_else(|| existing.get("toolSize"));
-    let description: Option<String> = body.description.or_else(|| existing.get("description"));
+    let category = body.category.unwrap_or(existing.category);
+    let name = body.name.unwrap_or(existing.name);
+    let torque = body.torque.unwrap_or(existing.torque);
+    let torque_end = body.torque_end.or(existing.torque_end);
+    let variation = body.variation.or(existing.variation);
+    let tool_size = body.tool_size.or(existing.tool_size);
+    let description = body.description.or(existing.description);
 
     sqlx::query(
         "UPDATE torqueSpecs SET \
@@ -225,15 +192,12 @@ pub async fn update_torque_spec(
     .execute(&pool)
     .await?;
 
-    let row = sqlx::query(&format!(
-        "SELECT {} FROM torqueSpecs WHERE id = ?",
-        SELECT_COLS
-    ))
-    .bind(tid)
-    .fetch_one(&pool)
-    .await?;
+    let spec = sqlx::query_as::<_, TorqueSpec>("SELECT * FROM torqueSpecs WHERE id = ?")
+        .bind(tid)
+        .fetch_one(&pool)
+        .await?;
 
-    Ok(Json(json!({ "torqueSpec": row_to_value(&row) })))
+    Ok(Json(json!({ "torqueSpec": spec })))
 }
 
 pub async fn delete_torque_spec(

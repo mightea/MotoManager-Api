@@ -6,25 +6,14 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::motorcycles::verify_motorcycle_ownership,
+    models::Issue,
 };
-
-fn row_to_issue(r: &sqlx::sqlite::SqliteRow) -> Value {
-    json!({
-        "id": r.get::<i64, _>("id"),
-        "motorcycleId": r.get::<i64, _>("motorcycleId"),
-        "odo": r.get::<i64, _>("odo"),
-        "description": r.get::<Option<String>, _>("description"),
-        "priority": r.get::<String, _>("priority"),
-        "status": r.get::<String, _>("status"),
-        "date": r.get::<Option<String>, _>("date"),
-    })
-}
 
 pub async fn list_issues(
     State(pool): State<SqlitePool>,
@@ -33,15 +22,13 @@ pub async fn list_issues(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let rows = sqlx::query(
-        "SELECT id, motorcycleId, odo, description, priority, status, date \
-         FROM issues WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
+    let issues = sqlx::query_as::<_, Issue>(
+        "SELECT * FROM issues WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
     )
     .bind(motorcycle_id)
     .fetch_all(&pool)
     .await?;
 
-    let issues: Vec<Value> = rows.iter().map(row_to_issue).collect();
     Ok(Json(json!({ "issues": issues })))
 }
 
@@ -82,19 +69,14 @@ pub async fn create_issue(
     .await?
     .last_insert_rowid();
 
+    let issue = sqlx::query_as::<_, Issue>("SELECT * FROM issues WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
+
     Ok((
         StatusCode::CREATED,
-        Json(json!({
-            "issue": {
-                "id": id,
-                "motorcycleId": motorcycle_id,
-                "odo": body.odo,
-                "description": body.description,
-                "priority": priority,
-                "status": status,
-                "date": date,
-            }
-        })),
+        Json(json!({ "issue": issue })),
     ))
 }
 
@@ -115,9 +97,8 @@ pub async fn update_issue(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let row = sqlx::query(
-        "SELECT id, motorcycleId, odo, description, priority, status, date \
-         FROM issues WHERE id = ? AND motorcycleId = ?",
+    let existing = sqlx::query_as::<_, Issue>(
+        "SELECT * FROM issues WHERE id = ? AND motorcycleId = ?",
     )
     .bind(issue_id)
     .bind(motorcycle_id)
@@ -125,11 +106,11 @@ pub async fn update_issue(
     .await?
     .ok_or_else(|| AppError::NotFound("Issue not found".to_string()))?;
 
-    let odo = body.odo.unwrap_or_else(|| row.get("odo"));
-    let description: Option<String> = body.description.or_else(|| row.get("description"));
-    let priority = body.priority.unwrap_or_else(|| row.get("priority"));
-    let status = body.status.unwrap_or_else(|| row.get("status"));
-    let date: Option<String> = body.date.or_else(|| row.get("date"));
+    let odo = body.odo.unwrap_or(existing.odo);
+    let description: Option<String> = body.description.or(existing.description);
+    let priority = body.priority.unwrap_or(existing.priority);
+    let status = body.status.unwrap_or(existing.status);
+    let date = body.date.unwrap_or(existing.date);
 
     sqlx::query(
         "UPDATE issues SET odo = ?, description = ?, priority = ?, status = ?, date = ? \
@@ -144,17 +125,12 @@ pub async fn update_issue(
     .execute(&pool)
     .await?;
 
-    Ok(Json(json!({
-        "issue": {
-            "id": issue_id,
-            "motorcycleId": motorcycle_id,
-            "odo": odo,
-            "description": description,
-            "priority": priority,
-            "status": status,
-            "date": date,
-        }
-    })))
+    let issue = sqlx::query_as::<_, Issue>("SELECT * FROM issues WHERE id = ?")
+        .bind(issue_id)
+        .fetch_one(&pool)
+        .await?;
+
+    Ok(Json(json!({ "issue": issue })))
 }
 
 pub async fn delete_issue(

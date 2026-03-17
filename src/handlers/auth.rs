@@ -7,7 +7,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 
 use crate::{
     auth::{
@@ -37,37 +37,20 @@ pub struct RegisterRequest {
     pub confirm_password: String,
 }
 
-fn row_to_user(row: &sqlx::sqlite::SqliteRow) -> User {
-    User {
-        id: row.get("id"),
-        email: row.get("email"),
-        username: row.get("username"),
-        name: row.get("name"),
-        password_hash: row.get("passwordHash"),
-        role: row.get("role"),
-        created_at: row.get("createdAt"),
-        updated_at: row.get("updatedAt"),
-        last_login_at: row.get("lastLoginAt"),
-    }
-}
-
 pub async fn login(
     State(pool): State<SqlitePool>,
     Json(body): Json<LoginRequest>,
 ) -> AppResult<Response> {
     tracing::info!("Login attempt for identifier: {}", body.identifier);
-    let row = sqlx::query(
-        "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
-         FROM users WHERE ? IN (email, username)",
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE ? IN (email, username)",
     )
     .bind(&body.identifier)
     .fetch_optional(&pool)
     .await?;
 
-    tracing::info!("Login request for user: {}", body.identifier);
-
-    let user = match row {
-        Some(r) => row_to_user(&r),
+    let user = match user {
+        Some(u) => u,
         None => {
             tracing::warn!(
                 "Login failed: user not found for identifier: {}",
@@ -87,11 +70,12 @@ pub async fn login(
 
     let now = Utc::now().to_rfc3339();
 
-    sqlx::query("UPDATE users SET lastLoginAt = ? WHERE id = ?")
-        .bind(&now)
-        .bind(user.id)
-        .execute(&pool)
-        .await?;
+    sqlx::query!(
+        "UPDATE users SET lastLoginAt = ? WHERE id = ?",
+        now, user.id
+    )
+    .execute(&pool)
+    .await?;
 
     let token = create_session(&pool, user.id).await?;
     let public_user = PublicUser::from(user);
@@ -138,10 +122,10 @@ pub async fn register(
         body.email,
         body.username
     );
-    let user_count: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM users")
+    let user_count: i64 = sqlx::query!("SELECT COUNT(*) as cnt FROM users")
         .fetch_one(&pool)
         .await?
-        .get("cnt");
+        .cnt as i64;
 
     if user_count > 0 && !config.enable_registration {
         tracing::warn!("Registration attempt while registration is disabled");
@@ -159,12 +143,10 @@ pub async fn register(
     }
 
     let existing: i64 =
-        sqlx::query("SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?")
-            .bind(&body.email)
-            .bind(&body.username)
+        sqlx::query!("SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?", body.email, body.username)
             .fetch_one(&pool)
             .await?
-            .get("cnt");
+            .cnt as i64;
 
     if existing > 0 {
         return Err(AppError::Conflict(
@@ -191,23 +173,20 @@ pub async fn register(
     .await?
     .last_insert_rowid();
 
-    sqlx::query("INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)")
-        .bind(user_id)
-        .bind(&now)
+    sqlx::query!("INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)", user_id, now)
         .execute(&pool)
         .await?;
 
     let token = create_session(&pool, user_id).await?;
 
-    let user_row = sqlx::query(
-        "SELECT id, email, username, name, passwordHash, role, createdAt, updatedAt, lastLoginAt \
-         FROM users WHERE id = ?",
+    let user = sqlx::query_as::<_, User>(
+        "SELECT * FROM users WHERE id = ?",
     )
     .bind(user_id)
     .fetch_one(&pool)
     .await?;
 
-    let public_user = PublicUser::from(row_to_user(&user_row));
+    let public_user = PublicUser::from(user);
 
     tracing::info!(
         "User registered: {} (ID: {}, role: {})",
@@ -223,9 +202,9 @@ pub async fn register(
 }
 
 pub async fn status(State(pool): State<SqlitePool>) -> AppResult<Json<serde_json::Value>> {
-    let user_count: i64 = sqlx::query("SELECT COUNT(*) as cnt FROM users")
+    let user_count: i64 = sqlx::query!("SELECT COUNT(*) as cnt FROM users")
         .fetch_one(&pool)
         .await?
-        .get("cnt");
+        .cnt as i64;
     Ok(Json(json!({ "userCount": user_count })))
 }

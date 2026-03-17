@@ -11,3 +11,4 @@ pub mod settings;
 pub mod stats;
 pub mod torque_specs;
 pub mod passkey;
+pub mod home;

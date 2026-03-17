@@ -5,34 +5,25 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool};
 
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
+    models::Location,
 };
-
-fn row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
-    json!({
-        "id": r.get::<i64, _>("id"),
-        "name": r.get::<String, _>("name"),
-        "countryCode": r.get::<String, _>("countryCode"),
-        "userId": r.get::<i64, _>("userId"),
-    })
-}
 
 pub async fn list_locations(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
-    let rows = sqlx::query(
-        "SELECT id, name, countryCode, userId FROM locations WHERE userId = ? ORDER BY name ASC",
+    let locations = sqlx::query_as::<_, Location>(
+        "SELECT * FROM locations WHERE userId = ? ORDER BY name ASC",
     )
     .bind(user.id)
     .fetch_all(&pool)
     .await?;
 
-    let locations: Vec<Value> = rows.iter().map(row_to_value).collect();
     Ok(Json(json!({ "locations": locations })))
 }
 
@@ -60,16 +51,14 @@ pub async fn create_location(
     .await?
     .last_insert_rowid();
 
-    let row = sqlx::query(
-        "SELECT id, name, countryCode, userId FROM locations WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_one(&pool)
-    .await?;
+    let location = sqlx::query_as::<_, Location>("SELECT * FROM locations WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
 
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "location": row_to_value(&row) })),
+        Json(json!({ "location": location })),
     ))
 }
 
@@ -86,8 +75,8 @@ pub async fn update_location(
     Path(lid): Path<i64>,
     Json(body): Json<UpdateLocationRequest>,
 ) -> AppResult<Json<Value>> {
-    let existing = sqlx::query(
-        "SELECT id, name, countryCode, userId FROM locations WHERE id = ? AND userId = ?",
+    let existing = sqlx::query_as::<_, Location>(
+        "SELECT * FROM locations WHERE id = ? AND userId = ?",
     )
     .bind(lid)
     .bind(user.id)
@@ -95,10 +84,8 @@ pub async fn update_location(
     .await?
     .ok_or_else(|| AppError::NotFound("Location not found".to_string()))?;
 
-    let name = body.name.unwrap_or_else(|| existing.get("name"));
-    let country_code = body
-        .country_code
-        .unwrap_or_else(|| existing.get("countryCode"));
+    let name = body.name.unwrap_or(existing.name);
+    let country_code = body.country_code.unwrap_or(existing.country_code);
 
     sqlx::query("UPDATE locations SET name = ?, countryCode = ? WHERE id = ?")
         .bind(&name)
@@ -107,14 +94,12 @@ pub async fn update_location(
         .execute(&pool)
         .await?;
 
-    let row = sqlx::query(
-        "SELECT id, name, countryCode, userId FROM locations WHERE id = ?",
-    )
-    .bind(lid)
-    .fetch_one(&pool)
-    .await?;
+    let location = sqlx::query_as::<_, Location>("SELECT * FROM locations WHERE id = ?")
+        .bind(lid)
+        .fetch_one(&pool)
+        .await?;
 
-    Ok(Json(json!({ "location": row_to_value(&row) })))
+    Ok(Json(json!({ "location": location })))
 }
 
 pub async fn delete_location(

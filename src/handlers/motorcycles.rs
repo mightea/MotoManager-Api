@@ -4,13 +4,14 @@ use axum::{
     Json,
 };
 use serde_json::{json, Value};
-use sqlx::{Row, SqlitePool};
+use sqlx::{SqlitePool, Row};
 use uuid::Uuid;
 
 use crate::{
     auth::AuthUser,
     config::Config,
     error::{AppError, AppResult},
+    models::{Motorcycle, MotorcycleWithStats, MaintenanceRecord, Issue, PreviousOwner, TorqueSpec},
 };
 
 async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppResult<String> {
@@ -30,84 +31,34 @@ async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppRe
     Ok(filename)
 }
 
-fn row_to_motorcycle(r: &sqlx::sqlite::SqliteRow) -> Value {
-    let image: Option<String> = r.get("image");
-    json!({
-        "id": r.get::<i64, _>("id"),
-        "make": r.get::<String, _>("make"),
-        "model": r.get::<String, _>("model"),
-        "fabricationDate": r.get::<Option<String>, _>("modelYear"),
-        "userId": r.get::<i64, _>("userId"),
-        "vin": r.get::<Option<String>, _>("vin"),
-        "engineNumber": r.get::<Option<String>, _>("engineNumber"),
-        "vehicleNr": r.get::<Option<String>, _>("vehicleNr"),
-        "numberPlate": r.get::<Option<String>, _>("numberPlate"),
-        "image": image.map(|i| format!("/images/{}", i.replace("/data/images/", "").replace("data/images/", ""))),
-        "isVeteran": r.get::<bool, _>("isVeteran"),
-        "isArchived": r.get::<bool, _>("isArchived"),
-        "firstRegistration": r.get::<Option<String>, _>("firstRegistration"),
-        "initialOdo": r.get::<i64, _>("initialOdo"),
-        "manualOdo": r.get::<Option<i64>, _>("manualOdo"),
-        "purchaseDate": r.get::<Option<String>, _>("purchaseDate"),
-        "purchasePrice": r.get::<Option<f64>, _>("purchasePrice"),
-        "normalizedPurchasePrice": r.get::<Option<f64>, _>("normalizedPurchasePrice"),
-        "currencyCode": r.get::<Option<String>, _>("currencyCode"),
-        "fuelTankSize": r.get::<Option<f64>, _>("fuelTankSize"),
-    })
+fn format_image_url(image: Option<String>) -> Option<String> {
+    image.map(|i| format!("/images/{}", i.replace("/data/images/", "").replace("data/images/", "")))
 }
-
-const MOTORCYCLE_SELECT: &str = r#"
-    SELECT id, make, model, modelYear, userId, vin, engineNumber, vehicleNr,
-           numberPlate, image, isVeteran, isArchived, firstRegistration, initialOdo,
-           manualOdo, purchaseDate, purchasePrice, normalizedPurchasePrice,
-           currencyCode, fuelTankSize
-    FROM motorcycles
-"#;
 
 pub async fn list_motorcycles(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
     tracing::debug!("Listing motorcycles for user: {} (ID: {})", user.username, user.id);
-    let rows = sqlx::query(&format!("{} WHERE userId = ? ORDER BY id ASC", MOTORCYCLE_SELECT))
-        .bind(user.id)
-        .fetch_all(&pool)
-        .await?;
+    
+    let motorcycles = sqlx::query_as::<_, MotorcycleWithStats>(r#"
+        SELECT 
+            m.*,
+            (SELECT COUNT(*) FROM issues i WHERE i.motorcycleId = m.id AND i.status != 'done') as openIssues,
+            (SELECT COUNT(*) FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id) as maintenanceCount,
+            (SELECT MAX(odo) FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id) as latestOdo
+        FROM motorcycles m
+        WHERE m.userId = ?
+        ORDER BY m.id ASC
+    "#)
+    .bind(user.id)
+    .fetch_all(&pool)
+    .await?;
 
-    let mut result = Vec::new();
-    for r in &rows {
-        let moto_id: i64 = r.get("id");
-
-        let open_issues: i64 = sqlx::query(
-            "SELECT COUNT(*) as cnt FROM issues WHERE motorcycleId = ? AND status != 'done'",
-        )
-        .bind(moto_id)
-        .fetch_one(&pool)
-        .await?
-        .get("cnt");
-
-        let maintenance_count: i64 =
-            sqlx::query("SELECT COUNT(*) as cnt FROM maintenanceRecords WHERE motorcycleId = ?")
-                .bind(moto_id)
-                .fetch_one(&pool)
-                .await?
-                .get("cnt");
-
-        let latest_odo: Option<i64> =
-            sqlx::query("SELECT MAX(odo) as max_odo FROM maintenanceRecords WHERE motorcycleId = ?")
-                .bind(moto_id)
-                .fetch_one(&pool)
-                .await?
-                .get("max_odo");
-
-        let mut moto = row_to_motorcycle(r);
-        if let Some(obj) = moto.as_object_mut() {
-            obj.insert("openIssues".to_string(), json!(open_issues));
-            obj.insert("maintenanceCount".to_string(), json!(maintenance_count));
-            obj.insert("latestOdo".to_string(), json!(latest_odo));
-        }
-        result.push(moto);
-    }
+    let result: Vec<Value> = motorcycles.into_iter().map(|mut m| {
+        m.image = format_image_url(m.image);
+        serde_json::to_value(m).unwrap_or(json!({}))
+    }).collect();
 
     Ok(Json(json!({ "motorcycles": result })))
 }
@@ -211,15 +162,17 @@ pub async fn create_motorcycle(
     .await?
     .last_insert_rowid();
 
-    let row = sqlx::query(&format!("{} WHERE id = ?", MOTORCYCLE_SELECT))
+    let mut motorcycle = sqlx::query_as::<_, Motorcycle>("SELECT * FROM motorcycles WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
         .await?;
 
+    motorcycle.image = format_image_url(motorcycle.image);
+
     tracing::info!("Motorcycle created: {} {} (ID: {})", make, model, id);
     Ok((
         StatusCode::CREATED,
-        Json(json!({ "motorcycle": row_to_motorcycle(&row) })),
+        Json(json!({ "motorcycle": motorcycle })),
     ))
 }
 
@@ -229,115 +182,52 @@ pub async fn get_motorcycle(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     tracing::debug!("Fetching motorcycle ID: {} for user: {}", id, user.id);
-    let row = sqlx::query(&format!(
-        "{} WHERE id = ? AND userId = ?",
-        MOTORCYCLE_SELECT
-    ))
+    let mut motorcycle = sqlx::query_as::<_, Motorcycle>(
+        "SELECT * FROM motorcycles WHERE id = ? AND userId = ?"
+    )
     .bind(id)
     .bind(user.id)
     .fetch_optional(&pool)
     .await?
     .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
 
-    let issues = sqlx::query(
-        "SELECT id, motorcycleId, odo, description, priority, status, date FROM issues WHERE motorcycleId = ? ORDER BY date DESC",
+    motorcycle.image = format_image_url(motorcycle.image);
+
+    let issues = sqlx::query_as::<_, Issue>(
+        "SELECT * FROM issues WHERE motorcycleId = ? ORDER BY date DESC",
     )
     .bind(id)
     .fetch_all(&pool)
     .await?;
 
-    let issues_json: Vec<Value> = issues
-        .iter()
-        .map(|r| {
-            json!({
-                "id": r.get::<i64, _>("id"),
-                "motorcycleId": r.get::<i64, _>("motorcycleId"),
-                "odo": r.get::<i64, _>("odo"),
-                "description": r.get::<Option<String>, _>("description"),
-                "priority": r.get::<String, _>("priority"),
-                "status": r.get::<String, _>("status"),
-                "date": r.get::<Option<String>, _>("date"),
-            })
-        })
-        .collect();
-
-    let maintenance = sqlx::query(
-        r#"SELECT id, date, odo, motorcycleId, cost, normalizedCost, currency, description, type,
-           brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity,
-           oilType, inspectionLocation, locationId, fuelType, fuelAmount, pricePerUnit,
-           latitude, longitude, locationName, fuelConsumption, tripDistance
-           FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC"#,
+    let maintenance = sqlx::query_as::<_, MaintenanceRecord>(
+        "SELECT * FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
     )
     .bind(id)
     .fetch_all(&pool)
     .await?;
 
-    let maintenance_json: Vec<Value> = maintenance.iter().map(maintenance_row_to_value).collect();
-
-    let previous_owners = sqlx::query(
-        r#"SELECT id, motorcycleId, name, surname, purchaseDate, address, city, postcode,
-           country, phoneNumber, email, comments, createdAt, updatedAt
-           FROM previousOwners WHERE motorcycleId = ? ORDER BY purchaseDate DESC"#,
+    let previous_owners = sqlx::query_as::<_, PreviousOwner>(
+        "SELECT * FROM previousOwners WHERE motorcycleId = ? ORDER BY purchaseDate DESC",
     )
     .bind(id)
     .fetch_all(&pool)
     .await?;
 
-    let owners_json: Vec<Value> = previous_owners
-        .iter()
-        .map(|r| {
-            json!({
-                "id": r.get::<i64, _>("id"),
-                "motorcycleId": r.get::<i64, _>("motorcycleId"),
-                "name": r.get::<String, _>("name"),
-                "surname": r.get::<String, _>("surname"),
-                "purchaseDate": r.get::<String, _>("purchaseDate"),
-                "address": r.get::<Option<String>, _>("address"),
-                "city": r.get::<Option<String>, _>("city"),
-                "postcode": r.get::<Option<String>, _>("postcode"),
-                "country": r.get::<Option<String>, _>("country"),
-                "phoneNumber": r.get::<Option<String>, _>("phoneNumber"),
-                "email": r.get::<Option<String>, _>("email"),
-                "comments": r.get::<Option<String>, _>("comments"),
-                "createdAt": r.get::<String, _>("createdAt"),
-                "updatedAt": r.get::<String, _>("updatedAt"),
-            })
-        })
-        .collect();
-
-    let torque_specs = sqlx::query(
-        "SELECT id, motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt \
-         FROM torqueSpecs WHERE motorcycleId = ? ORDER BY category ASC, name ASC",
+    let torque_specs = sqlx::query_as::<_, TorqueSpec>(
+        "SELECT * FROM torqueSpecs WHERE motorcycleId = ? ORDER BY category ASC, name ASC",
     )
     .bind(id)
     .fetch_all(&pool)
     .await?;
-
-    let specs_json: Vec<Value> = torque_specs
-        .iter()
-        .map(|r| {
-            json!({
-                "id": r.get::<i64, _>("id"),
-                "motorcycleId": r.get::<i64, _>("motorcycleId"),
-                "category": r.get::<String, _>("category"),
-                "name": r.get::<String, _>("name"),
-                "torque": r.get::<f64, _>("torque"),
-                "torqueEnd": r.get::<Option<f64>, _>("torqueEnd"),
-                "variation": r.get::<Option<f64>, _>("variation"),
-                "toolSize": r.get::<Option<String>, _>("toolSize"),
-                "description": r.get::<Option<String>, _>("description"),
-                "createdAt": r.get::<String, _>("createdAt"),
-            })
-        })
-        .collect();
 
     Ok(Json(json!({
-        "motorcycle": row_to_motorcycle(&row),
-        "issues": issues_json,
-        "maintenanceRecords": maintenance_json,
-        "previousOwners": owners_json,
-        "torqueSpecs": specs_json,
-        "torqueSpecifications": specs_json,
+        "motorcycle": motorcycle,
+        "issues": issues,
+        "maintenanceRecords": maintenance,
+        "previousOwners": previous_owners,
+        "torqueSpecs": torque_specs,
+        "torqueSpecifications": torque_specs,
     })))
 }
 
@@ -350,10 +240,9 @@ pub async fn update_motorcycle(
 ) -> AppResult<Json<Value>> {
     tracing::info!("Updating motorcycle ID: {} for user: {}", id, user.id);
     // Verify ownership
-    let existing = sqlx::query(&format!(
-        "{} WHERE id = ? AND userId = ?",
-        MOTORCYCLE_SELECT
-    ))
+    let existing = sqlx::query_as::<_, Motorcycle>(
+        "SELECT * FROM motorcycles WHERE id = ? AND userId = ?"
+    )
     .bind(id)
     .bind(user.id)
     .fetch_optional(&pool)
@@ -361,7 +250,7 @@ pub async fn update_motorcycle(
     .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
 
     let mut fields = std::collections::HashMap::<String, String>::new();
-    let mut image_filename: Option<String> = existing.get("image");
+    let mut image_filename: Option<String> = existing.image.clone();
 
     while let Some(field) = multipart
         .next_field()
@@ -390,68 +279,68 @@ pub async fn update_motorcycle(
     let make: String = fields
         .get("make")
         .cloned()
-        .unwrap_or_else(|| existing.get("make"));
+        .unwrap_or(existing.make);
     let model: String = fields
         .get("model")
         .cloned()
-        .unwrap_or_else(|| existing.get("model"));
+        .unwrap_or(existing.model);
     let model_year: Option<String> = fields
         .get("fabricationDate")
         .cloned()
-        .or_else(|| existing.get("modelYear"));
+        .or(existing.model_year);
     let is_veteran: bool = fields
         .get("isVeteran")
         .map(|v| v == "true")
-        .unwrap_or_else(|| existing.get("isVeteran"));
+        .unwrap_or(existing.is_veteran);
     let is_archived: bool = fields
         .get("isArchived")
         .map(|v| v == "true")
-        .unwrap_or_else(|| existing.get("isArchived"));
+        .unwrap_or(existing.is_archived);
     let initial_odo: i64 = fields
         .get("initialOdo")
         .and_then(|v| v.parse().ok())
-        .unwrap_or_else(|| existing.get("initialOdo"));
+        .unwrap_or(existing.initial_odo);
     let purchase_price: Option<f64> = fields
         .get("purchasePrice")
         .and_then(|v| v.parse().ok())
-        .or_else(|| existing.get("purchasePrice"));
+        .or(existing.purchase_price);
     let normalized_purchase_price: Option<f64> = fields
         .get("normalizedPurchasePrice")
         .and_then(|v| v.parse().ok())
-        .or_else(|| existing.get("normalizedPurchasePrice"));
+        .or(existing.normalized_purchase_price);
     let fuel_tank_size: Option<f64> = fields
         .get("fuelTankSize")
         .and_then(|v| v.parse().ok())
-        .or_else(|| existing.get("fuelTankSize"));
+        .or(existing.fuel_tank_size);
     let manual_odo: Option<i64> = fields
         .get("manualOdo")
         .and_then(|v| v.parse().ok())
-        .or_else(|| existing.get("manualOdo"));
-    let vin: Option<String> = fields.get("vin").cloned().or_else(|| existing.get("vin"));
+        .or(existing.manual_odo);
+    let vin: Option<String> = fields.get("vin").cloned().or(existing.vin);
     let engine_number: Option<String> = fields
         .get("engineNumber")
         .cloned()
-        .or_else(|| existing.get("engineNumber"));
+        .or(existing.engine_number);
     let vehicle_nr: Option<String> = fields
         .get("vehicleNr")
         .cloned()
-        .or_else(|| existing.get("vehicleNr"));
+        .or(existing.vehicle_nr);
     let number_plate: Option<String> = fields
         .get("numberPlate")
         .cloned()
-        .or_else(|| existing.get("numberPlate"));
+        .or(existing.number_plate);
     let first_registration: Option<String> = fields
         .get("firstRegistration")
         .cloned()
-        .or_else(|| existing.get("firstRegistration"));
+        .or(existing.first_registration);
     let purchase_date: Option<String> = fields
         .get("purchaseDate")
         .cloned()
-        .or_else(|| existing.get("purchaseDate"));
+        .or(existing.purchase_date);
     let currency_code: Option<String> = fields
         .get("currencyCode")
         .cloned()
-        .or_else(|| existing.get("currencyCode"));
+        .or(existing.currency_code);
 
     sqlx::query(
         "UPDATE motorcycles SET
@@ -484,13 +373,15 @@ pub async fn update_motorcycle(
     .execute(&pool)
     .await?;
 
-    let row = sqlx::query(&format!("{} WHERE id = ?", MOTORCYCLE_SELECT))
+    let mut motorcycle = sqlx::query_as::<_, Motorcycle>("SELECT * FROM motorcycles WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
         .await?;
 
+    motorcycle.image = format_image_url(motorcycle.image);
+
     tracing::info!("Motorcycle updated ID: {}", id);
-    Ok(Json(json!({ "motorcycle": row_to_motorcycle(&row) })))
+    Ok(Json(json!({ "motorcycle": motorcycle })))
 }
 
 pub async fn delete_motorcycle(
@@ -502,16 +393,14 @@ pub async fn delete_motorcycle(
     tracing::info!("Deleting motorcycle ID: {} for user: {}", id, user.id);
     
     // Get image path before deleting
-    let row = sqlx::query("SELECT image FROM motorcycles WHERE id = ? AND userId = ?")
-        .bind(id)
-        .bind(user.id)
-        .fetch_optional(&pool)
-        .await?;
-
-    let image_path: Option<String> = match row {
-        Some(r) => r.get("image"),
-        None => return Err(AppError::NotFound("Motorcycle not found".to_string())),
-    };
+    let motorcycle = sqlx::query_as::<_, Motorcycle>(
+        "SELECT * FROM motorcycles WHERE id = ? AND userId = ?"
+    )
+    .bind(id)
+    .bind(user.id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
 
     let result = sqlx::query("DELETE FROM motorcycles WHERE id = ? AND userId = ?")
         .bind(id)
@@ -520,12 +409,11 @@ pub async fn delete_motorcycle(
         .await?;
 
     if result.rows_affected() == 0 {
-        tracing::warn!("Delete failed: motorcycle ID: {} not found or not owned by user: {}", id, user.id);
         return Err(AppError::NotFound("Motorcycle not found".to_string()));
     }
 
     // Delete image and resized cache
-    if let Some(path_str) = image_path {
+    if let Some(path_str) = motorcycle.image {
         let filename = path_str
             .replace("/data/images/", "")
             .replace("data/images/", "");
@@ -548,39 +436,6 @@ pub async fn delete_motorcycle(
 
     tracing::info!("Motorcycle deleted ID: {}", id);
     Ok(Json(json!({ "message": "Motorcycle deleted" })))
-}
-
-pub fn maintenance_row_to_value(r: &sqlx::sqlite::SqliteRow) -> Value {
-    json!({
-        "id": r.get::<i64, _>("id"),
-        "date": r.get::<String, _>("date"),
-        "odo": r.get::<i64, _>("odo"),
-        "motorcycleId": r.get::<i64, _>("motorcycleId"),
-        "cost": r.get::<Option<f64>, _>("cost"),
-        "normalizedCost": r.get::<Option<f64>, _>("normalizedCost"),
-        "currency": r.get::<Option<String>, _>("currency"),
-        "description": r.get::<Option<String>, _>("description"),
-        "type": r.get::<String, _>("type"),
-        "brand": r.get::<Option<String>, _>("brand"),
-        "model": r.get::<Option<String>, _>("model"),
-        "tirePosition": r.get::<Option<String>, _>("tirePosition"),
-        "tireSize": r.get::<Option<String>, _>("tireSize"),
-        "dotCode": r.get::<Option<String>, _>("dotCode"),
-        "batteryType": r.get::<Option<String>, _>("batteryType"),
-        "fluidType": r.get::<Option<String>, _>("fluidType"),
-        "viscosity": r.get::<Option<String>, _>("viscosity"),
-        "oilType": r.get::<Option<String>, _>("oilType"),
-        "inspectionLocation": r.get::<Option<String>, _>("inspectionLocation"),
-        "locationId": r.get::<Option<i64>, _>("locationId"),
-        "fuelType": r.get::<Option<String>, _>("fuelType"),
-        "fuelAmount": r.get::<Option<f64>, _>("fuelAmount"),
-        "pricePerUnit": r.get::<Option<f64>, _>("pricePerUnit"),
-        "latitude": r.get::<Option<f64>, _>("latitude"),
-        "longitude": r.get::<Option<f64>, _>("longitude"),
-        "locationName": r.get::<Option<String>, _>("locationName"),
-        "fuelConsumption": r.get::<Option<f64>, _>("fuelConsumption"),
-        "tripDistance": r.get::<Option<f64>, _>("tripDistance"),
-    })
 }
 
 /// Helper: verify motorcycle belongs to user
