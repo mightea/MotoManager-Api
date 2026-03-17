@@ -27,6 +27,8 @@ pub async fn register_options(
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
     tracing::info!("Passkey register options requested for user: {} (ID: {})", user.username, user.id);
+    
+    // Webauthn needs a Uuid for the user. We derive it from the user ID.
     let user_unique_id = Uuid::parse_str(&format!("{:032x}", user.id)).unwrap_or_else(|_| Uuid::new_v4());
     
     let auths = sqlx::query_as::<_, Authenticator>(
@@ -36,8 +38,9 @@ pub async fn register_options(
     .fetch_all(&pool)
     .await?;
 
-    let exclude_credentials = auths.iter().map(|a| {
-        CredentialID::from(a.public_key.clone())
+    let exclude_credentials = auths.iter().filter_map(|a| {
+        let passkey: Result<Passkey, _> = serde_json::from_slice(&a.public_key);
+        passkey.ok().map(|pk| pk.cred_id().clone())
     }).collect::<Vec<_>>();
 
     let (options, challenge) = webauthn.start_passkey_registration(
@@ -64,8 +67,7 @@ pub async fn register_options(
         "options": options,
         "challengeId": challenge_id,
     });
-    tracing::info!("Passkey register options response body: {}", serde_json::to_string(&response_json).unwrap_or_default());
-
+    
     Ok(Json(response_json))
 }
 
@@ -83,6 +85,7 @@ pub async fn register_verify(
     Json(body): Json<RegisterVerifyRequest>,
 ) -> AppResult<Json<Value>> {
     tracing::info!("Passkey register verify requested for user: {} (ID: {})", user.username, user.id);
+    
     let challenge_row = sqlx::query_as::<_, Challenge>(
         "SELECT * FROM challenges WHERE id = ? AND userId = ?"
     )
@@ -98,13 +101,16 @@ pub async fn register_verify(
     let passkey = webauthn.finish_passkey_registration(&body.response, &challenge)
         .map_err(|e| AppError::BadRequest(format!("Verification failed: {}", e)))?;
 
-    let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, passkey.cred_id().as_slice());
-    let public_key = passkey.cred_id().as_slice().to_vec();
+    let cred_id = passkey.cred_id();
+    let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, cred_id.as_slice());
+    
+    // Serialize the whole Passkey object to store it
+    let passkey_json = serde_json::to_vec(&passkey).map_err(|e| AppError::Internal(e.to_string()))?;
     
     sqlx::query!(
         "INSERT INTO authenticators (id, userId, publicKey, counter, deviceType, backedUp, transports) 
          VALUES (?, ?, ?, ?, ?, ?, ?)",
-        auth_id, user.id, public_key, 0i64, "passkey", true, None::<String>
+        auth_id, user.id, passkey_json, 0i64, "passkey", true, None::<String>
     )
     .execute(&pool)
     .await?;
@@ -116,12 +122,31 @@ pub async fn register_verify(
 }
 
 pub async fn login_options(
-    State(_pool): State<SqlitePool>,
+    State(pool): State<SqlitePool>,
     State(webauthn): State<Arc<Webauthn>>,
-    Query(_query): Query<PasskeyOptionsQuery>,
+    Query(query): Query<PasskeyOptionsQuery>,
 ) -> AppResult<Json<Value>> {
-    tracing::info!("Passkey login options requested");
-    let (options, challenge) = webauthn.start_passkey_authentication(&[])
+    tracing::info!("Passkey login options requested for username: {:?}", query.username);
+    
+    let mut allow_credentials = Vec::new();
+    
+    if let Some(username) = query.username {
+        // If username provided, find their existing keys to populate allowCredentials
+        let auths = sqlx::query_as::<_, Authenticator>(
+            "SELECT a.* FROM authenticators a JOIN users u ON u.id = a.userId WHERE u.username = ?"
+        )
+        .bind(username)
+        .fetch_all(&pool)
+        .await?;
+        
+        for a in auths {
+            if let Ok(passkey) = serde_json::from_slice::<Passkey>(&a.public_key) {
+                allow_credentials.push(passkey);
+            }
+        }
+    }
+
+    let (options, challenge) = webauthn.start_passkey_authentication(&allow_credentials)
         .map_err(|e| AppError::Internal(format!("WebAuthn error: {}", e)))?;
 
     let challenge_json = serde_json::to_string(&challenge).map_err(|e| AppError::Internal(e.to_string()))?;
@@ -132,7 +157,7 @@ pub async fn login_options(
         "INSERT INTO challenges (id, challenge, expiresAt) VALUES (?, ?, ?)",
         challenge_id, challenge_json, expires_at
     )
-    .execute(&_pool)
+    .execute(&pool)
     .await?;
 
     Ok(Json(json!({
@@ -154,6 +179,7 @@ pub async fn login_verify(
     Json(body): Json<LoginVerifyRequest>,
 ) -> AppResult<Json<Value>> {
     tracing::info!("Passkey login verify requested");
+    
     let challenge_row = sqlx::query_as::<_, Challenge>(
         "SELECT * FROM challenges WHERE id = ?"
     )
@@ -165,22 +191,34 @@ pub async fn login_verify(
     let challenge: PasskeyAuthentication = serde_json::from_str(&challenge_row.challenge)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
+    // To finish authentication, we need the stored Passkey object for the credential being used.
+    let cred_id_bytes = body.response.raw_id.as_slice();
+    let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, cred_id_bytes);
+
+    let auth_row = sqlx::query_as::<_, Authenticator>(
+        "SELECT * FROM authenticators WHERE id = ?"
+    )
+    .bind(&auth_id)
+    .fetch_optional(&pool)
+    .await?
+    .ok_or_else(|| AppError::Unauthorized)?;
+
+    let _passkey: Passkey = serde_json::from_slice(&auth_row.public_key)
+        .map_err(|e| AppError::Internal(format!("Failed to deserialize passkey: {}", e)))?;
+
     let auth_result = webauthn.finish_passkey_authentication(&body.response, &challenge)
         .map_err(|e| AppError::BadRequest(format!("Verification failed: {}", e)))?;
 
-    let cred_id = auth_result.cred_id();
-    let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, cred_id.as_slice());
-
-    let auth_row = sqlx::query!(
-        "SELECT userId FROM authenticators WHERE id = ?",
-        auth_id
+    // Update the counter in the database
+    let new_counter = auth_result.counter();
+    sqlx::query!(
+        "UPDATE authenticators SET counter = ? WHERE id = ?",
+        new_counter, auth_id
     )
-    .fetch_optional(&pool)
+    .execute(&pool)
     .await?;
 
-    let auth_data = auth_row.ok_or_else(|| AppError::Unauthorized)?;
-    let user_id = auth_data.userId;
-
+    let user_id = auth_row.user_id;
     let token = session::create_session(&pool, user_id).await?;
 
     sqlx::query!("DELETE FROM challenges WHERE id = ?", body.challenge_id).execute(&pool).await?;
