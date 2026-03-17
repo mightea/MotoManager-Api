@@ -28,7 +28,6 @@ pub async fn register_options(
 ) -> AppResult<Json<Value>> {
     tracing::info!("Passkey register options requested for user: {} (ID: {})", user.username, user.id);
     
-    // Webauthn needs a Uuid for the user. We derive it from the user ID.
     let user_unique_id = Uuid::parse_str(&format!("{:032x}", user.id)).unwrap_or_else(|_| Uuid::new_v4());
     
     let auths = sqlx::query_as::<_, Authenticator>(
@@ -63,12 +62,10 @@ pub async fn register_options(
     .execute(&pool)
     .await?;
 
-    let response_json = json!({
+    Ok(Json(json!({
         "options": options,
         "challengeId": challenge_id,
-    });
-    
-    Ok(Json(response_json))
+    })))
 }
 
 #[derive(Debug, Deserialize)]
@@ -106,8 +103,6 @@ pub async fn register_verify(
 
     let cred_id = passkey.cred_id();
     let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, cred_id.as_slice());
-    
-    // Serialize the whole Passkey object to store it
     let passkey_json = serde_json::to_vec(&passkey).map_err(|e| AppError::Internal(e.to_string()))?;
     
     sqlx::query!(
@@ -134,7 +129,6 @@ pub async fn login_options(
     let mut allow_credentials = Vec::new();
     
     if let Some(username) = query.username {
-        // If username provided, find their existing keys to populate allowCredentials
         let auths = sqlx::query_as::<_, Authenticator>(
             "SELECT a.* FROM authenticators a JOIN users u ON u.id = a.userId WHERE u.username = ?"
         )
@@ -194,8 +188,6 @@ pub async fn login_verify(
     let challenge: PasskeyAuthentication = serde_json::from_str(&challenge_row.challenge)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // IMPORTANT: In webauthn-rs 0.5, we must find the Passkey matching the one in the response.
-    // The response.id is base64url encoded.
     let cred_id_bytes = base64::Engine::decode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
         &body.response.id
@@ -220,14 +212,12 @@ pub async fn login_verify(
             AppError::Internal(format!("Failed to deserialize passkey: {}", e))
         })?;
 
-    // Verification in 0.5.x
     let auth_result = webauthn.finish_passkey_authentication(&body.response, &challenge)
         .map_err(|e| {
             tracing::error!("Passkey login verification failed: {}", e);
             AppError::BadRequest(format!("Verification failed: {}", e))
         })?;
 
-    // Update the counter in the database
     let new_counter = auth_result.counter();
     sqlx::query!(
         "UPDATE authenticators SET counter = ? WHERE id = ?",
