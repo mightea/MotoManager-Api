@@ -99,7 +99,10 @@ pub async fn register_verify(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     let passkey = webauthn.finish_passkey_registration(&body.response, &challenge)
-        .map_err(|e| AppError::BadRequest(format!("Verification failed: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("Passkey registration verification failed: {}", e);
+            AppError::BadRequest(format!("Verification failed: {}", e))
+        })?;
 
     let cred_id = passkey.cred_id();
     let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, cred_id.as_slice());
@@ -191,9 +194,14 @@ pub async fn login_verify(
     let challenge: PasskeyAuthentication = serde_json::from_str(&challenge_row.challenge)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // To finish authentication, we need the stored Passkey object for the credential being used.
-    let cred_id_bytes = body.response.raw_id.as_slice();
-    let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, cred_id_bytes);
+    // IMPORTANT: In webauthn-rs 0.5, we must find the Passkey matching the one in the response.
+    // The response.id is base64url encoded.
+    let cred_id_bytes = base64::Engine::decode(
+        &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+        &body.response.id
+    ).map_err(|e| AppError::BadRequest(format!("Invalid credential ID encoding: {}", e)))?;
+    
+    let auth_id = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &cred_id_bytes);
 
     let auth_row = sqlx::query_as::<_, Authenticator>(
         "SELECT * FROM authenticators WHERE id = ?"
@@ -201,13 +209,23 @@ pub async fn login_verify(
     .bind(&auth_id)
     .fetch_optional(&pool)
     .await?
-    .ok_or_else(|| AppError::Unauthorized)?;
+    .ok_or_else(|| {
+        tracing::error!("No authenticator found for ID: {}", auth_id);
+        AppError::Unauthorized
+    })?;
 
     let _passkey: Passkey = serde_json::from_slice(&auth_row.public_key)
-        .map_err(|e| AppError::Internal(format!("Failed to deserialize passkey: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("Failed to deserialize passkey from DB: {}", e);
+            AppError::Internal(format!("Failed to deserialize passkey: {}", e))
+        })?;
 
+    // Verification in 0.5.x
     let auth_result = webauthn.finish_passkey_authentication(&body.response, &challenge)
-        .map_err(|e| AppError::BadRequest(format!("Verification failed: {}", e)))?;
+        .map_err(|e| {
+            tracing::error!("Passkey login verification failed: {}", e);
+            AppError::BadRequest(format!("Verification failed: {}", e))
+        })?;
 
     // Update the counter in the database
     let new_counter = auth_result.counter();
