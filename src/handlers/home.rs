@@ -202,56 +202,6 @@ pub async fn get_home_data(
             } else {
                 None
             }
-        } else if let Some(reg_date_str) = &moto.first_registration {
-             if let Some(reg_date) = parse_date(reg_date_str) {
-                let interval = if moto.is_veteran { 6 } else { 4 };
-                let next_date = NaiveDate::from_ymd_opt(reg_date.year() + interval, reg_date.month(), reg_date.day());
-                
-                // If it's already past the first interval and we have no record, we estimate the next "theoretical" date
-                // although it's better to show it's overdue or missing.
-                if let Some(d) = next_date {
-                    let mut final_date = d;
-                    if final_date < today && !moto.is_veteran {
-                        // 4 -> 7 -> 9 -> 11...
-                        if let Some(d7) = NaiveDate::from_ymd_opt(reg_date.year() + 7, reg_date.month(), reg_date.day()) {
-                            if d7 < today {
-                                // Every 2 years after year 7
-                                let mut current_d = d7;
-                                while current_d < today {
-                                    if let Some(next_d) = NaiveDate::from_ymd_opt(current_d.year() + 2, current_d.month(), current_d.day()) {
-                                        current_d = next_d;
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                final_date = current_d;
-                            } else {
-                                final_date = d7;
-                            }
-                        }
-                    } else if final_date < today && moto.is_veteran {
-                        let mut current_d = final_date;
-                        while current_d < today {
-                            if let Some(next_d) = NaiveDate::from_ymd_opt(current_d.year() + 6, current_d.month(), current_d.day()) {
-                                current_d = next_d;
-                            } else {
-                                break;
-                            }
-                        }
-                        final_date = current_d;
-                    }
-                    
-                    Some(json!({
-                        "dueDateISO": final_date.to_string(),
-                        "isOverdue": final_date < today,
-                        "relativeLabel": if final_date == today { "Heute fällig".to_string() } else if final_date < today { "Überfällig".to_string() } else { "Anstehend".to_string() }
-                    }))
-                } else {
-                    None
-                }
-             } else {
-                 None
-             }
         } else {
             None
         };

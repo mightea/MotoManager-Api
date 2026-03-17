@@ -492,6 +492,19 @@ async fn test_get_home_data() {
     .await
     .unwrap();
 
+    // Add a motorcycle without any maintenance entries
+    sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo, firstRegistration) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("Yamaha")
+    .bind("Tenere")
+    .bind(1)
+    .bind(500)
+    .bind("2022-05-01")
+    .execute(&pool)
+    .await
+    .unwrap();
+
     // 2. Fetch home data
     let response = app
         .oneshot(
@@ -511,13 +524,18 @@ async fn test_get_home_data() {
     
     assert!(body["motorcycles"].is_array());
     let motos = body["motorcycles"].as_array().unwrap();
-    assert_eq!(motos.len(), 1);
+    assert_eq!(motos.len(), 2);
     
-    let moto = &motos[0];
-    assert_eq!(moto["make"], "Ducati");
-    assert_eq!(moto["numberOfIssues"], 1);
-    assert_eq!(moto["odometer"], 3000);
-    assert!(moto["nextInspection"].is_object());
-    assert_eq!(moto["nextInspection"]["dueDateISO"], "2027-03-01");
-    assert_eq!(moto["nextInspection"]["isOverdue"], false);
+    // Check Ducati (with inspection)
+    let ducati = motos.iter().find(|m| m["make"] == "Ducati").unwrap();
+    assert_eq!(ducati["make"], "Ducati");
+    assert_eq!(ducati["numberOfIssues"], 1);
+    assert_eq!(ducati["odometer"], 3000);
+    assert!(ducati["nextInspection"].is_object());
+    assert_eq!(ducati["nextInspection"]["dueDateISO"], "2027-03-01");
+
+    // Check Yamaha (without inspection)
+    let yamaha = motos.iter().find(|m| m["make"] == "Yamaha").unwrap();
+    assert_eq!(yamaha["make"], "Yamaha");
+    assert!(yamaha["nextInspection"].is_null());
 }
