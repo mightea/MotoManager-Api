@@ -26,6 +26,7 @@ pub async fn register_options(
     State(webauthn): State<Arc<Webauthn>>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Passkey register options requested for user: {} (ID: {})", user.username, user.id);
     let user_unique_id = Uuid::parse_str(&format!("{:032x}", user.id)).unwrap_or_else(|_| Uuid::new_v4());
     
     let auths = sqlx::query_as::<_, Authenticator>(
@@ -76,6 +77,7 @@ pub async fn register_verify(
     AuthUser(user): AuthUser,
     Json(body): Json<RegisterVerifyRequest>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Passkey register verify requested for user: {} (ID: {})", user.username, user.id);
     let challenge_row = sqlx::query_as::<_, Challenge>(
         "SELECT * FROM challenges WHERE id = ? AND userId = ?"
     )
@@ -104,6 +106,7 @@ pub async fn register_verify(
 
     sqlx::query!("DELETE FROM challenges WHERE id = ?", body.challenge_id).execute(&pool).await?;
 
+    tracing::info!("Passkey registered successfully for user: {} (ID: {})", user.username, user.id);
     Ok(Json(json!({ "verified": true })))
 }
 
@@ -112,6 +115,7 @@ pub async fn login_options(
     State(webauthn): State<Arc<Webauthn>>,
     Query(_query): Query<PasskeyOptionsQuery>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Passkey login options requested");
     let (options, challenge) = webauthn.start_passkey_authentication(&[])
         .map_err(|e| AppError::Internal(format!("WebAuthn error: {}", e)))?;
 
@@ -144,6 +148,7 @@ pub async fn login_verify(
     State(webauthn): State<Arc<Webauthn>>,
     Json(body): Json<LoginVerifyRequest>,
 ) -> AppResult<Json<Value>> {
+    tracing::info!("Passkey login verify requested");
     let challenge_row = sqlx::query_as::<_, Challenge>(
         "SELECT * FROM challenges WHERE id = ?"
     )
@@ -175,6 +180,7 @@ pub async fn login_verify(
 
     sqlx::query!("DELETE FROM challenges WHERE id = ?", body.challenge_id).execute(&pool).await?;
 
+    tracing::info!("Passkey login successful for user ID: {}", user_id);
     Ok(Json(json!({
         "verified": true,
         "token": token,
