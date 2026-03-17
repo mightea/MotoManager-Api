@@ -51,6 +51,8 @@ pub async fn register_options(
     let expires_at = (Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
     let challenge_id = Uuid::new_v4().to_string();
 
+    tracing::info!("Passkey register options generated for user {}: challengeId={}", user.username, challenge_id);
+
     sqlx::query!(
         "INSERT INTO challenges (id, userId, challenge, expiresAt) VALUES (?, ?, ?, ?)",
         challenge_id, user.id, challenge_json, expires_at
@@ -58,10 +60,13 @@ pub async fn register_options(
     .execute(&pool)
     .await?;
 
-    Ok(Json(json!({
+    let response_json = json!({
         "options": options,
         "challengeId": challenge_id,
-    })))
+    });
+    tracing::info!("Passkey register options response body: {}", serde_json::to_string(&response_json).unwrap_or_default());
+
+    Ok(Json(response_json))
 }
 
 #[derive(Debug, Deserialize)]
