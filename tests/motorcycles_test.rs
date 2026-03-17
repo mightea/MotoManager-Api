@@ -539,3 +539,56 @@ async fn test_get_home_data() {
     assert_eq!(yamaha["make"], "Yamaha");
     assert!(yamaha["nextInspection"].is_null());
 }
+
+#[tokio::test]
+async fn test_home_data_location_logic() {
+    let (app, pool, token) = setup_test_app().await;
+
+    // 1. Seed base data
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("BMW")
+    .bind("R80GS")
+    .bind(1)
+    .bind(50000)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let loc1_id = sqlx::query("INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)")
+        .bind("Location 1").bind("CH").bind(1).execute(&pool).await.unwrap().last_insert_rowid();
+    let loc2_id = sqlx::query("INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)")
+        .bind("Location 2").bind("DE").bind(1).execute(&pool).await.unwrap().last_insert_rowid();
+
+    // SCENARIO 1: Only maintenance record has location
+    sqlx::query("INSERT INTO maintenanceRecords (motorcycleId, date, odo, type, locationId) VALUES (?, ?, ?, ?, ?)")
+        .bind(moto_id).bind("2025-01-01").bind(51000).bind("oil_change").bind(loc1_id).execute(&pool).await.unwrap();
+
+    let response = app.clone().oneshot(Request::builder().uri("/api/home").header(header::AUTHORIZATION, format!("Bearer {}", token)).body(Body::empty()).unwrap()).await.unwrap();
+    let body: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let moto = &body["motorcycles"][0];
+    assert_eq!(moto["currentLocationId"], loc1_id);
+    assert_eq!(moto["currentLocationName"], "Location 1");
+
+    // SCENARIO 2: Add a newer location record
+    sqlx::query("INSERT INTO locationRecords (motorcycleId, locationId, date, odometer) VALUES (?, ?, ?, ?)")
+        .bind(moto_id).bind(loc2_id).bind("2025-02-01").bind(52000).execute(&pool).await.unwrap();
+
+    let response = app.clone().oneshot(Request::builder().uri("/api/home").header(header::AUTHORIZATION, format!("Bearer {}", token)).body(Body::empty()).unwrap()).await.unwrap();
+    let body: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let moto = &body["motorcycles"][0];
+    assert_eq!(moto["currentLocationId"], loc2_id);
+    assert_eq!(moto["currentLocationName"], "Location 2");
+
+    // SCENARIO 3: Add an even newer maintenance record with a different location
+    sqlx::query("INSERT INTO maintenanceRecords (motorcycleId, date, odo, type, locationId) VALUES (?, ?, ?, ?, ?)")
+        .bind(moto_id).bind("2025-03-01").bind(53000).bind("tire").bind(loc1_id).execute(&pool).await.unwrap();
+
+    let response = app.oneshot(Request::builder().uri("/api/home").header(header::AUTHORIZATION, format!("Bearer {}", token)).body(Body::empty()).unwrap()).await.unwrap();
+    let body: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let moto = &body["motorcycles"][0];
+    assert_eq!(moto["currentLocationId"], loc1_id);
+    assert_eq!(moto["currentLocationName"], "Location 1");
+}
