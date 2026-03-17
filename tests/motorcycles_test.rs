@@ -518,6 +518,6 @@ async fn test_get_home_data() {
     assert_eq!(moto["numberOfIssues"], 1);
     assert_eq!(moto["odometer"], 3000);
     assert!(moto["nextInspection"].is_object());
-    assert_eq!(moto["nextInspection"]["dueDateISO"], "2026-03-01");
-    assert_eq!(moto["nextInspection"]["isOverdue"], true);
+    assert_eq!(moto["nextInspection"]["dueDateISO"], "2027-03-01");
+    assert_eq!(moto["nextInspection"]["isOverdue"], false);
 }

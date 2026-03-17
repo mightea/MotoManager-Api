@@ -139,27 +139,58 @@ pub async fn get_home_data(
             .sum();
         total_cost_this_year += cost_this_year;
 
-        // Next Inspection (simplistic version)
-        // In CH, it's 4-3-2-2 years from first registration, or 2 years from last inspection.
-        // For simplicity, we'll just check if there was an inspection record.
-        let last_inspection = moto_maintenance.iter()
+        // Next Inspection (Swiss Law: 4-3-2-2, Veterans: 6-6-6)
+        let last_inspection_record = moto_maintenance.iter()
             .filter(|m| m.record_type == "inspection")
             .next();
         
-        let next_inspection = if let Some(last) = last_inspection {
+        let next_inspection = if let Some(last) = last_inspection_record {
             if let Some(last_date) = parse_date(&last.date) {
-                let next_date = NaiveDate::from_ymd_opt(last_date.year() + 2, last_date.month(), last_date.day());
-                next_date.map(|d| {
-                    let is_overdue = d < today;
-                    let diff = d.signed_duration_since(today).num_days();
-                    let relative_label = if is_overdue {
-                        "Überfällig".to_string()
-                    } else if diff < 30 {
-                        format!("In {} Tagen", diff)
-                    } else if diff < 365 {
-                        format!("In {} Monaten", diff / 30)
+                let interval = if moto.is_veteran {
+                    6
+                } else if let Some(reg_date_str) = &moto.first_registration {
+                    if let Some(reg_date) = parse_date(reg_date_str) {
+                        let years_since_reg = (last_date.signed_duration_since(reg_date).num_days() as f64) / 365.25;
+                        if years_since_reg < 5.0 { // First inspection was at 4 years, next is +3
+                            3
+                        } else { // Second inspection was at 7 years, next is +2
+                            2
+                        }
                     } else {
-                        format!("In {} Jahren", diff / 365)
+                        2
+                    }
+                } else {
+                    2
+                };
+
+                let next_date = NaiveDate::from_ymd_opt(last_date.year() + interval, last_date.month(), last_date.day());
+                next_date.map(|d| {
+                    let diff = d.signed_duration_since(today).num_days();
+                    let is_overdue = diff < 0;
+                    
+                    let relative_label = if diff == 0 {
+                        "Heute fällig".to_string()
+                    } else if is_overdue {
+                        let abs_days = diff.abs();
+                        if abs_days < 14 {
+                            format!("seit {} Tagen überfällig", abs_days)
+                        } else if abs_days < 60 {
+                            format!("seit {} Wochen überfällig", abs_days / 7)
+                        } else if abs_days < 730 {
+                            format!("seit {} Monaten überfällig", abs_days / 30)
+                        } else {
+                            format!("seit {} Jahren überfällig", abs_days / 365)
+                        }
+                    } else {
+                        if diff < 14 {
+                            format!("in {} Tagen", diff)
+                        } else if diff < 60 {
+                            format!("in {} Wochen", diff / 7)
+                        } else if diff < 730 {
+                            format!("in {} Monaten", diff / 30)
+                        } else {
+                            format!("in {} Jahren", diff / 365)
+                        }
                     };
 
                     json!({
@@ -173,22 +204,119 @@ pub async fn get_home_data(
             }
         } else if let Some(reg_date_str) = &moto.first_registration {
              if let Some(reg_date) = parse_date(reg_date_str) {
-                // Simplification: 4 years after first registration if no inspection yet
-                let next_date = NaiveDate::from_ymd_opt(reg_date.year() + 4, reg_date.month(), reg_date.day());
-                next_date.map(|d| {
-                    let is_overdue = d < today;
-                    json!({
-                        "dueDateISO": d.to_string(),
-                        "isOverdue": is_overdue,
-                        "relativeLabel": if is_overdue { "Überfällig".to_string() } else { "Anstehend".to_string() }
-                    })
-                })
+                let interval = if moto.is_veteran { 6 } else { 4 };
+                let next_date = NaiveDate::from_ymd_opt(reg_date.year() + interval, reg_date.month(), reg_date.day());
+                
+                // If it's already past the first interval and we have no record, we estimate the next "theoretical" date
+                // although it's better to show it's overdue or missing.
+                if let Some(d) = next_date {
+                    let mut final_date = d;
+                    if final_date < today && !moto.is_veteran {
+                        // 4 -> 7 -> 9 -> 11...
+                        if let Some(d7) = NaiveDate::from_ymd_opt(reg_date.year() + 7, reg_date.month(), reg_date.day()) {
+                            if d7 < today {
+                                // Every 2 years after year 7
+                                let mut current_d = d7;
+                                while current_d < today {
+                                    if let Some(next_d) = NaiveDate::from_ymd_opt(current_d.year() + 2, current_d.month(), current_d.day()) {
+                                        current_d = next_d;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                final_date = current_d;
+                            } else {
+                                final_date = d7;
+                            }
+                        }
+                    } else if final_date < today && moto.is_veteran {
+                        let mut current_d = final_date;
+                        while current_d < today {
+                            if let Some(next_d) = NaiveDate::from_ymd_opt(current_d.year() + 6, current_d.month(), current_d.day()) {
+                                current_d = next_d;
+                            } else {
+                                break;
+                            }
+                        }
+                        final_date = current_d;
+                    }
+                    
+                    Some(json!({
+                        "dueDateISO": final_date.to_string(),
+                        "isOverdue": final_date < today,
+                        "relativeLabel": if final_date == today { "Heute fällig".to_string() } else if final_date < today { "Überfällig".to_string() } else { "Anstehend".to_string() }
+                    }))
+                } else {
+                    None
+                }
              } else {
                  None
              }
         } else {
             None
         };
+
+        // Overdue Maintenance Calculation
+        let mut overdue_items = Vec::new();
+        if let Some(s) = &_settings {
+            let moto_maintenance_records: Vec<&MaintenanceRecord> = moto_maintenance.iter().map(|&m| m).collect();
+            
+            // Helper to check if a specific type is overdue
+            let is_overdue_fn = |record_type: &str, subtype: Option<&str>, years: i64, kms: Option<i64>| -> (bool, String) {
+                let latest = moto_maintenance_records.iter()
+                    .filter(|r| r.record_type == record_type && (subtype.is_none() || r.fluid_type.as_deref() == subtype || r.tire_position.as_deref() == subtype))
+                    .next();
+                
+                if let Some(r) = latest {
+                    if let Some(last_date) = parse_date(&r.date) {
+                        let next_date = NaiveDate::from_ymd_opt(last_date.year() + (years as i32), last_date.month(), last_date.day());
+                        if let Some(d) = next_date {
+                            if d < today {
+                                return (true, format!("{} (Zeit)", record_type));
+                            }
+                        }
+                    }
+                    if let Some(interval_kms) = kms {
+                        if current_odo - r.odo >= interval_kms {
+                            return (true, format!("{} (Kilometer)", record_type));
+                        }
+                    }
+                }
+                (false, String::new())
+            };
+
+            // 1. Tires
+            let (ov, _) = is_overdue_fn("tire", Some("front"), s.tire_interval, s.tire_km_interval);
+            if ov { overdue_items.push("Vorderreifen".to_string()); }
+            let (ov, _) = is_overdue_fn("tire", Some("rear"), s.tire_interval, s.tire_km_interval);
+            if ov { overdue_items.push("Hinterreifen".to_string()); }
+
+            // 2. Battery
+            let latest_battery = moto_maintenance_records.iter().filter(|r| r.record_type == "battery").next();
+            let battery_years = if let Some(b) = latest_battery {
+                if b.battery_type.as_deref() == Some("lithium-ion") { s.battery_lithium_interval } else { s.battery_default_interval }
+            } else { s.battery_default_interval };
+            let (ov, _) = is_overdue_fn("battery", None, battery_years, None);
+            if ov { overdue_items.push("Batterie".to_string()); }
+
+            // 3. Fluids
+            let fluids = [
+                ("engineoil", "Motoröl", s.engine_oil_interval, s.engine_oil_km_interval),
+                ("gearboxoil", "Getriebeöl", s.gearbox_oil_interval, s.gearbox_oil_km_interval),
+                ("finaldriveoil", "Kardanöl", s.final_drive_oil_interval, s.final_drive_oil_km_interval),
+                ("forkoil", "Gabelöl", s.fork_oil_interval, s.fork_oil_km_interval),
+                ("brakefluid", "Bremsflüssigkeit", s.brake_fluid_interval, s.brake_fluid_km_interval),
+                ("coolant", "Kühlflüssigkeit", s.coolant_interval, s.coolant_km_interval),
+            ];
+            for (f_type, f_label, f_years, f_kms) in fluids {
+                let (ov, _) = is_overdue_fn("fluid", Some(f_type), f_years, f_kms);
+                if ov { overdue_items.push(f_label.to_string()); }
+            }
+
+            // 4. Chain
+            let (ov, _) = is_overdue_fn("chain", None, s.chain_interval, s.chain_km_interval);
+            if ov { overdue_items.push("Kette".to_string()); }
+        }
 
         motorcycles_json.push(json!({
             "id": moto.id,
@@ -208,8 +336,8 @@ pub async fn get_home_data(
             "currentLocationId": current_location_id,
             "currentLocationName": current_location.map(|l| l.name.clone()),
             "currentLocationCountryCode": current_location.map(|l| l.country_code.clone()),
-            "hasOverdueMaintenance": false, // Placeholder for now
-            "overdueMaintenanceItems": []   // Placeholder for now
+            "hasOverdueMaintenance": !overdue_items.is_empty(),
+            "overdueMaintenanceItems": overdue_items
         }));
     }
 
