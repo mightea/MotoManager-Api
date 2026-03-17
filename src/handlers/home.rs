@@ -129,7 +129,20 @@ pub async fn get_home_data(
 
         // Current Location
         let latest_loc_record = moto_loc_records.first();
-        let current_location_id = latest_loc_record.map(|r| r.location_id);
+        let latest_m_with_loc = moto_maintenance.iter().filter(|m| m.location_id.is_some()).next();
+        
+        let current_location_id = match (latest_loc_record, latest_m_with_loc) {
+            (Some(lr), Some(mr)) => {
+                if lr.date >= mr.date {
+                    Some(lr.location_id)
+                } else {
+                    mr.location_id
+                }
+            },
+            (Some(lr), None) => Some(lr.location_id),
+            (None, Some(mr)) => mr.location_id,
+            (None, None) => None,
+        };
         let current_location = current_location_id.and_then(|id| location_map.get(&id));
 
         // Cost this year
