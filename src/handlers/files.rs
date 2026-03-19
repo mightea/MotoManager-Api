@@ -45,7 +45,11 @@ pub async fn serve_image(
                 };
 
                 // Check cache
-                let cache_filename = format!("{}_{}x{}.{}", filename, w, h, if matches!(format, image::ImageFormat::WebP) { "webp" } else if matches!(format, image::ImageFormat::Png) { "png" } else { "jpg" });
+                let stem = std::path::Path::new(&filename)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&filename);
+                let cache_filename = format!("{}_{}x{}.{}", stem, w, h, if matches!(format, image::ImageFormat::WebP) { "webp" } else if matches!(format, image::ImageFormat::Png) { "png" } else { "jpg" });
                 let cache_path = config.resized_images_dir().join(&cache_filename);
 
                 if let Ok(cached_data) = tokio::fs::read(&cache_path).await {

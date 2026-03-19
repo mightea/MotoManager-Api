@@ -262,7 +262,11 @@ pub async fn regenerate_previews(
                             else { image::ImageFormat::Jpeg };
                 
                 let cache_ext = if ext == "webp" { "webp" } else if ext == "png" { "png" } else { "jpg" };
-                let cache_filename = format!("{}_400x400.{}", filename, cache_ext);
+                let stem = std::path::Path::new(&filename)
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or(&filename);
+                let cache_filename = format!("{}_400x400.{}", stem, cache_ext);
                 let cache_path = config.resized_images_dir().join(&cache_filename);
 
                 if let Ok(img) = image::load_from_memory(&file_data) {

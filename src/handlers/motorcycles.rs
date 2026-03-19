@@ -11,8 +11,9 @@ use crate::{
     auth::AuthUser,
     config::Config,
     error::{AppError, AppResult},
-    models::{Motorcycle, MotorcycleWithStats, MaintenanceRecord, Issue, PreviousOwner, TorqueSpec},
+    models::{Motorcycle, MotorcycleWithStats, MaintenanceRecord, Issue, PreviousOwner, TorqueSpec, Document},
 };
+use crate::handlers::documents::{format_doc_paths, get_motorcycle_ids_for_doc};
 
 async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppResult<String> {
     let ext = if content_type.contains("png") {
@@ -221,6 +222,26 @@ pub async fn get_motorcycle(
     .fetch_all(&pool)
     .await?;
 
+    let documents = sqlx::query_as::<_, Document>(
+        "SELECT d.* FROM documents d JOIN documentMotorcycles dm ON d.id = dm.documentId WHERE dm.motorcycleId = ? AND (d.isPrivate = 0 OR d.ownerId = ?) ORDER BY d.createdAt DESC",
+    )
+    .bind(id)
+    .bind(user.id)
+    .fetch_all(&pool)
+    .await?;
+
+    let mut formatted_docs = Vec::new();
+    for row in documents {
+        let doc_id = row.id;
+        let motorcycle_ids = get_motorcycle_ids_for_doc(&pool, doc_id).await?;
+        let doc = format_doc_paths(row);
+        let mut doc_val = serde_json::to_value(doc).unwrap_or(json!({}));
+        if let Some(obj) = doc_val.as_object_mut() {
+            obj.insert("motorcycleIds".to_string(), json!(motorcycle_ids));
+        }
+        formatted_docs.push(doc_val);
+    }
+
     Ok(Json(json!({
         "motorcycle": motorcycle,
         "issues": issues,
@@ -228,6 +249,7 @@ pub async fn get_motorcycle(
         "previousOwners": previous_owners,
         "torqueSpecs": torque_specs,
         "torqueSpecifications": torque_specs,
+        "documents": formatted_docs,
     })))
 }
 
@@ -422,11 +444,15 @@ pub async fn delete_motorcycle(
         let full_path = config.images_dir().join(&filename);
         let _ = tokio::fs::remove_file(full_path).await;
 
-        // Delete resized versions (look for anything starting with filename_)
+        // Delete resized versions (look for anything starting with stem_)
+        let stem = std::path::Path::new(&filename)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(&filename);
         if let Ok(mut entries) = tokio::fs::read_dir(config.resized_images_dir()).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 if let Some(entry_name) = entry.file_name().to_str() {
-                    if entry_name.starts_with(&filename) {
+                    if entry_name.starts_with(stem) {
                         let _ = tokio::fs::remove_file(entry.path()).await;
                     }
                 }

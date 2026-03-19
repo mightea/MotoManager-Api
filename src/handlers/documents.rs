@@ -16,13 +16,13 @@ use crate::{
     models::Document,
 };
 
-fn format_doc_paths(mut doc: Document) -> Document {
+pub fn format_doc_paths(mut doc: Document) -> Document {
     doc.file_path = format!("/documents/{}", doc.file_path.replace("/data/documents/", "").replace("data/documents/", ""));
     doc.preview_path = doc.preview_path.map(|p| format!("/previews/{}", p.replace("/data/previews/", "").replace("data/previews/", "")));
     doc
 }
 
-async fn get_motorcycle_ids_for_doc(pool: &SqlitePool, doc_id: i64) -> AppResult<Vec<i64>> {
+pub async fn get_motorcycle_ids_for_doc(pool: &SqlitePool, doc_id: i64) -> AppResult<Vec<i64>> {
     let rows = sqlx::query!(
         "SELECT motorcycleId FROM documentMotorcycles WHERE documentId = ?",
         doc_id

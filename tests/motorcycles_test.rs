@@ -207,7 +207,7 @@ async fn test_list_motorcycles_unauthorized() {
 
     let filename = "test_bike.webp";
     tokio::fs::write("./test_data/images/test_bike.webp", b"original").await.unwrap();
-    tokio::fs::write("./cache/resized/test_bike.webp_400x400.webp", b"resized").await.unwrap();
+    tokio::fs::write("./cache/resized/test_bike_400x400.webp", b"resized").await.unwrap();
 
     // 2. Seed motorcycle with that image
     let moto_id = sqlx::query(
@@ -240,7 +240,7 @@ async fn test_list_motorcycles_unauthorized() {
 
     // 4. Verify files are gone
     assert!(!std::path::Path::new("./test_data/images/test_bike.webp").exists());
-    assert!(!std::path::Path::new("./cache/resized/test_bike.webp_400x400.webp").exists());
+    assert!(!std::path::Path::new("./cache/resized/test_bike_400x400.webp").exists());
 
     // Cleanup
     let _ = tokio::fs::remove_dir_all("./test_data").await;
