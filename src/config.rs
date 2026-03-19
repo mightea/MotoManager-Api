@@ -31,7 +31,7 @@ impl Config {
                 .to_lowercase()
                 == "true",
             app_version: env::var("APP_VERSION")
-                .unwrap_or_else(|_| "2026.1.0".to_string()),
+                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
             data_dir: env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string()),
             cache_dir: env::var("CACHE_DIR").unwrap_or_else(|_| "./cache".to_string()),
         })
