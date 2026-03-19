@@ -1,10 +1,10 @@
 use sqlx::sqlite::SqlitePoolOptions;
-use tower_http::trace::TraceLayer;
 use std::sync::Arc;
-use webauthn_rs::WebauthnBuilder;
+use tower_http::trace::TraceLayer;
 use url::Url;
+use webauthn_rs::WebauthnBuilder;
 
-use moto_manager_api::{build_app, build_cors, AppState, config::Config};
+use moto_manager_api::{build_app, build_cors, config::Config, AppState};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -26,7 +26,7 @@ async fn main() -> anyhow::Result<()> {
     if !config.documents_dir().exists() {
         tokio::fs::create_dir_all(config.documents_dir()).await?;
     }
-    
+
     // Create cache directories
     if !config.previews_dir().exists() {
         tokio::fs::create_dir_all(config.previews_dir()).await?;
@@ -59,7 +59,9 @@ async fn main() -> anyhow::Result<()> {
     // Build CORS layer
     let cors = build_cors(&config.origin);
 
-    let app = build_app(state).layer(cors).layer(TraceLayer::new_for_http());
+    let app = build_app(state)
+        .layer(cors)
+        .layer(TraceLayer::new_for_http());
 
     let addr = format!("0.0.0.0:{}", config.port);
     tracing::info!("Listening on {}", addr);

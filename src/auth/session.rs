@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use rand::RngCore;
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::{
     auth::SESSION_DURATION_DAYS,
@@ -25,7 +25,10 @@ pub async fn create_session(pool: &SqlitePool, user_id: i64) -> AppResult<String
 
     sqlx::query!(
         "INSERT INTO sessions (token, userId, expiresAt, createdAt) VALUES (?, ?, ?, ?)",
-        token, user_id, expires_at_str, created_at
+        token,
+        user_id,
+        expires_at_str,
+        created_at
     )
     .execute(pool)
     .await?;

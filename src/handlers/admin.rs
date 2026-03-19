@@ -7,14 +7,14 @@ use chrono::Utc;
 use pdfium_render::prelude::*;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
     auth::{password::hash_password, AdminUser},
     config::Config,
     error::{AppError, AppResult},
-    models::{User, PublicUser, UserSettings, CurrencySetting},
+    models::{CurrencySetting, PublicUser, User, UserSettings},
 };
 
 // ─── User Management ─────────────────────────────────────────────────────────
@@ -23,25 +23,25 @@ pub async fn list_users(
     State(pool): State<SqlitePool>,
     AdminUser(_admin): AdminUser,
 ) -> AppResult<Json<Value>> {
-    let rows = sqlx::query_as::<_, User>(
-        "SELECT * FROM users ORDER BY createdAt ASC",
-    )
-    .fetch_all(&pool)
-    .await?;
+    let rows = sqlx::query_as::<_, User>("SELECT * FROM users ORDER BY createdAt ASC")
+        .fetch_all(&pool)
+        .await?;
 
     let mut users = Vec::new();
     for user in rows {
-        let settings = sqlx::query_as::<_, UserSettings>(
-            "SELECT * FROM userSettings WHERE userId = ?",
-        )
-        .bind(user.id)
-        .fetch_optional(&pool)
-        .await?;
+        let settings =
+            sqlx::query_as::<_, UserSettings>("SELECT * FROM userSettings WHERE userId = ?")
+                .bind(user.id)
+                .fetch_optional(&pool)
+                .await?;
 
         let pub_user = PublicUser::from(user);
         let mut user_val = serde_json::to_value(pub_user).unwrap_or(json!({}));
         if let Some(obj) = user_val.as_object_mut() {
-            obj.insert("settings".to_string(), serde_json::to_value(settings).unwrap_or(Value::Null));
+            obj.insert(
+                "settings".to_string(),
+                serde_json::to_value(settings).unwrap_or(Value::Null),
+            );
         }
         users.push(user_val);
     }
@@ -64,10 +64,16 @@ pub async fn create_user(
     AdminUser(admin): AdminUser,
     Json(body): Json<CreateUserRequest>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    tracing::info!("Admin {} (ID: {}) creating user: {}", admin.username, admin.id, body.email);
+    tracing::info!(
+        "Admin {} (ID: {}) creating user: {}",
+        admin.username,
+        admin.id,
+        body.email
+    );
     let existing: i64 = sqlx::query!(
         "SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?",
-        body.email, body.username
+        body.email,
+        body.username
     )
     .fetch_one(&pool)
     .await?
@@ -98,9 +104,13 @@ pub async fn create_user(
     .await?
     .last_insert_rowid();
 
-    sqlx::query!("INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)", user_id, now)
-        .execute(&pool)
-        .await?;
+    sqlx::query!(
+        "INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)",
+        user_id,
+        now
+    )
+    .execute(&pool)
+    .await?;
 
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
         .bind(user_id)
@@ -130,7 +140,12 @@ pub async fn update_user(
     Path(uid): Path<i64>,
     Json(body): Json<UpdateUserRequest>,
 ) -> AppResult<Json<Value>> {
-    tracing::info!("Admin {} (ID: {}) updating user ID: {}", admin.username, admin.id, uid);
+    tracing::info!(
+        "Admin {} (ID: {}) updating user ID: {}",
+        admin.username,
+        admin.id,
+        uid
+    );
     let existing = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
         .bind(uid)
         .fetch_optional(&pool)
@@ -171,7 +186,12 @@ pub async fn delete_user(
     AdminUser(admin): AdminUser,
     Path(uid): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    tracing::info!("Admin {} (ID: {}) deleting user ID: {}", admin.username, admin.id, uid);
+    tracing::info!(
+        "Admin {} (ID: {}) deleting user ID: {}",
+        admin.username,
+        admin.id,
+        uid
+    );
     let result = sqlx::query!("DELETE FROM users WHERE id = ?", uid)
         .execute(&pool)
         .await?;
@@ -189,7 +209,7 @@ pub async fn regenerate_previews(
     AdminUser(_admin): AdminUser,
 ) -> AppResult<Json<Value>> {
     tracing::info!("Regenerating all document previews and motorcycle resized images...");
-    
+
     let mut doc_count = 0;
     let mut moto_count = 0;
 
@@ -199,10 +219,11 @@ pub async fn regenerate_previews(
         .await?;
 
     for doc in docs {
-        let filename = doc.file_path
+        let filename = doc
+            .file_path
             .replace("/data/documents/", "")
             .replace("data/documents/", "");
-            
+
         let ext = std::path::Path::new(&filename)
             .extension()
             .and_then(|e| e.to_str())
@@ -215,11 +236,18 @@ pub async fn regenerate_previews(
                 let uuid = Uuid::new_v4().to_string();
                 match generate_image_preview_internal(&config, &file_data, &uuid).await {
                     Ok(preview_filename) => {
-                        sqlx::query!("UPDATE documents SET previewPath = ? WHERE id = ?", preview_filename, doc.id)
-                            .execute(&pool).await?;
+                        sqlx::query!(
+                            "UPDATE documents SET previewPath = ? WHERE id = ?",
+                            preview_filename,
+                            doc.id
+                        )
+                        .execute(&pool)
+                        .await?;
                         doc_count += 1;
                     }
-                    Err(e) => tracing::warn!("Failed to generate preview for doc {}: {}", doc.id, e),
+                    Err(e) => {
+                        tracing::warn!("Failed to generate preview for doc {}: {}", doc.id, e)
+                    }
                 }
             }
         } else if ext == "pdf" {
@@ -228,26 +256,36 @@ pub async fn regenerate_previews(
                 let uuid = Uuid::new_v4().to_string();
                 match generate_pdf_preview_internal(&config, &file_data, &uuid).await {
                     Ok(preview_filename) => {
-                        sqlx::query!("UPDATE documents SET previewPath = ? WHERE id = ?", preview_filename, doc.id)
-                            .execute(&pool).await?;
+                        sqlx::query!(
+                            "UPDATE documents SET previewPath = ? WHERE id = ?",
+                            preview_filename,
+                            doc.id
+                        )
+                        .execute(&pool)
+                        .await?;
                         doc_count += 1;
                     }
-                    Err(e) => tracing::warn!("Failed to generate PDF preview for doc {}: {}", doc.id, e),
+                    Err(e) => {
+                        tracing::warn!("Failed to generate PDF preview for doc {}: {}", doc.id, e)
+                    }
                 }
             }
         }
     }
 
     // 2. Process Motorcycles
-    let motos = sqlx::query_as::<_, crate::models::Motorcycle>("SELECT * FROM motorcycles WHERE image IS NOT NULL")
-        .fetch_all(&pool).await?;
+    let motos = sqlx::query_as::<_, crate::models::Motorcycle>(
+        "SELECT * FROM motorcycles WHERE image IS NOT NULL",
+    )
+    .fetch_all(&pool)
+    .await?;
 
     for moto in motos {
         let image_path = moto.image.unwrap();
         let filename = image_path
             .replace("/data/images/", "")
             .replace("data/images/", "");
-            
+
         let ext = std::path::Path::new(&filename)
             .extension()
             .and_then(|e| e.to_str())
@@ -257,11 +295,21 @@ pub async fn regenerate_previews(
         if ["jpg", "jpeg", "png", "webp", "gif"].contains(&ext.as_str()) {
             let full_path = config.images_dir().join(&filename);
             if let Ok(file_data) = tokio::fs::read(&full_path).await {
-                let format = if ext == "webp" { image::ImageFormat::WebP }
-                            else if ext == "png" { image::ImageFormat::Png }
-                            else { image::ImageFormat::Jpeg };
-                
-                let cache_ext = if ext == "webp" { "webp" } else if ext == "png" { "png" } else { "jpg" };
+                let format = if ext == "webp" {
+                    image::ImageFormat::WebP
+                } else if ext == "png" {
+                    image::ImageFormat::Png
+                } else {
+                    image::ImageFormat::Jpeg
+                };
+
+                let cache_ext = if ext == "webp" {
+                    "webp"
+                } else if ext == "png" {
+                    "png"
+                } else {
+                    "jpg"
+                };
                 let stem = std::path::Path::new(&filename)
                     .file_stem()
                     .and_then(|s| s.to_str())
@@ -271,7 +319,7 @@ pub async fn regenerate_previews(
 
                 if let Ok(img) = image::load_from_memory(&file_data) {
                     let thumbnail = img.thumbnail(400, 400);
-                    if let Ok(_) = thumbnail.save_with_format(&cache_path, format) {
+                    if thumbnail.save_with_format(&cache_path, format).is_ok() {
                         moto_count += 1;
                     }
                 }
@@ -279,8 +327,8 @@ pub async fn regenerate_previews(
         }
     }
 
-    Ok(Json(json!({ 
-        "message": format!("Regenerated {} document previews and {} motorcycle thumbnails", doc_count, moto_count), 
+    Ok(Json(json!({
+        "message": format!("Regenerated {} document previews and {} motorcycle thumbnails", doc_count, moto_count),
         "docCount": doc_count,
         "motoCount": moto_count
     })))
@@ -320,16 +368,25 @@ async fn generate_pdf_preview_internal(
         .load_pdf_from_byte_slice(data, None)
         .map_err(|e| AppError::Image(format!("Failed to load PDF: {:?}", e)))?;
 
-    let first_page = document.pages().get(0)
+    let first_page = document
+        .pages()
+        .get(0)
         .map_err(|e| AppError::Image(format!("Failed to get first page of PDF: {:?}", e)))?;
 
-    let bitmap = first_page.render_with_config(&PdfRenderConfig::new().set_target_width(800).set_maximum_height(1200))
+    let bitmap = first_page
+        .render_with_config(
+            &PdfRenderConfig::new()
+                .set_target_width(800)
+                .set_maximum_height(1200),
+        )
         .map_err(|e| AppError::Image(format!("Failed to render PDF page: {:?}", e)))?;
 
     let preview_filename = format!("{}.jpg", uuid);
     let preview_path = config.previews_dir().join(&preview_filename);
 
-    bitmap.as_image().thumbnail(400, 400)
+    bitmap
+        .as_image()
+        .thumbnail(400, 400)
         .save_with_format(&preview_path, image::ImageFormat::Jpeg)
         .map_err(|e| AppError::Image(format!("Failed to save PDF preview: {}", e)))?;
 
@@ -342,23 +399,19 @@ pub async fn list_currencies(
     State(pool): State<SqlitePool>,
     AdminUser(_admin): AdminUser,
 ) -> AppResult<Json<Value>> {
-    let currencies = sqlx::query_as::<_, CurrencySetting>(
-        "SELECT * FROM currencies ORDER BY code ASC",
-    )
-    .fetch_all(&pool)
-    .await?;
+    let currencies =
+        sqlx::query_as::<_, CurrencySetting>("SELECT * FROM currencies ORDER BY code ASC")
+            .fetch_all(&pool)
+            .await?;
 
     Ok(Json(json!({ "currencies": currencies })))
 }
 
-pub async fn list_currencies_public(
-    State(pool): State<SqlitePool>,
-) -> AppResult<Json<Value>> {
-    let currencies = sqlx::query_as::<_, CurrencySetting>(
-        "SELECT * FROM currencies ORDER BY code ASC",
-    )
-    .fetch_all(&pool)
-    .await?;
+pub async fn list_currencies_public(State(pool): State<SqlitePool>) -> AppResult<Json<Value>> {
+    let currencies =
+        sqlx::query_as::<_, CurrencySetting>("SELECT * FROM currencies ORDER BY code ASC")
+            .fetch_all(&pool)
+            .await?;
 
     Ok(Json(json!({ "currencies": currencies })))
 }
@@ -376,11 +429,19 @@ pub async fn create_currency(
     AdminUser(_admin): AdminUser,
     Json(body): Json<CreateCurrencyRequest>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    let existing = sqlx::query!("SELECT COUNT(*) as cnt FROM currencies WHERE code = ?", body.code)
-        .fetch_one(&pool).await?.cnt;
+    let existing = sqlx::query!(
+        "SELECT COUNT(*) as cnt FROM currencies WHERE code = ?",
+        body.code
+    )
+    .fetch_one(&pool)
+    .await?
+    .cnt;
 
     if existing > 0 {
-        return Err(AppError::Conflict(format!("Currency with code '{}' already exists", body.code)));
+        return Err(AppError::Conflict(format!(
+            "Currency with code '{}' already exists",
+            body.code
+        )));
     }
 
     let conversion_factor = fetch_conversion_factor(&body.code).await.unwrap_or(1.0);
@@ -400,7 +461,9 @@ pub async fn create_currency(
     .last_insert_rowid();
 
     let currency = sqlx::query_as::<_, CurrencySetting>("SELECT * FROM currencies WHERE id = ?")
-        .bind(id).fetch_one(&pool).await?;
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
 
     Ok((StatusCode::CREATED, Json(json!({ "currency": currency }))))
 }
@@ -421,7 +484,9 @@ pub async fn update_currency(
     Json(body): Json<UpdateCurrencyRequest>,
 ) -> AppResult<Json<Value>> {
     let existing = sqlx::query_as::<_, CurrencySetting>("SELECT * FROM currencies WHERE id = ?")
-        .bind(cid).fetch_optional(&pool).await?
+        .bind(cid)
+        .fetch_optional(&pool)
+        .await?
         .ok_or_else(|| AppError::NotFound("Currency not found".to_string()))?;
 
     let code = body.code.unwrap_or(existing.code);
@@ -431,12 +496,19 @@ pub async fn update_currency(
 
     sqlx::query!(
         "UPDATE currencies SET code = ?, symbol = ?, label = ?, conversionFactor = ? WHERE id = ?",
-        code, symbol, label, conversion_factor, cid
+        code,
+        symbol,
+        label,
+        conversion_factor,
+        cid
     )
-    .execute(&pool).await?;
+    .execute(&pool)
+    .await?;
 
     let currency = sqlx::query_as::<_, CurrencySetting>("SELECT * FROM currencies WHERE id = ?")
-        .bind(cid).fetch_one(&pool).await?;
+        .bind(cid)
+        .fetch_one(&pool)
+        .await?;
 
     Ok(Json(json!({ "currency": currency })))
 }
@@ -447,7 +519,8 @@ pub async fn delete_currency(
     Path(cid): Path<i64>,
 ) -> AppResult<Json<Value>> {
     let result = sqlx::query!("DELETE FROM currencies WHERE id = ?", cid)
-        .execute(&pool).await?;
+        .execute(&pool)
+        .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Currency not found".to_string()));
@@ -472,7 +545,10 @@ async fn fetch_conversion_factor(currency_code: &str) -> Option<f64> {
     let mut stream = tokio::time::timeout(
         std::time::Duration::from_secs(5),
         TcpStream::connect((host, 80u16)),
-    ).await.ok()?.ok()?;
+    )
+    .await
+    .ok()?
+    .ok()?;
 
     stream.write_all(request.as_bytes()).await.ok()?;
 
@@ -480,12 +556,19 @@ async fn fetch_conversion_factor(currency_code: &str) -> Option<f64> {
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         stream.read_to_end(&mut response),
-    ).await.ok()?.ok()?;
+    )
+    .await
+    .ok()?
+    .ok()?;
 
     let response_str = String::from_utf8_lossy(&response);
     let body = response_str.split("\r\n\r\n").nth(1)?;
     let json: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
     let rate = json.get("rates")?.get(currency_code)?.as_f64()?;
 
-    if rate > 0.0 { Some(1.0 / rate) } else { None }
+    if rate > 0.0 {
+        Some(1.0 / rate)
+    } else {
+        None
+    }
 }

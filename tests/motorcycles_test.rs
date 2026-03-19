@@ -68,13 +68,20 @@ async fn test_health_check() {
     let (app, _, _) = setup_test_app().await;
 
     let response = app
-        .oneshot(Request::builder().uri("/api/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["status"], "ok");
 }
@@ -95,8 +102,10 @@ async fn test_list_motorcycles_empty() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert!(body["motorcycles"].is_array());
     assert_eq!(body["motorcycles"].as_array().unwrap().len(), 0);
@@ -117,10 +126,10 @@ async fn test_list_motorcycles_unauthorized() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    }
+}
 
-    #[tokio::test]
-    async fn test_motorcycle_lifecycle() {
+#[tokio::test]
+async fn test_motorcycle_lifecycle() {
     let (app, pool, token) = setup_test_app().await;
 
     // 1. Seed a motorcycle
@@ -137,7 +146,8 @@ async fn test_list_motorcycles_unauthorized() {
     .last_insert_rowid();
 
     // 2. List motorcycles
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/motorcycles")
@@ -149,13 +159,16 @@ async fn test_list_motorcycles_unauthorized() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["motorcycles"].as_array().unwrap().len(), 1);
     assert_eq!(body["motorcycles"][0]["make"], "BMW");
 
     // 3. Get specific motorcycle
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri(format!("/api/motorcycles/{}", moto_id))
@@ -167,7 +180,9 @@ async fn test_list_motorcycles_unauthorized() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["motorcycle"]["model"], "R1250GS");
     assert!(body["torqueSpecs"].is_array());
@@ -195,19 +210,25 @@ async fn test_list_motorcycles_unauthorized() {
         .unwrap()
         .get(0);
     assert_eq!(count, 0);
-    }
+}
 
-    #[tokio::test]
-    async fn test_motorcycle_deletion_file_cleanup() {
+#[tokio::test]
+async fn test_motorcycle_deletion_file_cleanup() {
     let (app, pool, token) = setup_test_app().await;
 
     // 1. Create a dummy image file
-    tokio::fs::create_dir_all("./test_data/images").await.unwrap();
+    tokio::fs::create_dir_all("./test_data/images")
+        .await
+        .unwrap();
     tokio::fs::create_dir_all("./cache/resized").await.unwrap();
 
     let filename = "test_bike.webp";
-    tokio::fs::write("./test_data/images/test_bike.webp", b"original").await.unwrap();
-    tokio::fs::write("./cache/resized/test_bike_400x400.webp", b"resized").await.unwrap();
+    tokio::fs::write("./test_data/images/test_bike.webp", b"original")
+        .await
+        .unwrap();
+    tokio::fs::write("./cache/resized/test_bike_400x400.webp", b"resized")
+        .await
+        .unwrap();
 
     // 2. Seed motorcycle with that image
     let moto_id = sqlx::query(
@@ -245,9 +266,9 @@ async fn test_list_motorcycles_unauthorized() {
     // Cleanup
     let _ = tokio::fs::remove_dir_all("./test_data").await;
     let _ = tokio::fs::remove_dir_all("./cache").await;
-    }
-    #[tokio::test]
-    async fn test_issue_lifecycle() {
+}
+#[tokio::test]
+async fn test_issue_lifecycle() {
     let (app, pool, token) = setup_test_app().await;
 
     // 1. Seed a motorcycle
@@ -264,30 +285,37 @@ async fn test_list_motorcycles_unauthorized() {
     .last_insert_rowid();
 
     // 2. Create an issue
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri(format!("/api/motorcycles/{}/issues", moto_id))
                 .header(header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_vec(&json!({
-                    "odo": 5100,
-                    "description": "Strange noise from engine",
-                    "priority": "high"
-                })).unwrap()))
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "odo": 5100,
+                        "description": "Strange noise from engine",
+                        "priority": "high"
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     let issue_id = body["issue"]["id"].as_i64().unwrap();
 
     // 3. List issues
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri(format!("/api/motorcycles/{}/issues", moto_id))
@@ -299,21 +327,27 @@ async fn test_list_motorcycles_unauthorized() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["issues"].as_array().unwrap().len(), 1);
 
     // 4. Update issue
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
                 .uri(format!("/api/motorcycles/{}/issues/{}", moto_id, issue_id))
                 .header(header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_vec(&json!({
-                    "status": "in_progress"
-                })).unwrap()))
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "status": "in_progress"
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -335,10 +369,10 @@ async fn test_list_motorcycles_unauthorized() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    }
+}
 
-    #[tokio::test]
-    async fn test_maintenance_lifecycle() {
+#[tokio::test]
+async fn test_maintenance_lifecycle() {
     let (app, pool, token) = setup_test_app().await;
 
     // 1. Seed a motorcycle
@@ -355,31 +389,38 @@ async fn test_list_motorcycles_unauthorized() {
     .last_insert_rowid();
 
     // 2. Create a maintenance record
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("POST")
                 .uri(format!("/api/motorcycles/{}/maintenance", moto_id))
                 .header(header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_vec(&json!({
-                    "date": "2026-03-14",
-                    "odo": 2500,
-                    "type": "oil_change",
-                    "description": "Regular maintenance"
-                })).unwrap()))
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "date": "2026-03-14",
+                        "odo": 2500,
+                        "type": "oil_change",
+                        "description": "Regular maintenance"
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     let mid = body["maintenanceRecord"]["id"].as_i64().unwrap();
 
     // 3. List maintenance records
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri(format!("/api/motorcycles/{}/maintenance", moto_id))
@@ -391,21 +432,27 @@ async fn test_list_motorcycles_unauthorized() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["maintenanceRecords"].as_array().unwrap().len(), 1);
 
     // 4. Update maintenance record
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .method("PUT")
                 .uri(format!("/api/motorcycles/{}/maintenance/{}", moto_id, mid))
                 .header(header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_vec(&json!({
-                    "description": "Oil and filter change"
-                })).unwrap()))
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "description": "Oil and filter change"
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
@@ -427,7 +474,7 @@ async fn test_list_motorcycles_unauthorized() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    }
+}
 
 #[tokio::test]
 async fn test_get_motorcycle_not_found() {
@@ -518,14 +565,16 @@ async fn test_get_home_data() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
-    
+
     assert!(body["motorcycles"].is_array());
     let motos = body["motorcycles"].as_array().unwrap();
     assert_eq!(motos.len(), 2);
-    
+
     // Check Ducati (with inspection)
     let ducati = motos.iter().find(|m| m["make"] == "Ducati").unwrap();
     assert_eq!(ducati["make"], "Ducati");
@@ -558,16 +607,43 @@ async fn test_home_data_location_logic() {
     .last_insert_rowid();
 
     let loc1_id = sqlx::query("INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)")
-        .bind("Location 1").bind("CH").bind(1).execute(&pool).await.unwrap().last_insert_rowid();
+        .bind("Location 1")
+        .bind("CH")
+        .bind(1)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
     let loc2_id = sqlx::query("INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)")
-        .bind("Location 2").bind("DE").bind(1).execute(&pool).await.unwrap().last_insert_rowid();
+        .bind("Location 2")
+        .bind("DE")
+        .bind(1)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
 
     // SCENARIO 1: Only maintenance record has location
     sqlx::query("INSERT INTO maintenanceRecords (motorcycleId, date, odo, type, locationId) VALUES (?, ?, ?, ?, ?)")
         .bind(moto_id).bind("2025-01-01").bind(51000).bind("oil_change").bind(loc1_id).execute(&pool).await.unwrap();
 
-    let response = app.clone().oneshot(Request::builder().uri("/api/home").header(header::AUTHORIZATION, format!("Bearer {}", token)).body(Body::empty()).unwrap()).await.unwrap();
-    let body: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/home")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     let moto = &body["motorcycles"][0];
     assert_eq!(moto["currentLocationId"], loc1_id);
     assert_eq!(moto["currentLocationName"], "Location 1");
@@ -576,8 +652,23 @@ async fn test_home_data_location_logic() {
     sqlx::query("INSERT INTO locationRecords (motorcycleId, locationId, date, odometer) VALUES (?, ?, ?, ?)")
         .bind(moto_id).bind(loc2_id).bind("2025-02-01").bind(52000).execute(&pool).await.unwrap();
 
-    let response = app.clone().oneshot(Request::builder().uri("/api/home").header(header::AUTHORIZATION, format!("Bearer {}", token)).body(Body::empty()).unwrap()).await.unwrap();
-    let body: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/home")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     let moto = &body["motorcycles"][0];
     assert_eq!(moto["currentLocationId"], loc2_id);
     assert_eq!(moto["currentLocationName"], "Location 2");
@@ -586,8 +677,22 @@ async fn test_home_data_location_logic() {
     sqlx::query("INSERT INTO maintenanceRecords (motorcycleId, date, odo, type, locationId) VALUES (?, ?, ?, ?, ?)")
         .bind(moto_id).bind("2025-03-01").bind(53000).bind("tire").bind(loc1_id).execute(&pool).await.unwrap();
 
-    let response = app.oneshot(Request::builder().uri("/api/home").header(header::AUTHORIZATION, format!("Bearer {}", token)).body(Body::empty()).unwrap()).await.unwrap();
-    let body: Value = serde_json::from_slice(&axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/home")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
     let moto = &body["motorcycles"][0];
     assert_eq!(moto["currentLocationId"], loc1_id);
     assert_eq!(moto["currentLocationName"], "Location 1");

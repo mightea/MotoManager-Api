@@ -79,7 +79,9 @@ async fn test_list_documents_empty() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert!(body["docs"].is_array());
     assert_eq!(body["docs"].as_array().unwrap().len(), 0);
@@ -103,7 +105,8 @@ async fn test_document_lifecycle() {
     .last_insert_rowid();
 
     // 2. List documents
-    let response = app.clone()
+    let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/documents")
@@ -115,7 +118,9 @@ async fn test_document_lifecycle() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["docs"].as_array().unwrap().len(), 1);
     assert_eq!(body["docs"][0]["title"], "Manual");
@@ -123,10 +128,14 @@ async fn test_document_lifecycle() {
     // 3. Delete document (Note: delete_document also tries to delete files from disk)
     // In setup_test_app, data_dir is ./test_data. We should ensure the files exist or mock it.
     // For this test, we'll just check if the handler returns 200 OK after we "mock" the file.
-    
+
     // Create dummy file
-    tokio::fs::create_dir_all("./test_data/documents").await.unwrap();
-    tokio::fs::write("./test_data/documents/manual.pdf", b"dummy").await.unwrap();
+    tokio::fs::create_dir_all("./test_data/documents")
+        .await
+        .unwrap();
+    tokio::fs::write("./test_data/documents/manual.pdf", b"dummy")
+        .await
+        .unwrap();
 
     let response = app
         .oneshot(

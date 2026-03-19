@@ -4,16 +4,16 @@ pub mod error;
 pub mod handlers;
 pub mod models;
 
-use std::sync::Arc;
-use webauthn_rs::Webauthn;
 use axum::{
     http::{HeaderValue, Method},
-    routing::{get, post, put, delete},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde_json::json;
 use sqlx::SqlitePool;
+use std::sync::Arc;
 use tower_http::cors::CorsLayer;
+use webauthn_rs::Webauthn;
 
 use config::Config;
 
@@ -48,19 +48,29 @@ pub fn build_app(state: AppState) -> Router {
     Router::new()
         .route(
             "/api/health",
-            get(move || async move {
-                Json(json!({ "status": "ok", "version": app_version }))
-            }),
+            get(move || async move { Json(json!({ "status": "ok", "version": app_version })) }),
         )
         .route("/api/auth/status", get(handlers::auth::status))
         .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/logout", post(handlers::auth::logout))
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/me", get(handlers::auth::me))
-        .route("/api/auth/passkey/register-options", get(handlers::passkey::register_options))
-        .route("/api/auth/passkey/register-verify", post(handlers::passkey::register_verify))
-        .route("/api/auth/passkey/login-options", get(handlers::passkey::login_options))
-        .route("/api/auth/passkey/login-verify", post(handlers::passkey::login_verify))
+        .route(
+            "/api/auth/passkey/register-options",
+            get(handlers::passkey::register_options),
+        )
+        .route(
+            "/api/auth/passkey/register-verify",
+            post(handlers::passkey::register_verify),
+        )
+        .route(
+            "/api/auth/passkey/login-options",
+            get(handlers::passkey::login_options),
+        )
+        .route(
+            "/api/auth/passkey/login-verify",
+            post(handlers::passkey::login_verify),
+        )
         .route(
             "/api/motorcycles",
             get(handlers::motorcycles::list_motorcycles)
@@ -166,7 +176,10 @@ pub fn build_app(state: AppState) -> Router {
             "/api/admin/regenerate-previews",
             post(handlers::admin::regenerate_previews),
         )
-        .route("/api/currencies", get(handlers::admin::list_currencies_public))
+        .route(
+            "/api/currencies",
+            get(handlers::admin::list_currencies_public),
+        )
         .route("/api/stats", get(handlers::stats::get_stats))
         .route("/api/home", get(handlers::home::get_home_data))
         .route("/images/{filename}", get(handlers::files::serve_image))
@@ -174,10 +187,7 @@ pub fn build_app(state: AppState) -> Router {
             "/documents/{filename}",
             get(handlers::files::serve_document),
         )
-        .route(
-            "/previews/{filename}",
-            get(handlers::files::serve_preview)
-        )
+        .route("/previews/{filename}", get(handlers::files::serve_preview))
         .with_state(state)
 }
 

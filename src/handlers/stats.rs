@@ -1,15 +1,15 @@
 use axum::extract::State;
 use axum::Json;
+use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use serde_json::{json, Value};
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 use std::collections::HashMap;
-use chrono::{Datelike, Utc, NaiveDate, DateTime};
 
 use crate::{
     auth::AuthUser,
     config::Config,
     error::AppResult,
-    models::{Motorcycle, MaintenanceRecord, Issue},
+    models::{Issue, MaintenanceRecord, Motorcycle},
 };
 
 fn parse_year(date_str: &str) -> Option<i32> {
@@ -33,33 +33,73 @@ pub async fn get_stats(
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
     // 1. Global / Instance Counts
-    let users_count = sqlx::query!("SELECT COUNT(*) as cnt FROM users").fetch_one(&pool).await?.cnt;
-    let motorcycles_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles").fetch_one(&pool).await?.cnt;
-    let archived_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles WHERE isArchived = 1").fetch_one(&pool).await?.cnt;
-    let docs_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM documents").fetch_one(&pool).await?.cnt;
-    let doc_assignments_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM documentMotorcycles").fetch_one(&pool).await?.cnt;
-    let maintenance_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM maintenanceRecords").fetch_one(&pool).await?.cnt;
-    let issues_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM issues").fetch_one(&pool).await?.cnt;
-    let open_issues_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM issues WHERE status != 'done'").fetch_one(&pool).await?.cnt;
-    let locations_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM locations").fetch_one(&pool).await?.cnt;
-    let location_history_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM locationRecords").fetch_one(&pool).await?.cnt;
-    let torque_specs_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM torqueSpecs").fetch_one(&pool).await?.cnt;
+    let users_count = sqlx::query!("SELECT COUNT(*) as cnt FROM users")
+        .fetch_one(&pool)
+        .await?
+        .cnt;
+    let motorcycles_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles")
+        .fetch_one(&pool)
+        .await?
+        .cnt;
+    let archived_count_global =
+        sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles WHERE isArchived = 1")
+            .fetch_one(&pool)
+            .await?
+            .cnt;
+    let docs_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM documents")
+        .fetch_one(&pool)
+        .await?
+        .cnt;
+    let doc_assignments_count_global =
+        sqlx::query!("SELECT COUNT(*) as cnt FROM documentMotorcycles")
+            .fetch_one(&pool)
+            .await?
+            .cnt;
+    let maintenance_count_total_global =
+        sqlx::query!("SELECT COUNT(*) as cnt FROM maintenanceRecords")
+            .fetch_one(&pool)
+            .await?
+            .cnt;
+    let issues_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM issues")
+        .fetch_one(&pool)
+        .await?
+        .cnt;
+    let open_issues_count_total_global =
+        sqlx::query!("SELECT COUNT(*) as cnt FROM issues WHERE status != 'done'")
+            .fetch_one(&pool)
+            .await?
+            .cnt;
+    let locations_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM locations")
+        .fetch_one(&pool)
+        .await?
+        .cnt;
+    let location_history_count_total_global =
+        sqlx::query!("SELECT COUNT(*) as cnt FROM locationRecords")
+            .fetch_one(&pool)
+            .await?
+            .cnt;
+    let torque_specs_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM torqueSpecs")
+        .fetch_one(&pool)
+        .await?
+        .cnt;
 
     // 2. Fetch all user data for computation
     let motorcycles = sqlx::query_as::<_, Motorcycle>("SELECT * FROM motorcycles WHERE userId = ?")
         .bind(user.id)
         .fetch_all(&pool)
         .await?;
-    
+
     let maintenance = sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)")
         .bind(user.id)
         .fetch_all(&pool)
         .await?;
 
-    let issues = sqlx::query_as::<_, Issue>("SELECT * FROM issues WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)")
-        .bind(user.id)
-        .fetch_all(&pool)
-        .await?;
+    let issues = sqlx::query_as::<_, Issue>(
+        "SELECT * FROM issues WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)",
+    )
+    .bind(user.id)
+    .fetch_all(&pool)
+    .await?;
 
     // 3. Perform Aggregations
     let current_year = Utc::now().year();
@@ -76,28 +116,37 @@ pub async fn get_stats(
     for moto in &motorcycles {
         if let Some(date_str) = &moto.purchase_date {
             if let Some(y) = parse_year(date_str) {
-                if y < start_year { start_year = y; }
+                if y < start_year {
+                    start_year = y;
+                }
             }
         }
     }
     for y in start_year..=current_year {
-        yearly_map.insert(y, json!({
-            "year": y,
-            "distance": 0,
-            "cost": 0.0,
-            "motorcycleCount": 0,
-            "motorcycles": [],
-            "records": []
-        }));
+        yearly_map.insert(
+            y,
+            json!({
+                "year": y,
+                "distance": 0,
+                "cost": 0.0,
+                "motorcycleCount": 0,
+                "motorcycles": [],
+                "records": []
+            }),
+        );
     }
 
     // Process each motorcycle
     let mut motorcycles_json = Vec::new();
     for moto in &motorcycles {
         let initial_odo = moto.initial_odo;
-        if moto.is_veteran { veteran_count += 1; }
-        
-        let purchase_year = moto.purchase_date.as_ref()
+        if moto.is_veteran {
+            veteran_count += 1;
+        }
+
+        let purchase_year = moto
+            .purchase_date
+            .as_ref()
             .and_then(|d| parse_year(d))
             .unwrap_or(start_year);
 
@@ -109,7 +158,9 @@ pub async fn get_stats(
             let odo = m.odo;
             if let Some(y) = parse_year(&m.date) {
                 let current = odo_by_year.get(&y).cloned().unwrap_or(0);
-                if odo > current { odo_by_year.insert(y, odo); }
+                if odo > current {
+                    odo_by_year.insert(y, odo);
+                }
             }
         }
 
@@ -121,8 +172,9 @@ pub async fn get_stats(
             if y >= purchase_year {
                 let yearly_max = odo_by_year.get(&y).cloned().unwrap_or(last_odo);
                 let distance = yearly_max - last_odo;
-                
-                let yearly_cost = maintenance.iter()
+
+                let yearly_cost = maintenance
+                    .iter()
                     .filter(|m| m.motorcycle_id == moto.id)
                     .filter(|m| parse_year(&m.date) == Some(y))
                     .map(|m| m.normalized_cost.or(m.cost).unwrap_or(0.0))
@@ -130,10 +182,11 @@ pub async fn get_stats(
 
                 if let Some(y_stats) = yearly_map.get_mut(&y) {
                     if let Some(obj) = y_stats.as_object_mut() {
-                        obj["motorcycleCount"] = json!(obj["motorcycleCount"].as_i64().unwrap_or(0) + 1);
+                        obj["motorcycleCount"] =
+                            json!(obj["motorcycleCount"].as_i64().unwrap_or(0) + 1);
                         obj["distance"] = json!(obj["distance"].as_i64().unwrap_or(0) + distance);
                         obj["cost"] = json!(obj["cost"].as_f64().unwrap_or(0.0) + yearly_cost);
-                        
+
                         let moto_list = obj["motorcycles"].as_array_mut().unwrap();
                         moto_list.push(json!({
                             "id": moto.id,
@@ -145,9 +198,13 @@ pub async fn get_stats(
                     }
                 }
 
-                if y == current_year { total_km_this_year += distance; }
+                if y == current_year {
+                    total_km_this_year += distance;
+                }
                 last_odo = yearly_max;
-                if yearly_max > bike_max_odo { bike_max_odo = yearly_max; }
+                if yearly_max > bike_max_odo {
+                    bike_max_odo = yearly_max;
+                }
             }
         }
 
@@ -173,7 +230,9 @@ pub async fn get_stats(
         if let Some(y) = parse_year(&m.date) {
             let cost = m.normalized_cost.or(m.cost).unwrap_or(0.0);
             total_cost_overall += cost;
-            if y == current_year { total_cost_this_year += cost; }
+            if y == current_year {
+                total_cost_this_year += cost;
+            }
 
             if let Some(y_stats) = yearly_map.get_mut(&y) {
                 if let Some(obj) = y_stats.as_object_mut() {
@@ -185,21 +244,40 @@ pub async fn get_stats(
     }
 
     for i in &issues {
-        if i.status != "done" { total_active_issues += 1; }
+        if i.status != "done" {
+            total_active_issues += 1;
+        }
     }
 
     let mut yearly_vec: Vec<Value> = yearly_map.into_values().collect();
-    yearly_vec.sort_by_key(|v| v["year"].as_i64().unwrap_or(0) * -1);
+    yearly_vec.sort_by_key(|v| -v["year"].as_i64().unwrap_or(0));
 
     // Max values for charts
-    let max_yearly_distance = yearly_vec.iter().map(|v| v["distance"].as_i64().unwrap_or(0)).max().unwrap_or(0);
-    let max_yearly_cost = yearly_vec.iter().map(|v| v["cost"].as_f64().unwrap_or(0.0)).max_by(|a, b| a.partial_cmp(b).unwrap()).unwrap_or(0.0);
-    let max_yearly_count = yearly_vec.iter().map(|v| v["motorcycleCount"].as_i64().unwrap_or(0)).max().unwrap_or(0);
+    let max_yearly_distance = yearly_vec
+        .iter()
+        .map(|v| v["distance"].as_i64().unwrap_or(0))
+        .max()
+        .unwrap_or(0);
+    let max_yearly_cost = yearly_vec
+        .iter()
+        .map(|v| v["cost"].as_f64().unwrap_or(0.0))
+        .max_by(|a, b| a.partial_cmp(b).unwrap())
+        .unwrap_or(0.0);
+    let max_yearly_count = yearly_vec
+        .iter()
+        .map(|v| v["motorcycleCount"].as_i64().unwrap_or(0))
+        .max()
+        .unwrap_or(0);
 
     // Top Rider
-    let top_rider = yearly_vec.first()
+    let top_rider = yearly_vec
+        .first()
         .and_then(|y| y["motorcycles"].as_array())
-        .and_then(|motos| motos.iter().max_by_key(|m| m["distance"].as_i64().unwrap_or(0)))
+        .and_then(|motos| {
+            motos
+                .iter()
+                .max_by_key(|m| m["distance"].as_i64().unwrap_or(0))
+        })
         .cloned();
 
     let stats_data = json!({
