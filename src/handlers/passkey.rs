@@ -128,18 +128,25 @@ pub async fn login_options(
     
     let mut allow_credentials = Vec::new();
     
-    if let Some(username) = query.username {
-        let auths = sqlx::query_as::<_, Authenticator>(
+    let auths = if let Some(username) = query.username {
+        sqlx::query_as::<_, Authenticator>(
             "SELECT a.* FROM authenticators a JOIN users u ON u.id = a.userId WHERE u.username = ?"
         )
         .bind(username)
         .fetch_all(&pool)
-        .await?;
-        
-        for a in auths {
-            if let Ok(passkey) = serde_json::from_slice::<Passkey>(&a.public_key) {
-                allow_credentials.push(passkey);
-            }
+        .await?
+    } else {
+        // If no username, we allow all credentials we know about for this RP
+        sqlx::query_as::<_, Authenticator>(
+            "SELECT * FROM authenticators"
+        )
+        .fetch_all(&pool)
+        .await?
+    };
+
+    for a in auths {
+        if let Ok(passkey) = serde_json::from_slice::<Passkey>(&a.public_key) {
+            allow_credentials.push(passkey);
         }
     }
 
@@ -185,6 +192,9 @@ pub async fn login_verify(
     .await?
     .ok_or_else(|| AppError::BadRequest("Challenge not found".to_string()))?;
 
+    let challenge: PasskeyAuthentication = serde_json::from_str(&challenge_row.challenge)
+        .map_err(|e| AppError::Internal(format!("Failed to parse challenge JSON: {}", e)))?;
+
     // Identify the credential from the response
     let cred_id_bytes = base64::Engine::decode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
@@ -203,28 +213,6 @@ pub async fn login_verify(
         tracing::error!("No authenticator found for ID: {}", auth_id);
         AppError::Unauthorized
     })?;
-
-    // Reconstruct the challenge, injecting the known passkey if it was a discoverable login (empty credentials)
-    let mut challenge_val: Value = serde_json::from_str(&challenge_row.challenge)
-        .map_err(|e| AppError::Internal(format!("Failed to parse challenge JSON: {}", e)))?;
-    
-    let passkey_val: Value = serde_json::from_slice(&auth_row.public_key)
-        .map_err(|e| AppError::Internal(format!("Failed to parse passkey from DB: {}", e)))?;
-
-    // webauthn-rs 0.5.4 PasskeyAuthentication JSON structure has an "ast" field
-    // containing "credentials" array.
-    if let Some(credentials) = challenge_val.get_mut("ast")
-        .and_then(|ast| ast.get_mut("credentials"))
-        .and_then(|creds| creds.as_array_mut()) 
-    {
-        if credentials.is_empty() {
-            tracing::debug!("Populating empty challenge with passkey from DB for discoverable login");
-            credentials.push(passkey_val);
-        }
-    }
-
-    let challenge: PasskeyAuthentication = serde_json::from_value(challenge_val)
-        .map_err(|e| AppError::Internal(format!("Failed to reconstruct challenge: {}", e)))?;
 
     let auth_result = webauthn.finish_passkey_authentication(&body.response, &challenge)
         .map_err(|e| {
