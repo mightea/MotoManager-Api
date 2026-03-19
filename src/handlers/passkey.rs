@@ -185,9 +185,7 @@ pub async fn login_verify(
     .await?
     .ok_or_else(|| AppError::BadRequest("Challenge not found".to_string()))?;
 
-    let challenge: PasskeyAuthentication = serde_json::from_str(&challenge_row.challenge)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
+    // Identify the credential from the response
     let cred_id_bytes = base64::Engine::decode(
         &base64::engine::general_purpose::URL_SAFE_NO_PAD,
         &body.response.id
@@ -206,11 +204,27 @@ pub async fn login_verify(
         AppError::Unauthorized
     })?;
 
-    let _passkey: Passkey = serde_json::from_slice(&auth_row.public_key)
-        .map_err(|e| {
-            tracing::error!("Failed to deserialize passkey from DB: {}", e);
-            AppError::Internal(format!("Failed to deserialize passkey: {}", e))
-        })?;
+    // Reconstruct the challenge, injecting the known passkey if it was a discoverable login (empty credentials)
+    let mut challenge_val: Value = serde_json::from_str(&challenge_row.challenge)
+        .map_err(|e| AppError::Internal(format!("Failed to parse challenge JSON: {}", e)))?;
+    
+    let passkey_val: Value = serde_json::from_slice(&auth_row.public_key)
+        .map_err(|e| AppError::Internal(format!("Failed to parse passkey from DB: {}", e)))?;
+
+    // webauthn-rs 0.5.4 PasskeyAuthentication JSON structure has an "ast" field
+    // containing "credentials" array.
+    if let Some(credentials) = challenge_val.get_mut("ast")
+        .and_then(|ast| ast.get_mut("credentials"))
+        .and_then(|creds| creds.as_array_mut()) 
+    {
+        if credentials.is_empty() {
+            tracing::debug!("Populating empty challenge with passkey from DB for discoverable login");
+            credentials.push(passkey_val);
+        }
+    }
+
+    let challenge: PasskeyAuthentication = serde_json::from_value(challenge_val)
+        .map_err(|e| AppError::Internal(format!("Failed to reconstruct challenge: {}", e)))?;
 
     let auth_result = webauthn.finish_passkey_authentication(&body.response, &challenge)
         .map_err(|e| {
