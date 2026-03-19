@@ -8,16 +8,16 @@ name = "moto-manager-api"
 path = "src/main.rs"
 
 [dependencies]
-axum = { version = "0.7", features = ["multipart", "macros"] }
+axum = { version = "0.8", features = ["multipart", "macros"] }
 tokio = { version = "1", features = ["full"] }
-sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio-native-tls", "macros", "chrono"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-native-tls", "macros", "chrono"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["cors", "fs", "trace"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-thiserror = "1"
+thiserror = "2"
 dotenvy = "0.15"
 uuid = { version = "1", features = ["v4"] }
 rand = "0.8"

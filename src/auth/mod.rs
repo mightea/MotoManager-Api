@@ -2,7 +2,6 @@ pub mod password;
 pub mod session;
 
 use axum::{
-    async_trait,
     extract::{FromRef, FromRequestParts},
     http::{header, request::Parts, HeaderMap},
 };
@@ -23,7 +22,6 @@ pub struct AuthUser(pub User);
 #[derive(Debug, Clone)]
 pub struct AdminUser(pub User);
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AuthUser
 where
     S: Send + Sync,
@@ -41,7 +39,6 @@ where
     }
 }
 
-#[async_trait]
 impl<S> FromRequestParts<S> for AdminUser
 where
     S: Send + Sync,

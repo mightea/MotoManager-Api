@@ -67,50 +67,50 @@ pub fn build_app(state: AppState) -> Router {
                 .post(handlers::motorcycles::create_motorcycle),
         )
         .route(
-            "/api/motorcycles/:id",
+            "/api/motorcycles/{id}",
             get(handlers::motorcycles::get_motorcycle)
                 .put(handlers::motorcycles::update_motorcycle)
                 .delete(handlers::motorcycles::delete_motorcycle),
         )
         .route(
-            "/api/motorcycles/:id/issues",
+            "/api/motorcycles/{id}/issues",
             get(handlers::issues::list_issues).post(handlers::issues::create_issue),
         )
         .route(
-            "/api/motorcycles/:id/issues/:issue_id",
+            "/api/motorcycles/{id}/issues/{issue_id}",
             put(handlers::issues::update_issue).delete(handlers::issues::delete_issue),
         )
         .route(
-            "/api/motorcycles/:id/maintenance",
+            "/api/motorcycles/{id}/maintenance",
             get(handlers::maintenance::list_maintenance)
                 .post(handlers::maintenance::create_maintenance),
         )
         .route(
-            "/api/motorcycles/:id/maintenance/:mid",
+            "/api/motorcycles/{id}/maintenance/{mid}",
             put(handlers::maintenance::update_maintenance)
                 .delete(handlers::maintenance::delete_maintenance),
         )
         .route(
-            "/api/motorcycles/:id/previous-owners",
+            "/api/motorcycles/{id}/previous-owners",
             get(handlers::previous_owners::list_previous_owners)
                 .post(handlers::previous_owners::create_previous_owner),
         )
         .route(
-            "/api/motorcycles/:id/previous-owners/:oid",
+            "/api/motorcycles/{id}/previous-owners/{oid}",
             put(handlers::previous_owners::update_previous_owner)
                 .delete(handlers::previous_owners::delete_previous_owner),
         )
         .route(
-            "/api/motorcycles/:id/torque-specs",
+            "/api/motorcycles/{id}/torque-specs",
             get(handlers::torque_specs::list_torque_specs)
                 .post(handlers::torque_specs::create_torque_spec),
         )
         .route(
-            "/api/motorcycles/:id/torque-specs/import",
+            "/api/motorcycles/{id}/torque-specs/import",
             post(handlers::torque_specs::import_torque_specs),
         )
         .route(
-            "/api/motorcycles/:id/torque-specs/:tid",
+            "/api/motorcycles/{id}/torque-specs/{tid}",
             put(handlers::torque_specs::update_torque_spec)
                 .delete(handlers::torque_specs::delete_torque_spec),
         )
@@ -119,7 +119,7 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::documents::list_documents).post(handlers::documents::create_document),
         )
         .route(
-            "/api/documents/:doc_id",
+            "/api/documents/{doc_id}",
             put(handlers::documents::update_document).delete(handlers::documents::delete_document),
         )
         .route(
@@ -127,7 +127,7 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::locations::list_locations).post(handlers::locations::create_location),
         )
         .route(
-            "/api/locations/:lid",
+            "/api/locations/{lid}",
             put(handlers::locations::update_location).delete(handlers::locations::delete_location),
         )
         .route(
@@ -139,7 +139,7 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::settings::get_authenticators),
         )
         .route(
-            "/api/settings/authenticators/:id",
+            "/api/settings/authenticators/{id}",
             delete(handlers::settings::delete_authenticator),
         )
         .route(
@@ -151,7 +151,7 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::admin::list_users).post(handlers::admin::create_user),
         )
         .route(
-            "/api/admin/users/:uid",
+            "/api/admin/users/{uid}",
             put(handlers::admin::update_user).delete(handlers::admin::delete_user),
         )
         .route(
@@ -159,7 +159,7 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::admin::list_currencies).post(handlers::admin::create_currency),
         )
         .route(
-            "/api/admin/currencies/:cid",
+            "/api/admin/currencies/{cid}",
             put(handlers::admin::update_currency).delete(handlers::admin::delete_currency),
         )
         .route(
@@ -169,13 +169,13 @@ pub fn build_app(state: AppState) -> Router {
         .route("/api/currencies", get(handlers::admin::list_currencies_public))
         .route("/api/stats", get(handlers::stats::get_stats))
         .route("/api/home", get(handlers::home::get_home_data))
-        .route("/images/:filename", get(handlers::files::serve_image))
+        .route("/images/{filename}", get(handlers::files::serve_image))
         .route(
-            "/documents/:filename",
+            "/documents/{filename}",
             get(handlers::files::serve_document),
         )
         .route(
-            "/previews/:filename",
+            "/previews/{filename}",
             get(handlers::files::serve_preview)
         )
         .with_state(state)
