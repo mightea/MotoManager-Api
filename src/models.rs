@@ -275,7 +275,6 @@ pub struct PreviousOwner {
     pub updated_at: String,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 #[sqlx(rename_all = "camelCase")]

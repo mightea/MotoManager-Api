@@ -6,7 +6,7 @@ use axum::{
 use chrono::Utc;
 use pdfium_render::prelude::*;
 use serde_json::{json, Value};
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
@@ -17,8 +17,19 @@ use crate::{
 };
 
 pub fn format_doc_paths(mut doc: Document) -> Document {
-    doc.file_path = format!("/documents/{}", doc.file_path.replace("/data/documents/", "").replace("data/documents/", ""));
-    doc.preview_path = doc.preview_path.map(|p| format!("/previews/{}", p.replace("/data/previews/", "").replace("data/previews/", "")));
+    doc.file_path = format!(
+        "/documents/{}",
+        doc.file_path
+            .replace("/data/documents/", "")
+            .replace("data/documents/", "")
+    );
+    doc.preview_path = doc.preview_path.map(|p| {
+        format!(
+            "/previews/{}",
+            p.replace("/data/previews/", "")
+                .replace("data/previews/", "")
+        )
+    });
     doc
 }
 
@@ -58,7 +69,7 @@ async fn save_document_file(
             Ok(pf) => {
                 tracing::info!("Preview generated successfully: {}", pf);
                 Some(pf)
-            },
+            }
             Err(e) => {
                 tracing::error!("Failed to generate preview for {}: {}", stored_filename, e);
                 None
@@ -70,9 +81,13 @@ async fn save_document_file(
             Ok(pf) => {
                 tracing::info!("PDF preview generated successfully: {}", pf);
                 Some(pf)
-            },
+            }
             Err(e) => {
-                tracing::error!("Failed to generate PDF preview for {}: {}", stored_filename, e);
+                tracing::error!(
+                    "Failed to generate PDF preview for {}: {}",
+                    stored_filename,
+                    e
+                );
                 None
             }
         }
@@ -84,11 +99,7 @@ async fn save_document_file(
     Ok((stored_filename, preview_filename))
 }
 
-async fn generate_pdf_preview(
-    config: &Config,
-    data: &[u8],
-    uuid: &str,
-) -> AppResult<String> {
+async fn generate_pdf_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
     let pdfium = Pdfium::new(
         Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
             .or_else(|_| Pdfium::bind_to_system_library())
@@ -115,7 +126,7 @@ async fn generate_pdf_preview(
     let preview_filename = format!("{}.jpg", uuid);
     let preview_path = config.previews_dir().join(&preview_filename);
 
-    let img = bitmap.as_image(); 
+    let img = bitmap.as_image();
     let thumbnail = img.thumbnail(400, 400);
 
     thumbnail
@@ -125,11 +136,7 @@ async fn generate_pdf_preview(
     Ok(preview_filename)
 }
 
-async fn generate_image_preview(
-    config: &Config,
-    data: &[u8],
-    uuid: &str,
-) -> AppResult<String> {
+async fn generate_image_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
     let data = data.to_vec();
     let img = image::load_from_memory(&data)
         .map_err(|e| AppError::Image(format!("Failed to load image: {}", e)))?;
@@ -149,7 +156,11 @@ pub async fn list_documents(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
-    tracing::debug!("Listing documents for user: {} (ID: {})", user.username, user.id);
+    tracing::debug!(
+        "Listing documents for user: {} (ID: {})",
+        user.username,
+        user.id
+    );
     let rows = sqlx::query_as::<_, Document>(
         "SELECT * FROM documents WHERE isPrivate = 0 OR ownerId = ? ORDER BY createdAt DESC",
     )
@@ -176,24 +187,32 @@ pub async fn list_documents(
     .fetch_all(&pool)
     .await?;
 
-    let all_motorcycles: Vec<Value> = motorcycles.into_iter().map(|r| json!({
-        "id": r.id,
-        "make": r.make,
-        "model": r.model,
-    })).collect();
+    let all_motorcycles: Vec<Value> = motorcycles
+        .into_iter()
+        .map(|r| {
+            json!({
+                "id": r.id,
+                "make": r.make,
+                "model": r.model,
+            })
+        })
+        .collect();
 
-    let assignments_rows = sqlx::query!(
-        "SELECT documentId, motorcycleId FROM documentMotorcycles"
-    )
-    .fetch_all(&pool)
-    .await?;
+    let assignments_rows = sqlx::query!("SELECT documentId, motorcycleId FROM documentMotorcycles")
+        .fetch_all(&pool)
+        .await?;
 
-    let assignments: Vec<Value> = assignments_rows.into_iter().map(|r| json!({
-        "documentId": r.documentId,
-        "motorcycleId": r.motorcycleId,
-    })).collect();
+    let assignments: Vec<Value> = assignments_rows
+        .into_iter()
+        .map(|r| {
+            json!({
+                "documentId": r.documentId,
+                "motorcycleId": r.motorcycleId,
+            })
+        })
+        .collect();
 
-    Ok(Json(json!({ 
+    Ok(Json(json!({
         "docs": docs,
         "allMotorcycles": all_motorcycles,
         "assignments": assignments
@@ -206,7 +225,11 @@ pub async fn create_document(
     AuthUser(user): AuthUser,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    tracing::info!("Creating document for user: {} (ID: {})", user.username, user.id);
+    tracing::info!(
+        "Creating document for user: {} (ID: {})",
+        user.username,
+        user.id
+    );
     let mut title: Option<String> = None;
     let mut is_private = false;
     let mut motorcycle_ids: Vec<i64> = Vec::new();
@@ -220,34 +243,27 @@ pub async fn create_document(
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
             "title" => {
-                title = Some(
-                    field
-                        .text()
-                        .await
-                        .map_err(|e| AppError::BadRequest(format!("Failed to read title: {}", e)))?,
-                );
+                title =
+                    Some(field.text().await.map_err(|e| {
+                        AppError::BadRequest(format!("Failed to read title: {}", e))
+                    })?);
             }
             "isPrivate" => {
-                let val = field
-                    .text()
-                    .await
-                    .map_err(|e| AppError::BadRequest(format!("Failed to read isPrivate: {}", e)))?;
+                let val = field.text().await.map_err(|e| {
+                    AppError::BadRequest(format!("Failed to read isPrivate: {}", e))
+                })?;
                 is_private = val == "true" || val == "1";
             }
             "motorcycleIds" | "motorcycleIds[]" => {
-                let val = field
-                    .text()
-                    .await
-                    .map_err(|e| AppError::BadRequest(format!("Failed to read motorcycleIds: {}", e)))?;
+                let val = field.text().await.map_err(|e| {
+                    AppError::BadRequest(format!("Failed to read motorcycleIds: {}", e))
+                })?;
                 if let Ok(id) = val.parse::<i64>() {
                     motorcycle_ids.push(id);
                 }
             }
             "file" => {
-                let original_name = field
-                    .file_name()
-                    .unwrap_or("document.bin")
-                    .to_string();
+                let original_name = field.file_name().unwrap_or("document.bin").to_string();
                 let bytes = field
                     .bytes()
                     .await
@@ -289,11 +305,14 @@ pub async fn create_document(
 
     // Associate with motorcycles (verifying ownership)
     for moto_id in &motorcycle_ids {
-        let count: i64 =
-            sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?", moto_id, user.id)
-                .fetch_one(&pool)
-                .await?
-                .cnt as i64;
+        let count: i64 = sqlx::query!(
+            "SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?",
+            moto_id,
+            user.id
+        )
+        .fetch_one(&pool)
+        .await?
+        .cnt as i64;
         if count > 0 {
             sqlx::query!(
                 "INSERT OR IGNORE INTO documentMotorcycles (documentId, motorcycleId) VALUES (?, ?)",
@@ -304,12 +323,10 @@ pub async fn create_document(
         }
     }
 
-    let doc = sqlx::query_as::<_, Document>(
-        "SELECT * FROM documents WHERE id = ?",
-    )
-    .bind(doc_id)
-    .fetch_one(&pool)
-    .await?;
+    let doc = sqlx::query_as::<_, Document>("SELECT * FROM documents WHERE id = ?")
+        .bind(doc_id)
+        .fetch_one(&pool)
+        .await?;
 
     let saved_moto_ids = get_motorcycle_ids_for_doc(&pool, doc_id).await?;
     let doc = format_doc_paths(doc);
@@ -330,13 +347,11 @@ pub async fn update_document(
     mut multipart: Multipart,
 ) -> AppResult<Json<Value>> {
     tracing::info!("Updating document ID: {} for user: {}", doc_id, user.id);
-    let existing = sqlx::query_as::<_, Document>(
-        "SELECT * FROM documents WHERE id = ?",
-    )
-    .bind(doc_id)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Document not found".to_string()))?;
+    let existing = sqlx::query_as::<_, Document>("SELECT * FROM documents WHERE id = ?")
+        .bind(doc_id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Document not found".to_string()))?;
 
     let is_owner = existing.owner_id == Some(user.id);
 
@@ -361,21 +376,27 @@ pub async fn update_document(
         match name.as_str() {
             "title" => {
                 if is_owner {
-                    new_title = Some(field.text().await.map_err(|e| AppError::BadRequest(format!("Failed to read title: {}", e)))?);
+                    new_title = Some(field.text().await.map_err(|e| {
+                        AppError::BadRequest(format!("Failed to read title: {}", e))
+                    })?);
                 } else {
                     let _ = field.bytes().await;
                 }
             }
             "isPrivate" => {
                 if is_owner {
-                    let val = field.text().await.map_err(|e| AppError::BadRequest(format!("Failed to read isPrivate: {}", e)))?;
+                    let val = field.text().await.map_err(|e| {
+                        AppError::BadRequest(format!("Failed to read isPrivate: {}", e))
+                    })?;
                     new_is_private = Some(val == "true" || val == "1");
                 } else {
                     let _ = field.bytes().await;
                 }
             }
             "motorcycleIds" | "motorcycleIds[]" => {
-                let val = field.text().await.map_err(|e| AppError::BadRequest(format!("Failed to read motorcycleIds: {}", e)))?;
+                let val = field.text().await.map_err(|e| {
+                    AppError::BadRequest(format!("Failed to read motorcycleIds: {}", e))
+                })?;
                 if let Ok(id) = val.parse::<i64>() {
                     motorcycle_ids_buf.push(id);
                 }
@@ -384,7 +405,10 @@ pub async fn update_document(
             "file" => {
                 if is_owner {
                     let original_name = field.file_name().unwrap_or("document.bin").to_string();
-                    let bytes = field.bytes().await.map_err(|e| AppError::BadRequest(format!("Failed to read file: {}", e)))?;
+                    let bytes = field
+                        .bytes()
+                        .await
+                        .map_err(|e| AppError::BadRequest(format!("Failed to read file: {}", e)))?;
                     if !bytes.is_empty() {
                         file_data = Some((bytes.to_vec(), original_name));
                     }
@@ -408,7 +432,8 @@ pub async fn update_document(
         let title = new_title.unwrap_or(existing.title);
         let is_private = new_is_private.unwrap_or(existing.is_private);
 
-        let (new_file_path, new_preview_path) = if let Some((file_bytes, original_name)) = file_data {
+        let (new_file_path, new_preview_path) = if let Some((file_bytes, original_name)) = file_data
+        {
             let old_file = config.documents_dir().join(&existing.file_path);
             let _ = tokio::fs::remove_file(old_file).await;
             if let Some(old_preview) = &existing.preview_path {
@@ -432,12 +457,21 @@ pub async fn update_document(
 
     if let Some(moto_ids) = new_motorcycle_ids {
         if is_owner {
-            sqlx::query!("DELETE FROM documentMotorcycles WHERE documentId = ?", doc_id)
-                .execute(&pool)
-                .await?;
+            sqlx::query!(
+                "DELETE FROM documentMotorcycles WHERE documentId = ?",
+                doc_id
+            )
+            .execute(&pool)
+            .await?;
             for moto_id in &moto_ids {
-                let count = sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?", moto_id, user.id)
-                    .fetch_one(&pool).await?.cnt;
+                let count = sqlx::query!(
+                    "SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?",
+                    moto_id,
+                    user.id
+                )
+                .fetch_one(&pool)
+                .await?
+                .cnt;
                 if count > 0 {
                     sqlx::query!("INSERT OR IGNORE INTO documentMotorcycles (documentId, motorcycleId) VALUES (?, ?)", doc_id, moto_id)
                         .execute(&pool).await?;
@@ -445,16 +479,28 @@ pub async fn update_document(
             }
         } else {
             let user_motos = sqlx::query!("SELECT id FROM motorcycles WHERE userId = ?", user.id)
-                .fetch_all(&pool).await?;
+                .fetch_all(&pool)
+                .await?;
 
             for moto_row in user_motos {
-                sqlx::query!("DELETE FROM documentMotorcycles WHERE documentId = ? AND motorcycleId = ?", doc_id, moto_row.id)
-                    .execute(&pool).await?;
+                sqlx::query!(
+                    "DELETE FROM documentMotorcycles WHERE documentId = ? AND motorcycleId = ?",
+                    doc_id,
+                    moto_row.id
+                )
+                .execute(&pool)
+                .await?;
             }
 
             for moto_id in &moto_ids {
-                let count = sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?", moto_id, user.id)
-                    .fetch_one(&pool).await?.cnt;
+                let count = sqlx::query!(
+                    "SELECT COUNT(*) as cnt FROM motorcycles WHERE id = ? AND userId = ?",
+                    moto_id,
+                    user.id
+                )
+                .fetch_one(&pool)
+                .await?
+                .cnt;
                 if count > 0 {
                     sqlx::query!("INSERT OR IGNORE INTO documentMotorcycles (documentId, motorcycleId) VALUES (?, ?)", doc_id, moto_id)
                         .execute(&pool).await?;
@@ -464,7 +510,9 @@ pub async fn update_document(
     }
 
     let doc = sqlx::query_as::<_, Document>("SELECT * FROM documents WHERE id = ?")
-        .bind(doc_id).fetch_one(&pool).await?;
+        .bind(doc_id)
+        .fetch_one(&pool)
+        .await?;
 
     let saved_moto_ids = get_motorcycle_ids_for_doc(&pool, doc_id).await?;
     let doc = format_doc_paths(doc);
@@ -484,13 +532,11 @@ pub async fn delete_document(
     Path(doc_id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     tracing::info!("Deleting document ID: {} for user: {}", doc_id, user.id);
-    let doc = sqlx::query_as::<_, Document>(
-        "SELECT * FROM documents WHERE id = ?",
-    )
-    .bind(doc_id)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Document not found".to_string()))?;
+    let doc = sqlx::query_as::<_, Document>("SELECT * FROM documents WHERE id = ?")
+        .bind(doc_id)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("Document not found".to_string()))?;
 
     if doc.owner_id != Some(user.id) {
         return Err(AppError::Forbidden);
@@ -500,11 +546,16 @@ pub async fn delete_document(
         .execute(&pool)
         .await?;
 
-    let filename = doc.file_path.replace("/data/documents/", "").replace("data/documents/", "");
+    let filename = doc
+        .file_path
+        .replace("/data/documents/", "")
+        .replace("data/documents/", "");
     let _ = tokio::fs::remove_file(config.documents_dir().join(&filename)).await;
 
     if let Some(preview) = doc.preview_path {
-        let preview_filename = preview.replace("/data/previews/", "").replace("data/previews/", "");
+        let preview_filename = preview
+            .replace("/data/previews/", "")
+            .replace("data/previews/", "");
         let _ = tokio::fs::remove_file(config.previews_dir().join(&preview_filename)).await;
     }
 

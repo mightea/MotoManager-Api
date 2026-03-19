@@ -7,7 +7,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::{
     auth::{
@@ -42,12 +42,10 @@ pub async fn login(
     Json(body): Json<LoginRequest>,
 ) -> AppResult<Response> {
     tracing::info!("Login attempt for identifier: {}", body.identifier);
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE ? IN (email, username)",
-    )
-    .bind(&body.identifier)
-    .fetch_optional(&pool)
-    .await?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE ? IN (email, username)")
+        .bind(&body.identifier)
+        .fetch_optional(&pool)
+        .await?;
 
     let user = match user {
         Some(u) => u,
@@ -72,7 +70,8 @@ pub async fn login(
 
     sqlx::query!(
         "UPDATE users SET lastLoginAt = ? WHERE id = ?",
-        now, user.id
+        now,
+        user.id
     )
     .execute(&pool)
     .await?;
@@ -142,11 +141,14 @@ pub async fn register(
         ));
     }
 
-    let existing: i64 =
-        sqlx::query!("SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?", body.email, body.username)
-            .fetch_one(&pool)
-            .await?
-            .cnt as i64;
+    let existing: i64 = sqlx::query!(
+        "SELECT COUNT(*) as cnt FROM users WHERE email = ? OR username = ?",
+        body.email,
+        body.username
+    )
+    .fetch_one(&pool)
+    .await?
+    .cnt as i64;
 
     if existing > 0 {
         return Err(AppError::Conflict(
@@ -173,18 +175,20 @@ pub async fn register(
     .await?
     .last_insert_rowid();
 
-    sqlx::query!("INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)", user_id, now)
-        .execute(&pool)
-        .await?;
+    sqlx::query!(
+        "INSERT OR IGNORE INTO userSettings (userId, updatedAt) VALUES (?, ?)",
+        user_id,
+        now
+    )
+    .execute(&pool)
+    .await?;
 
     let token = create_session(&pool, user_id).await?;
 
-    let user = sqlx::query_as::<_, User>(
-        "SELECT * FROM users WHERE id = ?",
-    )
-    .bind(user_id)
-    .fetch_one(&pool)
-    .await?;
+    let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await?;
 
     let public_user = PublicUser::from(user);
 

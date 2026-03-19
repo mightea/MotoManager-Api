@@ -6,7 +6,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::{
     auth::AuthUser,
@@ -85,10 +85,7 @@ pub async fn create_previous_owner(
         .fetch_one(&pool)
         .await?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "previousOwner": owner })),
-    ))
+    Ok((StatusCode::CREATED, Json(json!({ "previousOwner": owner }))))
 }
 
 #[derive(Debug, Deserialize)]
@@ -171,12 +168,11 @@ pub async fn delete_previous_owner(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let result =
-        sqlx::query("DELETE FROM previousOwners WHERE id = ? AND motorcycleId = ?")
-            .bind(oid)
-            .bind(motorcycle_id)
-            .execute(&pool)
-            .await?;
+    let result = sqlx::query("DELETE FROM previousOwners WHERE id = ? AND motorcycleId = ?")
+        .bind(oid)
+        .bind(motorcycle_id)
+        .execute(&pool)
+        .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Previous owner not found".to_string()));

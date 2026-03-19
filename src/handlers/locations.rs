@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::{
     auth::AuthUser,
@@ -17,12 +17,11 @@ pub async fn list_locations(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
-    let locations = sqlx::query_as::<_, Location>(
-        "SELECT * FROM locations WHERE userId = ? ORDER BY name ASC",
-    )
-    .bind(user.id)
-    .fetch_all(&pool)
-    .await?;
+    let locations =
+        sqlx::query_as::<_, Location>("SELECT * FROM locations WHERE userId = ? ORDER BY name ASC")
+            .bind(user.id)
+            .fetch_all(&pool)
+            .await?;
 
     Ok(Json(json!({ "locations": locations })))
 }
@@ -41,25 +40,20 @@ pub async fn create_location(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     let country_code = body.country_code.unwrap_or_else(|| "CH".to_string());
 
-    let id = sqlx::query(
-        "INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)",
-    )
-    .bind(&body.name)
-    .bind(&country_code)
-    .bind(user.id)
-    .execute(&pool)
-    .await?
-    .last_insert_rowid();
+    let id = sqlx::query("INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)")
+        .bind(&body.name)
+        .bind(&country_code)
+        .bind(user.id)
+        .execute(&pool)
+        .await?
+        .last_insert_rowid();
 
     let location = sqlx::query_as::<_, Location>("SELECT * FROM locations WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
         .await?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "location": location })),
-    ))
+    Ok((StatusCode::CREATED, Json(json!({ "location": location }))))
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,14 +69,13 @@ pub async fn update_location(
     Path(lid): Path<i64>,
     Json(body): Json<UpdateLocationRequest>,
 ) -> AppResult<Json<Value>> {
-    let existing = sqlx::query_as::<_, Location>(
-        "SELECT * FROM locations WHERE id = ? AND userId = ?",
-    )
-    .bind(lid)
-    .bind(user.id)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Location not found".to_string()))?;
+    let existing =
+        sqlx::query_as::<_, Location>("SELECT * FROM locations WHERE id = ? AND userId = ?")
+            .bind(lid)
+            .bind(user.id)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Location not found".to_string()))?;
 
     let name = body.name.unwrap_or(existing.name);
     let country_code = body.country_code.unwrap_or(existing.country_code);

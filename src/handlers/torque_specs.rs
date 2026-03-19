@@ -6,7 +6,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::{
     auth::AuthUser,
@@ -80,10 +80,7 @@ pub async fn create_torque_spec(
         .fetch_one(&pool)
         .await?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "torqueSpec": spec })),
-    ))
+    Ok((StatusCode::CREATED, Json(json!({ "torqueSpec": spec }))))
 }
 
 #[derive(Debug, Deserialize)]
@@ -101,12 +98,11 @@ pub async fn import_torque_specs(
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
     verify_motorcycle_ownership(&pool, body.from_motorcycle_id, user.id).await?;
 
-    let source_specs = sqlx::query_as::<_, TorqueSpec>(
-        "SELECT * FROM torqueSpecs WHERE motorcycleId = ?",
-    )
-    .bind(body.from_motorcycle_id)
-    .fetch_all(&pool)
-    .await?;
+    let source_specs =
+        sqlx::query_as::<_, TorqueSpec>("SELECT * FROM torqueSpecs WHERE motorcycleId = ?")
+            .bind(body.from_motorcycle_id)
+            .fetch_all(&pool)
+            .await?;
 
     let now = Utc::now().to_rfc3339();
     let mut imported_count: i64 = 0;

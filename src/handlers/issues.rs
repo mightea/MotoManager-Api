@@ -6,7 +6,7 @@ use axum::{
 use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::{
     auth::AuthUser,
@@ -74,10 +74,7 @@ pub async fn create_issue(
         .fetch_one(&pool)
         .await?;
 
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({ "issue": issue })),
-    ))
+    Ok((StatusCode::CREATED, Json(json!({ "issue": issue }))))
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,14 +94,13 @@ pub async fn update_issue(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let existing = sqlx::query_as::<_, Issue>(
-        "SELECT * FROM issues WHERE id = ? AND motorcycleId = ?",
-    )
-    .bind(issue_id)
-    .bind(motorcycle_id)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Issue not found".to_string()))?;
+    let existing =
+        sqlx::query_as::<_, Issue>("SELECT * FROM issues WHERE id = ? AND motorcycleId = ?")
+            .bind(issue_id)
+            .bind(motorcycle_id)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Issue not found".to_string()))?;
 
     let odo = body.odo.unwrap_or(existing.odo);
     let description: Option<String> = body.description.or(existing.description);

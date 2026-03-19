@@ -4,16 +4,19 @@ use axum::{
     Json,
 };
 use serde_json::{json, Value};
-use sqlx::{SqlitePool, Row};
+use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
+use crate::handlers::documents::{format_doc_paths, get_motorcycle_ids_for_doc};
 use crate::{
     auth::AuthUser,
     config::Config,
     error::{AppError, AppResult},
-    models::{Motorcycle, MotorcycleWithStats, MaintenanceRecord, Issue, PreviousOwner, TorqueSpec, Document},
+    models::{
+        Document, Issue, MaintenanceRecord, Motorcycle, MotorcycleWithStats, PreviousOwner,
+        TorqueSpec,
+    },
 };
-use crate::handlers::documents::{format_doc_paths, get_motorcycle_ids_for_doc};
 
 async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppResult<String> {
     let ext = if content_type.contains("png") {
@@ -33,15 +36,24 @@ async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppRe
 }
 
 fn format_image_url(image: Option<String>) -> Option<String> {
-    image.map(|i| format!("/images/{}", i.replace("/data/images/", "").replace("data/images/", "")))
+    image.map(|i| {
+        format!(
+            "/images/{}",
+            i.replace("/data/images/", "").replace("data/images/", "")
+        )
+    })
 }
 
 pub async fn list_motorcycles(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
-    tracing::debug!("Listing motorcycles for user: {} (ID: {})", user.username, user.id);
-    
+    tracing::debug!(
+        "Listing motorcycles for user: {} (ID: {})",
+        user.username,
+        user.id
+    );
+
     let motorcycles = sqlx::query_as::<_, MotorcycleWithStats>(r#"
         SELECT 
             m.*,
@@ -56,10 +68,13 @@ pub async fn list_motorcycles(
     .fetch_all(&pool)
     .await?;
 
-    let result: Vec<Value> = motorcycles.into_iter().map(|mut m| {
-        m.image = format_image_url(m.image);
-        serde_json::to_value(m).unwrap_or(json!({}))
-    }).collect();
+    let result: Vec<Value> = motorcycles
+        .into_iter()
+        .map(|mut m| {
+            m.image = format_image_url(m.image);
+            serde_json::to_value(m).unwrap_or(json!({}))
+        })
+        .collect();
 
     Ok(Json(json!({ "motorcycles": result })))
 }
@@ -70,7 +85,11 @@ pub async fn create_motorcycle(
     AuthUser(user): AuthUser,
     mut multipart: Multipart,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    tracing::info!("Creating motorcycle for user: {} (ID: {})", user.username, user.id);
+    tracing::info!(
+        "Creating motorcycle for user: {} (ID: {})",
+        user.username,
+        user.id
+    );
     let mut fields = std::collections::HashMap::<String, String>::new();
     let mut image_filename: Option<String> = None;
 
@@ -183,14 +202,13 @@ pub async fn get_motorcycle(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     tracing::debug!("Fetching motorcycle ID: {} for user: {}", id, user.id);
-    let mut motorcycle = sqlx::query_as::<_, Motorcycle>(
-        "SELECT * FROM motorcycles WHERE id = ? AND userId = ?"
-    )
-    .bind(id)
-    .bind(user.id)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
+    let mut motorcycle =
+        sqlx::query_as::<_, Motorcycle>("SELECT * FROM motorcycles WHERE id = ? AND userId = ?")
+            .bind(id)
+            .bind(user.id)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
 
     motorcycle.image = format_image_url(motorcycle.image);
 
@@ -262,14 +280,13 @@ pub async fn update_motorcycle(
 ) -> AppResult<Json<Value>> {
     tracing::info!("Updating motorcycle ID: {} for user: {}", id, user.id);
     // Verify ownership
-    let existing = sqlx::query_as::<_, Motorcycle>(
-        "SELECT * FROM motorcycles WHERE id = ? AND userId = ?"
-    )
-    .bind(id)
-    .bind(user.id)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
+    let existing =
+        sqlx::query_as::<_, Motorcycle>("SELECT * FROM motorcycles WHERE id = ? AND userId = ?")
+            .bind(id)
+            .bind(user.id)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
 
     let mut fields = std::collections::HashMap::<String, String>::new();
     let mut image_filename: Option<String> = existing.image.clone();
@@ -298,14 +315,8 @@ pub async fn update_motorcycle(
         }
     }
 
-    let make: String = fields
-        .get("make")
-        .cloned()
-        .unwrap_or(existing.make);
-    let model: String = fields
-        .get("model")
-        .cloned()
-        .unwrap_or(existing.model);
+    let make: String = fields.get("make").cloned().unwrap_or(existing.make);
+    let model: String = fields.get("model").cloned().unwrap_or(existing.model);
     let model_year: Option<String> = fields
         .get("fabricationDate")
         .cloned()
@@ -343,14 +354,8 @@ pub async fn update_motorcycle(
         .get("engineNumber")
         .cloned()
         .or(existing.engine_number);
-    let vehicle_nr: Option<String> = fields
-        .get("vehicleNr")
-        .cloned()
-        .or(existing.vehicle_nr);
-    let number_plate: Option<String> = fields
-        .get("numberPlate")
-        .cloned()
-        .or(existing.number_plate);
+    let vehicle_nr: Option<String> = fields.get("vehicleNr").cloned().or(existing.vehicle_nr);
+    let number_plate: Option<String> = fields.get("numberPlate").cloned().or(existing.number_plate);
     let first_registration: Option<String> = fields
         .get("firstRegistration")
         .cloned()
@@ -413,16 +418,15 @@ pub async fn delete_motorcycle(
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
     tracing::info!("Deleting motorcycle ID: {} for user: {}", id, user.id);
-    
+
     // Get image path before deleting
-    let motorcycle = sqlx::query_as::<_, Motorcycle>(
-        "SELECT * FROM motorcycles WHERE id = ? AND userId = ?"
-    )
-    .bind(id)
-    .bind(user.id)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
+    let motorcycle =
+        sqlx::query_as::<_, Motorcycle>("SELECT * FROM motorcycles WHERE id = ? AND userId = ?")
+            .bind(id)
+            .bind(user.id)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
 
     let result = sqlx::query("DELETE FROM motorcycles WHERE id = ? AND userId = ?")
         .bind(id)
@@ -439,7 +443,7 @@ pub async fn delete_motorcycle(
         let filename = path_str
             .replace("/data/images/", "")
             .replace("data/images/", "");
-        
+
         // Delete original
         let full_path = config.images_dir().join(&filename);
         let _ = tokio::fs::remove_file(full_path).await;

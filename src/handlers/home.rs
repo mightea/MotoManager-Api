@@ -155,9 +155,7 @@ pub async fn get_home_data(
 
         // Current Location
         let latest_loc_record = moto_loc_records.first();
-        let latest_m_with_loc = moto_maintenance
-            .iter()
-            .find(|m| m.location_id.is_some());
+        let latest_m_with_loc = moto_maintenance.iter().find(|m| m.location_id.is_some());
 
         let current_location_id = match (latest_loc_record, latest_m_with_loc) {
             (Some(lr), Some(mr)) => {
@@ -262,8 +260,7 @@ pub async fn get_home_data(
         // Overdue Maintenance Calculation
         let mut overdue_items = Vec::new();
         if let Some(s) = &_settings {
-            let moto_maintenance_records: Vec<&MaintenanceRecord> =
-                moto_maintenance.to_vec();
+            let moto_maintenance_records: Vec<&MaintenanceRecord> = moto_maintenance.to_vec();
 
             // Helper to check if a specific type is overdue
             let is_overdue_fn = |record_type: &str,
@@ -271,14 +268,12 @@ pub async fn get_home_data(
                                  years: i64,
                                  kms: Option<i64>|
              -> (bool, String) {
-                let latest = moto_maintenance_records
-                    .iter()
-                    .find(|r| {
-                        r.record_type == record_type
-                            && (subtype.is_none()
-                                || r.fluid_type.as_deref() == subtype
-                                || r.tire_position.as_deref() == subtype)
-                    });
+                let latest = moto_maintenance_records.iter().find(|r| {
+                    r.record_type == record_type
+                        && (subtype.is_none()
+                            || r.fluid_type.as_deref() == subtype
+                            || r.tire_position.as_deref() == subtype)
+                });
 
                 if let Some(r) = latest {
                     if let Some(last_date) = parse_date(&r.date) {

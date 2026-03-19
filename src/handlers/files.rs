@@ -49,7 +49,19 @@ pub async fn serve_image(
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or(&filename);
-                let cache_filename = format!("{}_{}x{}.{}", stem, w, h, if matches!(format, image::ImageFormat::WebP) { "webp" } else if matches!(format, image::ImageFormat::Png) { "png" } else { "jpg" });
+                let cache_filename = format!(
+                    "{}_{}x{}.{}",
+                    stem,
+                    w,
+                    h,
+                    if matches!(format, image::ImageFormat::WebP) {
+                        "webp"
+                    } else if matches!(format, image::ImageFormat::Png) {
+                        "png"
+                    } else {
+                        "jpg"
+                    }
+                );
                 let cache_path = config.resized_images_dir().join(&cache_filename);
 
                 if let Ok(cached_data) = tokio::fs::read(&cache_path).await {
@@ -65,13 +77,20 @@ pub async fn serve_image(
 
                 match resize_image(&data, w, h, format) {
                     Ok(resized) => {
-                        tracing::info!("Resized image {} to {}x{} (format: {:?})", filename, w, h, format);
-                        
+                        tracing::info!(
+                            "Resized image {} to {}x{} (format: {:?})",
+                            filename,
+                            w,
+                            h,
+                            format
+                        );
+
                         // Save to cache (fire and forget)
                         let cache_path_clone = cache_path.clone();
                         let resized_clone = resized.clone();
                         tokio::spawn(async move {
-                            if let Err(e) = tokio::fs::write(cache_path_clone, resized_clone).await {
+                            if let Err(e) = tokio::fs::write(cache_path_clone, resized_clone).await
+                            {
                                 tracing::warn!("Failed to write resized image to cache: {}", e);
                             }
                         });
@@ -79,10 +98,7 @@ pub async fn serve_image(
                         let response = Response::builder()
                             .status(StatusCode::OK)
                             .header(header::CONTENT_TYPE, content_type)
-                            .header(
-                                header::CACHE_CONTROL,
-                                "public, max-age=31536000",
-                            )
+                            .header(header::CACHE_CONTROL, "public, max-age=31536000")
                             .body(Body::from(resized))
                             .unwrap();
                         response.into_response()
@@ -166,9 +182,13 @@ fn serve_raw(data: Vec<u8>, filename: &str) -> impl IntoResponse {
         .unwrap()
 }
 
-fn resize_image(data: &[u8], width: u32, height: u32, format: image::ImageFormat) -> Result<Vec<u8>, String> {
-    let img = image::load_from_memory(data)
-        .map_err(|e| format!("Failed to load image: {}", e))?;
+fn resize_image(
+    data: &[u8],
+    width: u32,
+    height: u32,
+    format: image::ImageFormat,
+) -> Result<Vec<u8>, String> {
+    let img = image::load_from_memory(data).map_err(|e| format!("Failed to load image: {}", e))?;
 
     let resized = if width > 0 && height > 0 {
         img.resize(width, height, image::imageops::FilterType::Lanczos3)

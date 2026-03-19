@@ -5,7 +5,7 @@ use axum::{
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
-use sqlx::{SqlitePool};
+use sqlx::SqlitePool;
 
 use crate::{
     auth::AuthUser,
@@ -64,11 +64,15 @@ pub async fn list_maintenance(
     AuthUser(user): AuthUser,
     Path(motorcycle_id): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    tracing::debug!("Listing maintenance records for motorcycle ID: {} for user: {}", motorcycle_id, user.id);
+    tracing::debug!(
+        "Listing maintenance records for motorcycle ID: {} for user: {}",
+        motorcycle_id,
+        user.id
+    );
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let records = sqlx::query_as::<_, MaintenanceRecord>(
-        "SELECT * FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC"
+        "SELECT * FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
     )
     .bind(motorcycle_id)
     .fetch_all(&pool)
@@ -115,7 +119,11 @@ pub async fn create_maintenance(
     Path(motorcycle_id): Path<i64>,
     Json(body): Json<MaintenanceRequest>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
-    tracing::info!("Creating maintenance record for motorcycle ID: {} for user: {}", motorcycle_id, user.id);
+    tracing::info!(
+        "Creating maintenance record for motorcycle ID: {} for user: {}",
+        motorcycle_id,
+        user.id
+    );
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let date = body
@@ -181,12 +189,17 @@ pub async fn create_maintenance(
         }
     }
 
-    let record = sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE id = ?")
-        .bind(id)
-        .fetch_one(&pool)
-        .await?;
+    let record =
+        sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await?;
 
-    tracing::info!("Maintenance record created ID: {} for motorcycle ID: {}", id, motorcycle_id);
+    tracing::info!(
+        "Maintenance record created ID: {} for motorcycle ID: {}",
+        id,
+        motorcycle_id
+    );
     Ok((
         StatusCode::CREATED,
         Json(json!({ "maintenanceRecord": record })),
@@ -199,11 +212,16 @@ pub async fn update_maintenance(
     Path((motorcycle_id, mid)): Path<(i64, i64)>,
     Json(body): Json<MaintenanceRequest>,
 ) -> AppResult<Json<Value>> {
-    tracing::info!("Updating maintenance record ID: {} for motorcycle ID: {} for user: {}", mid, motorcycle_id, user.id);
+    tracing::info!(
+        "Updating maintenance record ID: {} for motorcycle ID: {} for user: {}",
+        mid,
+        motorcycle_id,
+        user.id
+    );
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
     let existing = sqlx::query_as::<_, MaintenanceRecord>(
-        "SELECT * FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?"
+        "SELECT * FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?",
     )
     .bind(mid)
     .bind(motorcycle_id)
@@ -227,7 +245,8 @@ pub async fn update_maintenance(
     let fluid_type: Option<String> = body.fluid_type.or(existing.fluid_type);
     let viscosity: Option<String> = body.viscosity.or(existing.viscosity);
     let oil_type: Option<String> = body.oil_type.or(existing.oil_type);
-    let inspection_location: Option<String> = body.inspection_location.or(existing.inspection_location);
+    let inspection_location: Option<String> =
+        body.inspection_location.or(existing.inspection_location);
     let location_id: Option<i64> = body.location_id.or(existing.location_id);
     let fuel_type: Option<String> = body.fuel_type.or(existing.fuel_type);
     let fuel_amount: Option<f64> = body.fuel_amount.or(existing.fuel_amount);
@@ -291,10 +310,11 @@ pub async fn update_maintenance(
         }
     }
 
-    let record = sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE id = ?")
-        .bind(mid)
-        .fetch_one(&pool)
-        .await?;
+    let record =
+        sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE id = ?")
+            .bind(mid)
+            .fetch_one(&pool)
+            .await?;
 
     tracing::info!("Maintenance record updated ID: {}", mid);
     Ok(Json(json!({ "maintenanceRecord": record })))
@@ -305,18 +325,24 @@ pub async fn delete_maintenance(
     AuthUser(user): AuthUser,
     Path((motorcycle_id, mid)): Path<(i64, i64)>,
 ) -> AppResult<Json<Value>> {
-    tracing::info!("Deleting maintenance record ID: {} for motorcycle ID: {} for user: {}", mid, motorcycle_id, user.id);
+    tracing::info!(
+        "Deleting maintenance record ID: {} for motorcycle ID: {} for user: {}",
+        mid,
+        motorcycle_id,
+        user.id
+    );
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let result =
-        sqlx::query("DELETE FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?")
-            .bind(mid)
-            .bind(motorcycle_id)
-            .execute(&pool)
-            .await?;
+    let result = sqlx::query("DELETE FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?")
+        .bind(mid)
+        .bind(motorcycle_id)
+        .execute(&pool)
+        .await?;
 
     if result.rows_affected() == 0 {
-        return Err(AppError::NotFound("Maintenance record not found".to_string()));
+        return Err(AppError::NotFound(
+            "Maintenance record not found".to_string(),
+        ));
     }
 
     tracing::info!("Maintenance record deleted ID: {}", mid);
