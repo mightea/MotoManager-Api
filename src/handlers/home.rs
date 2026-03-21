@@ -403,6 +403,23 @@ pub async fn get_home_data(
         }));
     }
 
+    let mut busiest_bike: Option<Value> = None;
+    let mut max_km = -1i64;
+
+    for moto_val in &motorcycles_json {
+        let km = moto_val["odometerThisYear"].as_i64().unwrap_or(0);
+        if km > max_km {
+            max_km = km;
+            busiest_bike = Some(json!({
+                "id": moto_val["id"],
+                "make": moto_val["make"],
+                "model": moto_val["model"],
+                "distance": km,
+                "image": moto_val["image"],
+            }));
+        }
+    }
+
     let stats_data = json!({
         "year": current_year,
         "totalMotorcycles": motorcycles.len(),
@@ -411,10 +428,12 @@ pub async fn get_home_data(
         "totalActiveIssues": total_active_issues,
         "totalMaintenanceCostThisYear": total_cost_this_year,
         "veteranCount": veteran_count,
+        "busiestBike": busiest_bike,
     });
 
     Ok(Json(json!({
         "stats": stats_data,
+        "fleetStats": stats_data,
         "motorcycles": motorcycles_json,
         "version": config.app_version,
     })))
