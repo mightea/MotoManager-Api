@@ -113,18 +113,18 @@ pub async fn get_home_data(
             .collect();
 
         // Latest Odometer
-        let max_m_odo = moto_maintenance.iter().map(|m| m.odo).max().unwrap_or(0);
-        let max_i_odo = moto_issues.iter().map(|i| i.odo).max().unwrap_or(0);
-        let max_l_odo = moto_loc_records
+        let max_maintenance_odo = moto_maintenance.iter().map(|m| m.odo).max().unwrap_or(0);
+        let max_issues_odo = moto_issues.iter().map(|i| i.odo).max().unwrap_or(0);
+        let max_location_odo = moto_loc_records
             .iter()
             .filter_map(|r| r.odometer)
             .max()
             .unwrap_or(0);
         let manual_odo = moto.manual_odo.unwrap_or(0);
         let current_odo = initial_odo
-            .max(max_m_odo)
-            .max(max_i_odo)
-            .max(max_l_odo)
+            .max(max_maintenance_odo)
+            .max(max_issues_odo)
+            .max(max_location_odo)
             .max(manual_odo);
 
         // Odometer at start of year
@@ -148,10 +148,10 @@ pub async fn get_home_data(
         total_active_issues += open_issues_count;
 
         // Last Activity
-        let last_m_date = moto_maintenance.first().map(|m| m.date.clone());
-        let last_i_date = moto_issues.iter().map(|i| i.date.clone()).max();
-        let last_l_date = moto_loc_records.first().map(|r| r.date.clone());
-        let last_activity = last_m_date.max(last_i_date).max(last_l_date);
+        let last_maintenance_date = moto_maintenance.first().map(|m| m.date.clone());
+        let last_issues_date = moto_issues.iter().map(|i| i.date.clone()).max();
+        let last_location_date = moto_loc_records.first().map(|r| r.date.clone());
+        let last_activity = last_maintenance_date.max(last_issues_date).max(last_location_date);
 
         // Current Location
         let latest_loc_record = moto_loc_records.first();

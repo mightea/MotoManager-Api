@@ -170,8 +170,8 @@ pub async fn get_stats(
 
         for y in start_year..=current_year {
             if y >= purchase_year {
-                let yearly_max = odo_by_year.get(&y).cloned().unwrap_or(last_odo);
-                let distance = yearly_max - last_odo;
+                let max_odo_for_year = odo_by_year.get(&y).cloned().unwrap_or(last_odo);
+                let distance = max_odo_for_year - last_odo;
 
                 let yearly_cost = maintenance
                     .iter()
@@ -201,9 +201,9 @@ pub async fn get_stats(
                 if y == current_year {
                     total_km_this_year += distance;
                 }
-                last_odo = yearly_max;
-                if yearly_max > bike_max_odo {
-                    bike_max_odo = yearly_max;
+                last_odo = max_odo_for_year;
+                if max_odo_for_year > bike_max_odo {
+                    bike_max_odo = max_odo_for_year;
                 }
             }
         }

@@ -234,7 +234,7 @@ pub async fn regenerate_previews(
             let full_path = config.documents_dir().join(&filename);
             if let Ok(file_data) = tokio::fs::read(&full_path).await {
                 let uuid = Uuid::new_v4().to_string();
-                match generate_image_preview_internal(&config, &file_data, &uuid).await {
+                match generate_image_preview_internal(&config, &file_data, &uuid) {
                     Ok(preview_filename) => {
                         sqlx::query!(
                             "UPDATE documents SET previewPath = ? WHERE id = ?",
@@ -254,7 +254,7 @@ pub async fn regenerate_previews(
             let full_path = config.documents_dir().join(&filename);
             if let Ok(file_data) = tokio::fs::read(&full_path).await {
                 let uuid = Uuid::new_v4().to_string();
-                match generate_pdf_preview_internal(&config, &file_data, &uuid).await {
+                match generate_pdf_preview_internal(&config, &file_data, &uuid) {
                     Ok(preview_filename) => {
                         sqlx::query!(
                             "UPDATE documents SET previewPath = ? WHERE id = ?",
@@ -334,7 +334,7 @@ pub async fn regenerate_previews(
     })))
 }
 
-async fn generate_image_preview_internal(
+fn generate_image_preview_internal(
     config: &Config,
     data: &[u8],
     uuid: &str,
@@ -353,7 +353,7 @@ async fn generate_image_preview_internal(
     Ok(preview_filename)
 }
 
-async fn generate_pdf_preview_internal(
+fn generate_pdf_preview_internal(
     config: &Config,
     data: &[u8],
     uuid: &str,

@@ -13,7 +13,7 @@ pub const SESSION_DURATION_DAYS: i64 = 14;
 
 pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
-    value.strip_prefix("Bearer ").map(|s| s.to_string())
+    value.strip_prefix("Bearer ").map(ToString::to_string)
 }
 
 #[derive(Debug, Clone)]

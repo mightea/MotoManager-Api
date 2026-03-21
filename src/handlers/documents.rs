@@ -65,7 +65,7 @@ async fn save_document_file(
     let image_extensions = ["jpg", "jpeg", "png", "webp", "gif"];
     let preview_filename = if image_extensions.contains(&ext.as_str()) {
         tracing::info!("Generating preview for image document: {}", stored_filename);
-        match generate_image_preview(config, &data, &uuid).await {
+        match generate_image_preview(config, &data, &uuid) {
             Ok(pf) => {
                 tracing::info!("Preview generated successfully: {}", pf);
                 Some(pf)
@@ -77,7 +77,7 @@ async fn save_document_file(
         }
     } else if ext == "pdf" {
         tracing::info!("Generating preview for PDF document: {}", stored_filename);
-        match generate_pdf_preview(config, &data, &uuid).await {
+        match generate_pdf_preview(config, &data, &uuid) {
             Ok(pf) => {
                 tracing::info!("PDF preview generated successfully: {}", pf);
                 Some(pf)
@@ -99,7 +99,7 @@ async fn save_document_file(
     Ok((stored_filename, preview_filename))
 }
 
-async fn generate_pdf_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
+fn generate_pdf_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
     let pdfium = Pdfium::new(
         Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
             .or_else(|_| Pdfium::bind_to_system_library())
@@ -136,7 +136,7 @@ async fn generate_pdf_preview(config: &Config, data: &[u8], uuid: &str) -> AppRe
     Ok(preview_filename)
 }
 
-async fn generate_image_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
+fn generate_image_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
     let data = data.to_vec();
     let img = image::load_from_memory(&data)
         .map_err(|e| AppError::Image(format!("Failed to load image: {}", e)))?;

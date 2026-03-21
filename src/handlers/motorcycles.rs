@@ -54,7 +54,7 @@ pub async fn list_motorcycles(
         user.id
     );
 
-    let motorcycles = sqlx::query_as::<_, MotorcycleWithStats>(r#"
+    let motorcycles = sqlx::query_as::<_, MotorcycleWithStats>(r"
         SELECT 
             m.*,
             (SELECT COUNT(*) FROM issues i WHERE i.motorcycleId = m.id AND i.status != 'done') as openIssues,
@@ -63,7 +63,7 @@ pub async fn list_motorcycles(
         FROM motorcycles m
         WHERE m.userId = ?
         ORDER BY m.id ASC
-    "#)
+    ")
     .bind(user.id)
     .fetch_all(&pool)
     .await?;
