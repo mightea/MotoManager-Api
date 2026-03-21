@@ -403,20 +403,18 @@ pub async fn get_home_data(
         }));
     }
 
-    let mut busiest_bike: Option<Value> = None;
+    let mut busiest_bike: Option<String> = None;
     let mut max_km = -1i64;
 
     for moto_val in &motorcycles_json {
         let km = moto_val["odometerThisYear"].as_i64().unwrap_or(0);
         if km > max_km {
             max_km = km;
-            busiest_bike = Some(json!({
-                "id": moto_val["id"],
-                "make": moto_val["make"],
-                "model": moto_val["model"],
-                "distance": km,
-                "image": moto_val["image"],
-            }));
+            busiest_bike = Some(format!(
+                "{} {}",
+                moto_val["make"].as_str().unwrap_or(""),
+                moto_val["model"].as_str().unwrap_or("")
+            ));
         }
     }
 
