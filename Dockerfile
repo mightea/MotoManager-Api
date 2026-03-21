@@ -7,19 +7,25 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy manifests and pre-build dependencies to leverage Docker cache
 COPY Cargo.toml Cargo.lock ./
 RUN mkdir src && echo "fn main() {}" > src/main.rs
-RUN cargo build --release
+# Provide a dummy DATABASE_URL for dependency compilation if needed
+RUN DATABASE_URL=sqlite:db.sqlite cargo build --release
 RUN rm -f target/release/deps/moto_manager_api*
 
 # Copy actual source code
 COPY . .
 
 # Build the application
-RUN cargo build --release
+# We need a real-ish database schema for sqlx macros to verify against
+RUN touch db.sqlite && \
+    sqlite3 db.sqlite < migrations/001_initial_schema.sql && \
+    sqlite3 db.sqlite < migrations/002_camelcase.sql && \
+    DATABASE_URL=sqlite:db.sqlite cargo build --release
 
 # --- Runtime Stage ---
 FROM debian:bookworm-slim
