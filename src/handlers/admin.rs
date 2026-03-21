@@ -334,11 +334,7 @@ pub async fn regenerate_previews(
     })))
 }
 
-fn generate_image_preview_internal(
-    config: &Config,
-    data: &[u8],
-    uuid: &str,
-) -> AppResult<String> {
+fn generate_image_preview_internal(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
     let img = image::load_from_memory(data)
         .map_err(|e| AppError::Image(format!("Failed to load image: {}", e)))?;
 
@@ -353,11 +349,7 @@ fn generate_image_preview_internal(
     Ok(preview_filename)
 }
 
-fn generate_pdf_preview_internal(
-    config: &Config,
-    data: &[u8],
-    uuid: &str,
-) -> AppResult<String> {
+fn generate_pdf_preview_internal(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
     let pdfium = Pdfium::new(
         Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
             .or_else(|_| Pdfium::bind_to_system_library())

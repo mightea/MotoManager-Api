@@ -151,7 +151,9 @@ pub async fn get_home_data(
         let last_maintenance_date = moto_maintenance.first().map(|m| m.date.clone());
         let last_issues_date = moto_issues.iter().map(|i| i.date.clone()).max();
         let last_location_date = moto_loc_records.first().map(|r| r.date.clone());
-        let last_activity = last_maintenance_date.max(last_issues_date).max(last_location_date);
+        let last_activity = last_maintenance_date
+            .max(last_issues_date)
+            .max(last_location_date);
 
         // Current Location
         let latest_loc_record = moto_loc_records.first();
