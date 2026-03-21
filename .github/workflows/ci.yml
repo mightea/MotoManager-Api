@@ -19,7 +19,13 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
+          sudo apt-get install -y pkg-config libssl-dev sqlite3
+      
+      - name: Set up database for sqlx macros
+        run: |
+          sqlite3 db.sqlite < migrations/001_initial_schema.sql
+          sqlite3 db.sqlite < migrations/002_camelcase.sql
+          echo "DATABASE_URL=sqlite:$(pwd)/db.sqlite" >> $GITHUB_ENV
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -43,7 +49,13 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev
+          sudo apt-get install -y pkg-config libssl-dev sqlite3
+      
+      - name: Set up database for sqlx macros
+        run: |
+          sqlite3 db.sqlite < migrations/001_initial_schema.sql
+          sqlite3 db.sqlite < migrations/002_camelcase.sql
+          echo "DATABASE_URL=sqlite:$(pwd)/db.sqlite" >> $GITHUB_ENV
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
