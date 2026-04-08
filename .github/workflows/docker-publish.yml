@@ -29,6 +29,9 @@ jobs:
           VERSION=${VERSION#v}
           sed -i "/^\[package\]/,/^\[/ s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
 
+      - name: List files (troubleshooting)
+        run: ls -la
+
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:

@@ -46,7 +46,7 @@ RUN curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/downloa
     chmod +x /usr/local/lib/libpdfium.so
 
 # Ensure the library path includes /usr/local/lib
-ENV LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH}
+ENV LD_LIBRARY_PATH=/usr/local/lib
 
 # Copy the binary from the builder
 COPY --from=builder /app/target/release/moto-manager-api /app/moto-manager-api
