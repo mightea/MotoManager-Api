@@ -1,5 +1,5 @@
 # --- Build Stage ---
-FROM rust:1.81-slim-bookworm as builder
+FROM rust:1.81-slim-bookworm AS builder
 
 WORKDIR /app
 
@@ -42,7 +42,8 @@ RUN apt-get update && apt-get install -y \
 
 # Download and install PDFium (required for PDF previews)
 # Using a stable release of PDFium binaries for Linux x64
-RUN curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz | tar -xz -C /usr/local/lib/ && \
+# We extract only the library from the 'lib' folder in the tarball
+RUN curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz | tar -xz -C /usr/local/lib/ --strip-components=1 lib/libpdfium.so && \
     chmod +x /usr/local/lib/libpdfium.so
 
 # Ensure the library path includes /usr/local/lib
