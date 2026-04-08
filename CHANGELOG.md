@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/mightea/MotoManager-Api/compare/v0.1.0...v0.1.1) (2026-04-08)
+
+
+### Bug Fixes
+
+* include busiest bike information in home data response ([62527e1](https://github.com/mightea/MotoManager-Api/commit/62527e17fe0389e2a0840d6680bc9d6d2d426d96))
+* return busiest bike as a formatted string instead of a full object ([904548f](https://github.com/mightea/MotoManager-Api/commit/904548f1f9527404e4c3f06ec43d0185536dbc64))
+
 ## 0.1.0 (2026-03-19)
 
 
