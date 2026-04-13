@@ -248,6 +248,24 @@ pub async fn get_motorcycle(
     .fetch_all(&pool)
     .await?;
 
+    let maintenance_locations = sqlx::query!(
+        "SELECT DISTINCT locationName, latitude, longitude FROM maintenanceRecords \
+         WHERE motorcycleId = ? AND locationName IS NOT NULL AND locationName != '' \
+         ORDER BY locationName ASC",
+        id
+    )
+    .fetch_all(&pool)
+    .await?
+    .into_iter()
+    .map(|row| {
+        json!({
+            "name": row.locationName,
+            "latitude": row.latitude,
+            "longitude": row.longitude,
+        })
+    })
+    .collect::<Vec<Value>>();
+
     let mut formatted_docs = Vec::new();
     for row in documents {
         let doc_id = row.id;
@@ -264,6 +282,7 @@ pub async fn get_motorcycle(
         "motorcycle": motorcycle,
         "issues": issues,
         "maintenanceRecords": maintenance,
+        "maintenanceLocations": maintenance_locations,
         "previousOwners": previous_owners,
         "torqueSpecs": torque_specs,
         "torqueSpecifications": torque_specs,
