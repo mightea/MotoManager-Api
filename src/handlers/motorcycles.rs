@@ -248,7 +248,14 @@ pub async fn get_motorcycle(
     .fetch_all(&pool)
     .await?;
 
-    let maintenance_locations = sqlx::query!(
+    #[derive(sqlx::FromRow, serde::Serialize)]
+    struct MaintenanceLocation {
+        name: String,
+        latitude: Option<f64>,
+        longitude: Option<f64>,
+    }
+
+    let maintenance_locations = sqlx::query_as::<_, MaintenanceLocation>(
         "SELECT DISTINCT name, latitude, longitude FROM ( \
            SELECT locationName as name, latitude, longitude FROM maintenanceRecords \
            WHERE motorcycleId = ? AND locationName IS NOT NULL AND locationName != '' \
@@ -256,20 +263,23 @@ pub async fn get_motorcycle(
            SELECT inspectionLocation as name, NULL as latitude, NULL as longitude FROM maintenanceRecords \
            WHERE motorcycleId = ? AND inspectionLocation IS NOT NULL AND inspectionLocation != '' \
          ) ORDER BY name ASC",
-        id,
-        id
     )
+    .bind(id)
+    .bind(id)
     .fetch_all(&pool)
-    .await?
-    .into_iter()
-    .map(|row| {
-        json!({
-            "name": row.name,
-            "latitude": row.latitude,
-            "longitude": row.longitude,
+    .await?;
+
+    let locations_json = maintenance_locations
+        .into_iter()
+        .map(|row| {
+            json!({
+                "name": row.name,
+                "latitude": row.latitude,
+                "longitude": row.longitude,
+            })
         })
-    })
-    .collect::<Vec<Value>>();
+        .collect::<Vec<_>>();
+
 
     let mut formatted_docs = Vec::new();
     for row in documents {
@@ -287,7 +297,7 @@ pub async fn get_motorcycle(
         "motorcycle": motorcycle,
         "issues": issues,
         "maintenanceRecords": maintenance,
-        "maintenanceLocations": maintenance_locations,
+        "maintenanceLocations": locations_json,
         "previousOwners": previous_owners,
         "torqueSpecs": torque_specs,
         "torqueSpecifications": torque_specs,
