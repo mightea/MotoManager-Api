@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.0](https://github.com/mightea/MotoManager-Api/compare/v0.1.1...v0.2.0) (2026-04-13)
+
+
+### Features
+
+* add parentId and bundled maintenance items support with reconciliation logic ([934b0df](https://github.com/mightea/MotoManager-Api/commit/934b0dfb54288c3563863c4cba06c87905fd6753))
+* handle bundled_items in update_maintenance handler ([d21f586](https://github.com/mightea/MotoManager-Api/commit/d21f586beca0e8d76d423f5b33868baa4d7dc332))
+* include maintenanceLocations in motorcycle detail response ([690b737](https://github.com/mightea/MotoManager-Api/commit/690b73757a276e2f666977424e57dc70f6f9c13e))
+
 ## [0.1.1](https://github.com/mightea/MotoManager-Api/compare/v0.1.0...v0.1.1) (2026-04-08)
 
 
