@@ -149,6 +149,7 @@ pub struct MaintenanceRecord {
     pub location_name: Option<String>,
     pub fuel_consumption: Option<f64>,
     pub trip_distance: Option<f64>,
+    pub parent_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

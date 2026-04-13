@@ -249,9 +249,14 @@ pub async fn get_motorcycle(
     .await?;
 
     let maintenance_locations = sqlx::query!(
-        "SELECT DISTINCT locationName, latitude, longitude FROM maintenanceRecords \
-         WHERE motorcycleId = ? AND locationName IS NOT NULL AND locationName != '' \
-         ORDER BY locationName ASC",
+        "SELECT DISTINCT name, latitude, longitude FROM ( \
+           SELECT locationName as name, latitude, longitude FROM maintenanceRecords \
+           WHERE motorcycleId = ? AND locationName IS NOT NULL AND locationName != '' \
+           UNION \
+           SELECT inspectionLocation as name, NULL as latitude, NULL as longitude FROM maintenanceRecords \
+           WHERE motorcycleId = ? AND inspectionLocation IS NOT NULL AND inspectionLocation != '' \
+         ) ORDER BY name ASC",
+        id,
         id
     )
     .fetch_all(&pool)
@@ -259,7 +264,7 @@ pub async fn get_motorcycle(
     .into_iter()
     .map(|row| {
         json!({
-            "name": row.locationName,
+            "name": row.name,
             "latitude": row.latitude,
             "longitude": row.longitude,
         })

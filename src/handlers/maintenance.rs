@@ -332,8 +332,32 @@ pub async fn update_maintenance(
     .execute(&mut *tx)
     .await?;
 
-    // Handle new bundled items added during edit
+    // Reconcile bundled items if provided
     if let Some(bundled) = body.bundled_items {
+        // Fetch existing child records
+        let existing_children = sqlx::query!(
+            "SELECT id, type AS record_type, fluidType FROM maintenanceRecords WHERE parentId = ?",
+            mid
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        // 1. Delete children that are no longer in the bundled list
+        for child in &existing_children {
+            let item_key = match child.record_type.as_str() {
+                "fluid" => child.fluidType.clone().unwrap_or_default(),
+                "chain" => "chain".to_string(),
+                _ => "general".to_string(), // Simplified, might need more robust matching
+            };
+
+            if !bundled.contains(&item_key) {
+                sqlx::query!("DELETE FROM maintenanceRecords WHERE id = ?", child.id)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        // 2. Add new children that don't exist yet
         for item in bundled {
             let (rec_type, fluid_type) = match item.as_str() {
                 "engineoil" | "gearboxoil" | "finaldriveoil" | "forkoil" | "brakefluid" | "coolant" => {
@@ -343,18 +367,40 @@ pub async fn update_maintenance(
                 _ => ("general", None),
             };
 
-            sqlx::query(
-                "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type, fluidType, parentId) \
-                 VALUES (?, ?, ?, ?, ?, ?)",
-            )
-            .bind(&date)
-            .bind(odo)
-            .bind(motorcycle_id)
-            .bind(rec_type)
-            .bind(fluid_type)
-            .bind(mid) // mid is the parent ID
-            .execute(&mut *tx)
-            .await?;
+            let already_exists = existing_children.iter().any(|c| {
+                if rec_type == "fluid" {
+                    c.record_type == "fluid" && c.fluidType.as_deref() == fluid_type.as_deref()
+                } else {
+                    c.record_type == rec_type
+                }
+            });
+
+            if !already_exists {
+                sqlx::query!(
+                    "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type, fluidType, parentId) \
+                     VALUES (?, ?, ?, ?, ?, ?)",
+                    date,
+                    odo,
+                    motorcycle_id,
+                    rec_type,
+                    fluid_type,
+                    mid
+                )
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                // Update existing child's date and odo to match parent
+                sqlx::query!(
+                    "UPDATE maintenanceRecords SET date = ?, odo = ? WHERE parentId = ? AND type = ? AND (fluidType = ? OR fluidType IS NULL)",
+                    date,
+                    odo,
+                    mid,
+                    rec_type,
+                    fluid_type
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
         }
     }
 
