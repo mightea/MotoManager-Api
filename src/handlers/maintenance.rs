@@ -111,6 +111,8 @@ pub struct MaintenanceRequest {
     pub location_name: Option<String>,
     pub fuel_consumption: Option<f64>,
     pub trip_distance: Option<f64>,
+    pub parent_id: Option<i64>,
+    pub bundled_items: Option<Vec<String>>,
 }
 
 pub async fn create_maintenance(
@@ -136,13 +138,15 @@ pub async fn create_maintenance(
         .record_type
         .ok_or_else(|| AppError::BadRequest("type is required".to_string()))?;
 
+    let mut tx = pool.begin().await?;
+
     let id = sqlx::query(
         "INSERT INTO maintenanceRecords \
          (date, odo, motorcycleId, cost, normalizedCost, currency, description, type, \
           brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
           oilType, inspectionLocation, locationId, fuelType, fuelAmount, pricePerUnit, \
-          latitude, longitude, locationName, fuelConsumption, tripDistance) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          latitude, longitude, locationName, fuelConsumption, tripDistance, parentId) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&date)
     .bind(odo)
@@ -171,9 +175,37 @@ pub async fn create_maintenance(
     .bind(&body.location_name)
     .bind(body.fuel_consumption)
     .bind(body.trip_distance)
-    .execute(&pool)
+    .bind(body.parent_id)
+    .execute(&mut *tx)
     .await?
     .last_insert_rowid();
+
+    if let Some(bundled) = body.bundled_items {
+        for item in bundled {
+            let (rec_type, fluid_type) = match item.as_str() {
+                "engineoil" | "gearboxoil" | "finaldriveoil" | "forkoil" | "brakefluid" | "coolant" => {
+                    ("fluid", Some(item))
+                }
+                "chain" => ("chain", None),
+                _ => ("general", None),
+            };
+
+            sqlx::query(
+                "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type, fluidType, parentId) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&date)
+            .bind(odo)
+            .bind(motorcycle_id)
+            .bind(rec_type)
+            .bind(fluid_type)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
 
     if record_type == "fuel" {
         if let Some(fuel_amount) = body.fuel_amount {
@@ -256,6 +288,9 @@ pub async fn update_maintenance(
     let location_name: Option<String> = body.location_name.or(existing.location_name);
     let fuel_consumption: Option<f64> = body.fuel_consumption.or(existing.fuel_consumption);
     let trip_distance: Option<f64> = body.trip_distance.or(existing.trip_distance);
+    let parent_id: Option<i64> = body.parent_id.or(existing.parent_id);
+
+    let mut tx = pool.begin().await?;
 
     sqlx::query(
         "UPDATE maintenanceRecords SET \
@@ -263,7 +298,7 @@ pub async fn update_maintenance(
          type = ?, brand = ?, model = ?, tirePosition = ?, tireSize = ?, dotCode = ?, \
          batteryType = ?, fluidType = ?, viscosity = ?, oilType = ?, inspectionLocation = ?, \
          locationId = ?, fuelType = ?, fuelAmount = ?, pricePerUnit = ?, latitude = ?, \
-         longitude = ?, locationName = ?, fuelConsumption = ?, tripDistance = ? \
+         longitude = ?, locationName = ?, fuelConsumption = ?, tripDistance = ?, parentId = ? \
          WHERE id = ?",
     )
     .bind(&date)
@@ -292,9 +327,38 @@ pub async fn update_maintenance(
     .bind(&location_name)
     .bind(fuel_consumption)
     .bind(trip_distance)
+    .bind(parent_id)
     .bind(mid)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
+
+    // Handle new bundled items added during edit
+    if let Some(bundled) = body.bundled_items {
+        for item in bundled {
+            let (rec_type, fluid_type) = match item.as_str() {
+                "engineoil" | "gearboxoil" | "finaldriveoil" | "forkoil" | "brakefluid" | "coolant" => {
+                    ("fluid", Some(item))
+                }
+                "chain" => ("chain", None),
+                _ => ("general", None),
+            };
+
+            sqlx::query(
+                "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type, fluidType, parentId) \
+                 VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&date)
+            .bind(odo)
+            .bind(motorcycle_id)
+            .bind(rec_type)
+            .bind(fluid_type)
+            .bind(mid) // mid is the parent ID
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    tx.commit().await?;
 
     if record_type == "fuel" {
         if let Some(fa) = fuel_amount {
