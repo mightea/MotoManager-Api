@@ -300,3 +300,19 @@ pub struct Challenge {
     pub expires_at: String,
     pub created_at: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct Expense {
+    pub id: i64,
+    pub user_id: i64,
+    pub date: String,
+    pub amount: f64,
+    pub currency: String,
+    pub category: String,
+    pub description: Option<String>,
+    pub interval_months: Option<i64>,
+    pub created_at: String,
+    pub updated_at: String,
+}

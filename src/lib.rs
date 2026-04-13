@@ -141,6 +141,14 @@ pub fn build_app(state: AppState) -> Router {
             put(handlers::locations::update_location).delete(handlers::locations::delete_location),
         )
         .route(
+            "/api/expenses",
+            get(handlers::expenses::list_expenses).post(handlers::expenses::create_expense),
+        )
+        .route(
+            "/api/expenses/{id}",
+            put(handlers::expenses::update_expense).delete(handlers::expenses::delete_expense),
+        )
+        .route(
             "/api/settings",
             get(handlers::settings::get_settings).put(handlers::settings::update_settings),
         )

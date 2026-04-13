@@ -1,6 +1,7 @@
 pub mod admin;
 pub mod auth;
 pub mod documents;
+pub mod expenses;
 pub mod files;
 pub mod home;
 pub mod issues;

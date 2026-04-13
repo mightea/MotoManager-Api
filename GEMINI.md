@@ -41,7 +41,8 @@ You are Gemini CLI, the expert backend architect for MotoManager. Follow these p
 ### Modifying the Schema
 1.  Add a new migration file.
 2.  Update the models and handlers.
-3.  **Crucial**: The dev database `db.sqlite` might need to be recreated if schema changes are destructive (no auto-migration tool currently beyond what SQLx provides).
+3.  **Crucial**: Update the `Dockerfile` schema preparation step (the `RUN touch db.sqlite && ...` block) to include the new migration file. This is required for `sqlx` macro validation during the Docker build.
+4.  **Crucial**: The dev database `db.sqlite` might need to be recreated if schema changes are destructive (no auto-migration tool currently beyond what SQLx provides).
 
 ### File Uploads
 - Use `save_image` or `save_document_file` helpers in handlers.
