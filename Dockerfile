@@ -25,6 +25,7 @@ COPY . .
 RUN touch db.sqlite && \
     sqlite3 db.sqlite < migrations/001_initial_schema.sql && \
     sqlite3 db.sqlite < migrations/002_camelcase.sql && \
+    sqlite3 db.sqlite < migrations/003_maintenance_parent_id.sql && \
     DATABASE_URL=sqlite:db.sqlite cargo build --release
 
 # --- Runtime Stage ---
