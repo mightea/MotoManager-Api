@@ -25,6 +25,8 @@ jobs:
         run: |
           sqlite3 db.sqlite < migrations/001_initial_schema.sql
           sqlite3 db.sqlite < migrations/002_camelcase.sql
+          sqlite3 db.sqlite < migrations/003_maintenance_parent_id.sql
+          sqlite3 db.sqlite < migrations/004_shared_expenses.sql
           echo "DATABASE_URL=sqlite:$(pwd)/db.sqlite" >> $GITHUB_ENV
       
       - name: Install Rust
@@ -55,6 +57,8 @@ jobs:
         run: |
           sqlite3 db.sqlite < migrations/001_initial_schema.sql
           sqlite3 db.sqlite < migrations/002_camelcase.sql
+          sqlite3 db.sqlite < migrations/003_maintenance_parent_id.sql
+          sqlite3 db.sqlite < migrations/004_shared_expenses.sql
           echo "DATABASE_URL=sqlite:$(pwd)/db.sqlite" >> $GITHUB_ENV
       
       - name: Install Rust
