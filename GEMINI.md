@@ -11,7 +11,8 @@ You are Gemini CLI, the expert backend architect for MotoManager. Follow these p
 
 ### Testing & Quality Standards
 - **Validation is Mandatory**: Every feature or bug fix MUST include corresponding tests.
-- **Linting is Mandatory**: Code MUST be clean and pass Clippy checks.
+- **Linting is Mandatory**: Code MUST be clean and pass Clippy checks (with no warnings) and formatting checks after EVERY change.
+- **Verification is Mandatory**: Run `cargo clippy` and `cargo test` after each modification to ensure regressions or lint issues are not introduced.
 - **Test Types**:
     - **Unit Tests**: Place in the same file as the logic being tested (use `#[cfg(test)] mod tests`).
     - **Integration Tests**: Place in the `tests/` directory. Use `setup_test_app` (from existing tests) for a clean in-memory environment.
@@ -19,15 +20,15 @@ You are Gemini CLI, the expert backend architect for MotoManager. Follow these p
     ```sh
     cargo test                # Run all tests
     cargo test --test <name>  # Run specific integration test
-    cargo clippy --all-targets --all-features -- -D warnings # Run linter
-    cargo fmt --all           # Format code
+    cargo clippy --all-targets --all-features -- -D warnings # Run linter (must pass with 0 warnings)
+    cargo fmt --all           # Format code (must be run before committing)
     ```
 
 ### Workflow
 1.  **Research**: Use `grep_search` and `read_file` to understand the current handler/model logic.
 2.  **Reproduction**: For bugs, write a failing integration test in `tests/` before applying the fix.
 3.  **Implementation**: Follow existing patterns in `src/handlers/`. Ensure all JSON mappings in `row_to_value` are correct.
-4.  **Verification**: Run the full suite with `cargo test` and `cargo clippy`. Ensure zero warnings and zero errors.
+4.  **Verification**: After EVERY modification, run the full suite with `cargo test` and `cargo clippy`. Ensure zero warnings and zero errors. Always run `cargo fmt` before concluding a task.
 
 ## Common Tasks
 
