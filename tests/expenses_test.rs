@@ -68,10 +68,28 @@ async fn test_expense_lifecycle() {
     let (app, pool, token) = setup_test_app().await;
 
     // Seed motorcycles
-    let m1_id = sqlx::query("INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)")
-        .bind("Honda").bind("CBR").bind(1).bind(0).execute(&pool).await.unwrap().last_insert_rowid();
-    let m2_id = sqlx::query("INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)")
-        .bind("Yamaha").bind("R1").bind(1).bind(0).execute(&pool).await.unwrap().last_insert_rowid();
+    let m1_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("Honda")
+    .bind("CBR")
+    .bind(1)
+    .bind(0)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let m2_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("Yamaha")
+    .bind("R1")
+    .bind(1)
+    .bind(0)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
 
     // 1. Create expense
     let response = app
@@ -82,21 +100,26 @@ async fn test_expense_lifecycle() {
                 .uri("/api/expenses")
                 .header(header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_vec(&json!({
-                    "date": "2026-04-12",
-                    "amount": 500.0,
-                    "currency": "CHF",
-                    "category": "Versicherung",
-                    "description": "Flottenversicherung",
-                    "motorcycleIds": [m1_id, m2_id]
-                })).unwrap()))
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "date": "2026-04-12",
+                        "amount": 500.0,
+                        "currency": "CHF",
+                        "category": "Versicherung",
+                        "description": "Flottenversicherung",
+                        "motorcycleIds": [m1_id, m2_id]
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CREATED);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     let expense_id = body["expense"]["id"].as_i64().unwrap();
 
@@ -114,10 +137,18 @@ async fn test_expense_lifecycle() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["expenses"].as_array().unwrap().len(), 1);
-    assert_eq!(body["expenses"][0]["motorcycleIds"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        body["expenses"][0]["motorcycleIds"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
 
     // 3. Update expense
     let response = app
@@ -128,10 +159,13 @@ async fn test_expense_lifecycle() {
                 .uri(format!("/api/expenses/{}", expense_id))
                 .header(header::AUTHORIZATION, format!("Bearer {}", token))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(serde_json::to_vec(&json!({
-                    "amount": 600.0,
-                    "motorcycleIds": [m1_id]
-                })).unwrap()))
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "amount": 600.0,
+                        "motorcycleIds": [m1_id]
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await

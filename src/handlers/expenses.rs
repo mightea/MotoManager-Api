@@ -41,12 +41,15 @@ pub async fn list_expenses(
 
     let mut result = Vec::new();
     for expense in expenses {
-        let motorcycle_ids = sqlx::query!("SELECT motorcycleId FROM expenseMotorcycles WHERE expenseId = ?", expense.id)
-            .fetch_all(&pool)
-            .await?
-            .into_iter()
-            .map(|r| r.motorcycleId)
-            .collect::<Vec<_>>();
+        let motorcycle_ids = sqlx::query!(
+            "SELECT motorcycleId FROM expenseMotorcycles WHERE expenseId = ?",
+            expense.id
+        )
+        .fetch_all(&pool)
+        .await?
+        .into_iter()
+        .map(|r| r.motorcycleId)
+        .collect::<Vec<_>>();
 
         let mut val = serde_json::to_value(&expense).unwrap();
         if let Some(obj) = val.as_object_mut() {
@@ -65,10 +68,18 @@ pub async fn create_expense(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     tracing::info!("Creating expense for user: {}", user.id);
 
-    let date = body.date.ok_or_else(|| AppError::BadRequest("date is required".to_string()))?;
-    let amount = body.amount.ok_or_else(|| AppError::BadRequest("amount is required".to_string()))?;
-    let currency = body.currency.ok_or_else(|| AppError::BadRequest("currency is required".to_string()))?;
-    let category = body.category.ok_or_else(|| AppError::BadRequest("category is required".to_string()))?;
+    let date = body
+        .date
+        .ok_or_else(|| AppError::BadRequest("date is required".to_string()))?;
+    let amount = body
+        .amount
+        .ok_or_else(|| AppError::BadRequest("amount is required".to_string()))?;
+    let currency = body
+        .currency
+        .ok_or_else(|| AppError::BadRequest("currency is required".to_string()))?;
+    let category = body
+        .category
+        .ok_or_else(|| AppError::BadRequest("category is required".to_string()))?;
 
     let mut tx = pool.begin().await?;
 
@@ -113,12 +124,13 @@ pub async fn update_expense(
 ) -> AppResult<Json<Value>> {
     tracing::info!("Updating expense ID: {} for user: {}", id, user.id);
 
-    let existing = sqlx::query_as::<_, Expense>("SELECT * FROM expenses WHERE id = ? AND userId = ?")
-        .bind(id)
-        .bind(user.id)
-        .fetch_optional(&pool)
-        .await?
-        .ok_or_else(|| AppError::NotFound("Expense not found".to_string()))?;
+    let existing =
+        sqlx::query_as::<_, Expense>("SELECT * FROM expenses WHERE id = ? AND userId = ?")
+            .bind(id)
+            .bind(user.id)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Expense not found".to_string()))?;
 
     let date = body.date.unwrap_or(existing.date);
     let amount = body.amount.unwrap_or(existing.amount);

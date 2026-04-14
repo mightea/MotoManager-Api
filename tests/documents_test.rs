@@ -177,7 +177,10 @@ async fn test_list_all_motorcycles_independent_of_user() {
     // Create motorcycle for first user
     sqlx::query!(
         "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
-        "Yamaha", "MT-07", 1, 0
+        "Yamaha",
+        "MT-07",
+        1,
+        0
     )
     .execute(&pool)
     .await
@@ -186,7 +189,10 @@ async fn test_list_all_motorcycles_independent_of_user() {
     // Create motorcycle for other user
     sqlx::query!(
         "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
-        "Honda", "CB650R", other_user_id, 0
+        "Honda",
+        "CB650R",
+        other_user_id,
+        0
     )
     .execute(&pool)
     .await
@@ -195,7 +201,10 @@ async fn test_list_all_motorcycles_independent_of_user() {
     // Create archived motorcycle
     sqlx::query!(
         "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
-        "Suzuki", "SV650", 1, 1
+        "Suzuki",
+        "SV650",
+        1,
+        1
     )
     .execute(&pool)
     .await
@@ -218,17 +227,23 @@ async fn test_list_all_motorcycles_independent_of_user() {
         .await
         .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
-    
+
     let all_motorcycles = body["allMotorcycles"].as_array().unwrap();
-    
+
     // Should have 2 (Yamaha and Honda), Suzuki is archived
     assert_eq!(all_motorcycles.len(), 2);
 
     // Verify Yamaha (Test User)
-    let yamaha = all_motorcycles.iter().find(|m| m["make"] == "Yamaha").unwrap();
+    let yamaha = all_motorcycles
+        .iter()
+        .find(|m| m["make"] == "Yamaha")
+        .unwrap();
     assert_eq!(yamaha["ownerName"], "Test User");
 
     // Verify Honda (Other User)
-    let honda = all_motorcycles.iter().find(|m| m["make"] == "Honda").unwrap();
+    let honda = all_motorcycles
+        .iter()
+        .find(|m| m["make"] == "Honda")
+        .unwrap();
     assert_eq!(honda["ownerName"], "Other User");
 }

@@ -183,9 +183,8 @@ pub async fn create_maintenance(
     if let Some(bundled) = body.bundled_items {
         for item in bundled {
             let (rec_type, fluid_type) = match item.as_str() {
-                "engineoil" | "gearboxoil" | "finaldriveoil" | "forkoil" | "brakefluid" | "coolant" => {
-                    ("fluid", Some(item))
-                }
+                "engineoil" | "gearboxoil" | "finaldriveoil" | "forkoil" | "brakefluid"
+                | "coolant" => ("fluid", Some(item)),
                 "chain" => ("chain", None),
                 _ => ("general", None),
             };
@@ -360,9 +359,8 @@ pub async fn update_maintenance(
         // 2. Add new children that don't exist yet
         for item in bundled {
             let (rec_type, fluid_type) = match item.as_str() {
-                "engineoil" | "gearboxoil" | "finaldriveoil" | "forkoil" | "brakefluid" | "coolant" => {
-                    ("fluid", Some(item))
-                }
+                "engineoil" | "gearboxoil" | "finaldriveoil" | "forkoil" | "brakefluid"
+                | "coolant" => ("fluid", Some(item)),
                 "chain" => ("chain", None),
                 _ => ("general", None),
             };

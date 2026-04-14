@@ -280,7 +280,6 @@ pub async fn get_motorcycle(
         })
         .collect::<Vec<_>>();
 
-
     let mut formatted_docs = Vec::new();
     for row in documents {
         let doc_id = row.id;
