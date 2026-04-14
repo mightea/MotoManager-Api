@@ -181,8 +181,12 @@ pub async fn list_documents(
     }
 
     let motorcycles = sqlx::query!(
-        "SELECT id, make, model FROM motorcycles WHERE userId = ?",
-        user.id
+        r#"
+        SELECT m.id, m.make, m.model, u.name as "ownerName!"
+        FROM motorcycles m
+        JOIN users u ON m.userId = u.id
+        WHERE m.isArchived = 0
+        "#
     )
     .fetch_all(&pool)
     .await?;
@@ -194,6 +198,7 @@ pub async fn list_documents(
                 "id": r.id,
                 "make": r.make,
                 "model": r.model,
+                "ownerName": r.ownerName,
             })
         })
         .collect();

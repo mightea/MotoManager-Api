@@ -154,3 +154,81 @@ async fn test_document_lifecycle() {
     // cleanup
     let _ = tokio::fs::remove_dir_all("./test_data").await;
 }
+
+#[tokio::test]
+async fn test_list_all_motorcycles_independent_of_user() {
+    let (app, pool, token) = setup_test_app().await;
+
+    // Create another user
+    let password_hash = hash_password("otherpass").unwrap();
+    let other_user_id = sqlx::query(
+        "INSERT INTO users (email, username, name, passwordHash, role) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("other@example.com")
+    .bind("otheruser")
+    .bind("Other User")
+    .bind(password_hash)
+    .bind("user")
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // Create motorcycle for first user
+    sqlx::query!(
+        "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
+        "Yamaha", "MT-07", 1, 0
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Create motorcycle for other user
+    sqlx::query!(
+        "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
+        "Honda", "CB650R", other_user_id, 0
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Create archived motorcycle
+    sqlx::query!(
+        "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
+        "Suzuki", "SV650", 1, 1
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // List documents
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/documents")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    
+    let all_motorcycles = body["allMotorcycles"].as_array().unwrap();
+    
+    // Should have 2 (Yamaha and Honda), Suzuki is archived
+    assert_eq!(all_motorcycles.len(), 2);
+
+    // Verify Yamaha (Test User)
+    let yamaha = all_motorcycles.iter().find(|m| m["make"] == "Yamaha").unwrap();
+    assert_eq!(yamaha["ownerName"], "Test User");
+
+    // Verify Honda (Other User)
+    let honda = all_motorcycles.iter().find(|m| m["make"] == "Honda").unwrap();
+    assert_eq!(honda["ownerName"], "Other User");
+}
