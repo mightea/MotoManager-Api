@@ -40,10 +40,11 @@ You are Gemini CLI, the expert backend architect for MotoManager. Follow these p
 5.  Add integration test in `tests/`.
 
 ### Modifying the Schema
-1.  Add a new migration file.
+1.  Add a new migration file in `migrations/`.
 2.  Update the models and handlers.
 3.  **Crucial**: Update the `Dockerfile` schema preparation step (the `RUN touch db.sqlite && ...` block) to include the new migration file. This is required for `sqlx` macro validation during the Docker build.
-4.  **Crucial**: The dev database `db.sqlite` might need to be recreated if schema changes are destructive (no auto-migration tool currently beyond what SQLx provides).
+4.  **Crucial**: Update the `.github/workflows/ci.yml` schema preparation step (the `Set up database for sqlx macros` block) in BOTH the `check` and `test` jobs to include the new migration file. This is required for `sqlx` macro validation during the CI run.
+5.  **Crucial**: The dev database `db.sqlite` might need to be recreated if schema changes are destructive (no auto-migration tool currently beyond what SQLx provides).
 
 ### File Uploads
 - Use `save_image` or `save_document_file` helpers in handlers.
