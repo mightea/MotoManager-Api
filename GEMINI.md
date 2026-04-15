@@ -53,3 +53,6 @@ You are Gemini CLI, the expert backend architect for MotoManager. Follow these p
 ## Performance & Scaling
 - Ensure all foreign keys (`motorcycleId`, `userId`, `locationId`) have indexes in migrations for query performance.
 - Use `recalculate_fuel_consumption` logic for fuel-related entries.
+
+## CI/CD & Deployment
+- **Cross-Workflow Triggers**: The `release-please` workflow must use a Personal Access Token (PAT) stored as `GH_TOKEN` in GitHub Secrets. This is required to trigger the `Docker Publish` workflow when a new tag or release is created by `release-please`. The default `GITHUB_TOKEN` will NOT trigger subsequent workflows.
