@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/mightea/MotoManager-Api/compare/v0.2.0...v0.3.0) (2026-04-14)
+
+
+### Features
+
+* implement shared expenses tracking across multiple motorcycles ([b5e6cde](https://github.com/mightea/MotoManager-Api/commit/b5e6cde443ab07edf5a3656f28df6fd5e2505463))
+* include motorcycle owners in document motorcycle list ([2517baa](https://github.com/mightea/MotoManager-Api/commit/2517baa07bee2bb39b6bec3fa010b590c16c37ab))
+
+
+### Bug Fixes
+
+* update CI to include all migrations for sqlx macro validation ([2fbe5e1](https://github.com/mightea/MotoManager-Api/commit/2fbe5e1e467959befd78390736124c67ca77066a))
+
 ## [0.2.0](https://github.com/mightea/MotoManager-Api/compare/v0.1.1...v0.2.0) (2026-04-13)
 
 
