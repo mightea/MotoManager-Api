@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -13,6 +13,12 @@ use crate::{
     handlers::motorcycles::verify_motorcycle_ownership,
     models::MaintenanceRecord,
 };
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaintenanceFilter {
+    pub types: Option<String>,
+}
 
 async fn recalculate_fuel_consumption(
     pool: &SqlitePool,
@@ -63,20 +69,39 @@ pub async fn list_maintenance(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
     Path(motorcycle_id): Path<i64>,
+    Query(filter): Query<MaintenanceFilter>,
 ) -> AppResult<Json<Value>> {
     tracing::debug!(
-        "Listing maintenance records for motorcycle ID: {} for user: {}",
+        "Listing maintenance records for motorcycle ID: {} for user: {} with filter: {:?}",
         motorcycle_id,
-        user.id
+        user.id,
+        filter
     );
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let records = sqlx::query_as::<_, MaintenanceRecord>(
-        "SELECT * FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
-    )
-    .bind(motorcycle_id)
-    .fetch_all(&pool)
-    .await?;
+    let mut query_str = "SELECT * FROM maintenanceRecords WHERE motorcycleId = ?".to_string();
+    let mut types_list = Vec::new();
+
+    if let Some(types) = filter.types {
+        if !types.is_empty() {
+            let parts: Vec<String> = types.split(',').map(|s| s.trim().to_string()).collect();
+            if !parts.is_empty() {
+                let placeholders: Vec<&str> = vec!["?"; parts.len()];
+                query_str.push_str(&format!(" AND type IN ({})", placeholders.join(", ")));
+                types_list = parts;
+            }
+        }
+    }
+
+    query_str.push_str(" ORDER BY date DESC, id DESC");
+
+    let mut query = sqlx::query_as::<_, MaintenanceRecord>(&query_str).bind(motorcycle_id);
+
+    for t in types_list {
+        query = query.bind(t);
+    }
+
+    let records = query.fetch_all(&pool).await?;
 
     Ok(Json(json!({ "maintenanceRecords": records })))
 }

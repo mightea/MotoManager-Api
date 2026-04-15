@@ -697,3 +697,138 @@ async fn test_home_data_location_logic() {
     assert_eq!(moto["currentLocationId"], loc1_id);
     assert_eq!(moto["currentLocationName"], "Location 1");
 }
+
+#[tokio::test]
+async fn test_maintenance_filtering() {
+    let (app, pool, token) = setup_test_app().await;
+
+    // 1. Seed a motorcycle
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("Kawasaki")
+    .bind("Z900RS")
+    .bind(1)
+    .bind(0)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // 2. Seed maintenance records of different types
+    let types = ["oil", "tire", "fuel", "general"];
+    for (i, t) in types.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO maintenanceRecords (motorcycleId, date, odo, type) VALUES (?, ?, ?, ?)",
+        )
+        .bind(moto_id)
+        .bind(format!("2025-01-0{}", i + 1))
+        .bind(((i + 1) * 100) as i64)
+        .bind(t)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    // 3. Test unfiltered
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/motorcycles/{}/maintenance", moto_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["maintenanceRecords"].as_array().unwrap().len(), 4);
+
+    // 4. Test filtering by single type (oil)
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/motorcycles/{}/maintenance?types=oil",
+                    moto_id
+                ))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let records = body["maintenanceRecords"].as_array().unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["type"], "oil");
+
+    // 5. Test filtering by multiple types (tire, fuel)
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!(
+                    "/api/motorcycles/{}/maintenance?types=tire,fuel",
+                    moto_id
+                ))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let records = body["maintenanceRecords"].as_array().unwrap();
+    assert_eq!(records.len(), 2);
+    let record_types: Vec<_> = records
+        .iter()
+        .map(|r| r["type"].as_str().unwrap())
+        .collect();
+    assert!(record_types.contains(&"tire"));
+    assert!(record_types.contains(&"fuel"));
+
+    // 6. Test filtering with empty types list
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/motorcycles/{}/maintenance?types=", moto_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(body["maintenanceRecords"].as_array().unwrap().len(), 4);
+}
