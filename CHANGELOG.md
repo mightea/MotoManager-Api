@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/mightea/MotoManager-Api/compare/v0.3.0...v0.3.1) (2026-04-15)
+
+
+### Bug Fixes
+
+* use workflow_run to trigger docker publish from release-please ([7e69ff3](https://github.com/mightea/MotoManager-Api/commit/7e69ff30bc771f231e3e5e9ca3d2498b61e8d130))
+
 ## [0.3.0](https://github.com/mightea/MotoManager-Api/compare/v0.2.0...v0.3.0) (2026-04-14)
 
 
