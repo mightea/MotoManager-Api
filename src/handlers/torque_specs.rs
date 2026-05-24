@@ -86,7 +86,7 @@ pub async fn create_torque_spec(
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportTorqueSpecsRequest {
-    pub from_motorcycle_id: i64,
+    pub source_spec_ids: Vec<i64>,
 }
 
 pub async fn import_torque_specs(
@@ -96,18 +96,23 @@ pub async fn import_torque_specs(
     Json(body): Json<ImportTorqueSpecsRequest>,
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
-    verify_motorcycle_ownership(&pool, body.from_motorcycle_id, user.id).await?;
-
-    let source_specs =
-        sqlx::query_as::<_, TorqueSpec>("SELECT * FROM torqueSpecs WHERE motorcycleId = ?")
-            .bind(body.from_motorcycle_id)
-            .fetch_all(&pool)
-            .await?;
 
     let now = Utc::now().to_rfc3339();
     let mut imported_count: i64 = 0;
 
-    for spec in &source_specs {
+    for spec_id in &body.source_spec_ids {
+        let source = sqlx::query_as::<_, TorqueSpec>(
+            "SELECT t.* FROM torqueSpecs t \
+             JOIN motorcycles m ON t.motorcycleId = m.id \
+             WHERE t.id = ? AND m.userId = ?",
+        )
+        .bind(spec_id)
+        .bind(user.id)
+        .fetch_optional(&pool)
+        .await?;
+
+        let Some(spec) = source else { continue };
+
         sqlx::query(
             "INSERT INTO torqueSpecs \
              (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt) \
