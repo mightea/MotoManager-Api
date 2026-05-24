@@ -182,7 +182,7 @@ pub async fn list_documents(
 
     let motorcycles = sqlx::query!(
         r#"
-        SELECT m.id, m.make, m.model, u.name as "ownerName!"
+        SELECT m.id, m.userId, m.make, m.model, u.name as "ownerName!"
         FROM motorcycles m
         JOIN users u ON m.userId = u.id
         WHERE m.isArchived = 0
@@ -196,6 +196,7 @@ pub async fn list_documents(
         .map(|r| {
             json!({
                 "id": r.id,
+                "userId": r.userId,
                 "make": r.make,
                 "model": r.model,
                 "ownerName": r.ownerName,
