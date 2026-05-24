@@ -95,7 +95,8 @@ pub async fn list_maintenance(
 
     query_str.push_str(" ORDER BY date DESC, id DESC");
 
-    let mut query = sqlx::query_as::<_, MaintenanceRecord>(&query_str).bind(motorcycle_id);
+    let mut query =
+        sqlx::query_as::<_, MaintenanceRecord>(sqlx::AssertSqlSafe(query_str)).bind(motorcycle_id);
 
     for t in types_list {
         query = query.bind(t);

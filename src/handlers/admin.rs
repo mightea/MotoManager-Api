@@ -378,6 +378,7 @@ fn generate_pdf_preview_internal(config: &Config, data: &[u8], uuid: &str) -> Ap
 
     bitmap
         .as_image()
+        .map_err(|e| AppError::Image(format!("Failed to convert PDF bitmap to image: {:?}", e)))?
         .thumbnail(400, 400)
         .save_with_format(&preview_path, image::ImageFormat::Jpeg)
         .map_err(|e| AppError::Image(format!("Failed to save PDF preview: {}", e)))?;

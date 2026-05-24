@@ -126,7 +126,9 @@ fn generate_pdf_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<S
     let preview_filename = format!("{}.jpg", uuid);
     let preview_path = config.previews_dir().join(&preview_filename);
 
-    let img = bitmap.as_image();
+    let img = bitmap
+        .as_image()
+        .map_err(|e| AppError::Image(format!("Failed to convert PDF bitmap to image: {:?}", e)))?;
     let thumbnail = img.thumbnail(400, 400);
 
     thumbnail

@@ -11,7 +11,7 @@ path = "src/main.rs"
 [dependencies]
 axum = { version = "0.8", features = ["multipart", "macros"] }
 tokio = { version = "1", features = ["full"] }
-sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-native-tls", "macros", "chrono"] }
+sqlx = { version = "0.9", features = ["sqlite", "runtime-tokio", "tls-native-tls", "macros", "chrono"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tower = { version = "0.5", features = ["util"] }
@@ -21,10 +21,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2"
 dotenvy = "0.15"
 uuid = { version = "1", features = ["v4"] }
-rand = "0.8"
+rand = "0.10"
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 argon2 = "0.5"
+password-hash = { version = "0.5", features = ["getrandom"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 mime_guess = "2"
 tokio-util = { version = "0.7", features = ["io"] }
@@ -32,7 +33,7 @@ bytes = "1"
 http = "1"
 futures = "0.3"
 anyhow = "1"
-webauthn-rs = { version = "0.5.4", features = ["danger-allow-state-serialisation"] }
+webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation"] }
 base64 = "0.22.1"
 url = "2.5.8"
-pdfium-render = "0.8.37"
+pdfium-render = "0.9.1"

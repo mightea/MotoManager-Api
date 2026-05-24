@@ -1,5 +1,5 @@
 use chrono::{Duration, Utc};
-use rand::RngCore;
+use rand::Rng;
 use sqlx::SqlitePool;
 
 use crate::{
@@ -11,7 +11,7 @@ use crate::{
 /// Generate a random session token: 40 bytes as 80-char hex string.
 pub fn generate_session_token() -> String {
     let mut bytes = [0u8; 40];
-    rand::thread_rng().fill_bytes(&mut bytes);
+    rand::rng().fill_bytes(&mut bytes);
     hex::encode(bytes)
 }
 
