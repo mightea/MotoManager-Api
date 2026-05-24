@@ -382,24 +382,17 @@ pub async fn update_document(
     {
         let name = field.name().unwrap_or("").to_string();
         match name.as_str() {
-            "title" => {
-                if is_owner {
-                    new_title = Some(field.text().await.map_err(|e| {
+            "title" if is_owner => {
+                new_title =
+                    Some(field.text().await.map_err(|e| {
                         AppError::BadRequest(format!("Failed to read title: {}", e))
                     })?);
-                } else {
-                    let _ = field.bytes().await;
-                }
             }
-            "isPrivate" => {
-                if is_owner {
-                    let val = field.text().await.map_err(|e| {
-                        AppError::BadRequest(format!("Failed to read isPrivate: {}", e))
-                    })?;
-                    new_is_private = Some(val == "true" || val == "1");
-                } else {
-                    let _ = field.bytes().await;
-                }
+            "isPrivate" if is_owner => {
+                let val = field.text().await.map_err(|e| {
+                    AppError::BadRequest(format!("Failed to read isPrivate: {}", e))
+                })?;
+                new_is_private = Some(val == "true" || val == "1");
             }
             "motorcycleIds" | "motorcycleIds[]" => {
                 let val = field.text().await.map_err(|e| {
@@ -410,18 +403,14 @@ pub async fn update_document(
                 }
                 motorcycle_ids_provided = true;
             }
-            "file" => {
-                if is_owner {
-                    let original_name = field.file_name().unwrap_or("document.bin").to_string();
-                    let bytes = field
-                        .bytes()
-                        .await
-                        .map_err(|e| AppError::BadRequest(format!("Failed to read file: {}", e)))?;
-                    if !bytes.is_empty() {
-                        file_data = Some((bytes.to_vec(), original_name));
-                    }
-                } else {
-                    let _ = field.bytes().await;
+            "file" if is_owner => {
+                let original_name = field.file_name().unwrap_or("document.bin").to_string();
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("Failed to read file: {}", e)))?;
+                if !bytes.is_empty() {
+                    file_data = Some((bytes.to_vec(), original_name));
                 }
             }
             _ => {
