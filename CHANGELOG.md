@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.0](https://github.com/mightea/MotoManager-Api/compare/v0.3.0...v0.4.0) (2026-05-24)
+
+
+### Features
+
+* add filtering by type to maintenance records list ([9daa3a3](https://github.com/mightea/MotoManager-Api/commit/9daa3a3961c2a904a7c94685e673ecb3b5b4e4f1))
+* import torque specs by id list instead of source motorcycle ([8f17a5f](https://github.com/mightea/MotoManager-Api/commit/8f17a5fd8a7cc75ece16f1c7407e86d31783a5d7))
+* include userId on allMotorcycles in /documents response ([af32480](https://github.com/mightea/MotoManager-Api/commit/af324801c0c2d02e7aa5cadf8ab2caa749743dd8))
+
+
+### Bug Fixes
+
+* use workflow_run to trigger docker publish from release-please ([7e69ff3](https://github.com/mightea/MotoManager-Api/commit/7e69ff30bc771f231e3e5e9ca3d2498b61e8d130))
+
 ## [0.3.0](https://github.com/mightea/MotoManager-Api/compare/v0.2.0...v0.3.0) (2026-04-14)
 
 
