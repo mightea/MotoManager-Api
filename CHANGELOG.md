@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/mightea/MotoManager-Api/compare/v0.4.0...v0.4.1) (2026-05-24)
+
+
+### Bug Fixes
+
+* collapse if-is_owner into match guards in document update ([dfb127a](https://github.com/mightea/MotoManager-Api/commit/dfb127a2ed963cc329258429a5568c3408935fa1))
+
 ## [0.4.0](https://github.com/mightea/MotoManager-Api/compare/v0.3.0...v0.4.0) (2026-05-24)
 
 
