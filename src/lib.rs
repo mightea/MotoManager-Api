@@ -125,6 +125,12 @@ pub fn build_app(state: AppState) -> Router {
                 .delete(handlers::torque_specs::delete_torque_spec),
         )
         .route(
+            "/api/motorcycles/{id}/tire-pressure",
+            get(handlers::tire_pressure::get_tire_pressure)
+                .put(handlers::tire_pressure::upsert_tire_pressure)
+                .delete(handlers::tire_pressure::delete_tire_pressure),
+        )
+        .route(
             "/api/documents",
             get(handlers::documents::list_documents).post(handlers::documents::create_document),
         )

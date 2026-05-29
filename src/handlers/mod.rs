@@ -12,4 +12,5 @@ pub mod passkey;
 pub mod previous_owners;
 pub mod settings;
 pub mod stats;
+pub mod tire_pressure;
 pub mod torque_specs;

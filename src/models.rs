@@ -205,6 +205,20 @@ pub struct TorqueSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 #[sqlx(rename_all = "camelCase")]
+pub struct TirePressure {
+    pub id: i64,
+    pub motorcycle_id: i64,
+    pub front_bar: f64,
+    pub rear_bar: f64,
+    pub sidecar_bar: Option<f64>,
+    pub preferred_unit: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
 pub struct UserSettings {
     pub id: i64,
     pub user_id: i64,
