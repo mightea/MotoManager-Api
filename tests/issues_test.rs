@@ -188,7 +188,10 @@ async fn test_create_with_title_and_description() {
         .unwrap();
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["issue"]["title"], "Ölverlust");
-    assert_eq!(body["issue"]["description"], "Tropft am Ventildeckel rechts");
+    assert_eq!(
+        body["issue"]["description"],
+        "Tropft am Ventildeckel rechts"
+    );
     assert_eq!(body["issue"]["priority"], "high");
 }
 
@@ -214,10 +217,7 @@ async fn test_update_preserves_title_when_omitted() {
         .oneshot(auth(
             Request::builder()
                 .method(Method::PUT)
-                .uri(format!(
-                    "/api/motorcycles/{}/issues/{}",
-                    moto_id, issue_id
-                ))
+                .uri(format!("/api/motorcycles/{}/issues/{}", moto_id, issue_id))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({ "priority": "high" }).to_string()))
                 .unwrap(),
@@ -253,10 +253,7 @@ async fn test_update_can_clear_description() {
         .oneshot(auth(
             Request::builder()
                 .method(Method::PUT)
-                .uri(format!(
-                    "/api/motorcycles/{}/issues/{}",
-                    moto_id, issue_id
-                ))
+                .uri(format!("/api/motorcycles/{}/issues/{}", moto_id, issue_id))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({ "description": null }).to_string()))
                 .unwrap(),
@@ -291,10 +288,7 @@ async fn test_update_rejects_blank_title() {
         .oneshot(auth(
             Request::builder()
                 .method(Method::PUT)
-                .uri(format!(
-                    "/api/motorcycles/{}/issues/{}",
-                    moto_id, issue_id
-                ))
+                .uri(format!("/api/motorcycles/{}/issues/{}", moto_id, issue_id))
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from(json!({ "title": "" }).to_string()))
                 .unwrap(),

@@ -25,12 +25,11 @@ pub async fn get_tire_pressure(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let pressure = sqlx::query_as::<_, TirePressure>(
-        "SELECT * FROM tirePressures WHERE motorcycleId = ?",
-    )
-    .bind(motorcycle_id)
-    .fetch_optional(&pool)
-    .await?;
+    let pressure =
+        sqlx::query_as::<_, TirePressure>("SELECT * FROM tirePressures WHERE motorcycleId = ?")
+            .bind(motorcycle_id)
+            .fetch_optional(&pool)
+            .await?;
 
     Ok(Json(json!({ "tirePressure": pressure })))
 }
@@ -107,12 +106,11 @@ pub async fn upsert_tire_pressure(
     .execute(&pool)
     .await?;
 
-    let pressure = sqlx::query_as::<_, TirePressure>(
-        "SELECT * FROM tirePressures WHERE motorcycleId = ?",
-    )
-    .bind(motorcycle_id)
-    .fetch_one(&pool)
-    .await?;
+    let pressure =
+        sqlx::query_as::<_, TirePressure>("SELECT * FROM tirePressures WHERE motorcycleId = ?")
+            .bind(motorcycle_id)
+            .fetch_one(&pool)
+            .await?;
 
     Ok(Json(json!({ "tirePressure": pressure })))
 }
@@ -133,5 +131,7 @@ pub async fn delete_tire_pressure(
         return Err(AppError::NotFound("Tire pressure not found".to_string()));
     }
 
-    Ok(Json(json!({ "success": true, "message": "Tire pressure deleted" })))
+    Ok(Json(
+        json!({ "success": true, "message": "Tire pressure deleted" }),
+    ))
 }

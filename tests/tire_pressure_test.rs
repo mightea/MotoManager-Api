@@ -174,11 +174,12 @@ async fn test_upsert_creates_then_updates() {
     assert_eq!(body["tirePressure"]["preferredUnit"], "psi");
 
     // Exactly one row exists.
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tirePressures WHERE motorcycleId = ?")
-        .bind(moto_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM tirePressures WHERE motorcycleId = ?")
+            .bind(moto_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(count, 1);
 }
 
@@ -231,11 +232,12 @@ async fn test_delete_after_upsert_clears_row() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tirePressures WHERE motorcycleId = ?")
-        .bind(moto_id)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM tirePressures WHERE motorcycleId = ?")
+            .bind(moto_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(count, 0);
 }
 

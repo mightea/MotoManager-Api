@@ -296,6 +296,7 @@ async fn test_issue_lifecycle() {
                 .body(Body::from(
                     serde_json::to_vec(&json!({
                         "odo": 5100,
+                        "title": "Strange engine noise",
                         "description": "Strange noise from engine",
                         "priority": "high"
                     }))
