@@ -42,7 +42,29 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     // Run migrations
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    let migrator = sqlx::migrate!("./migrations");
+    let latest_embedded = migrator
+        .iter()
+        .filter(|m| !m.migration_type.is_down_migration())
+        .map(|m| m.version)
+        .max()
+        .ok_or_else(|| anyhow::anyhow!("no migrations bundled"))?;
+    tracing::info!(
+        "Applying database migrations (target version: {})",
+        latest_embedded
+    );
+    migrator.run(&pool).await?;
+
+    let latest_applied: i64 =
+        sqlx::query_scalar("SELECT COALESCE(MAX(version), 0) FROM _sqlx_migrations")
+            .fetch_one(&pool)
+            .await?;
+    if latest_applied != latest_embedded {
+        anyhow::bail!(
+            "migration version mismatch: embedded latest is {latest_embedded}, but database is at {latest_applied}"
+        );
+    }
+    tracing::info!("Migrations up to date (version {})", latest_applied);
 
     // Initialize WebAuthn
     let rp_id = &config.rp_id;

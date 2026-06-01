@@ -527,11 +527,12 @@ async fn test_get_home_data() {
 
     // Add an issue
     sqlx::query(
-        "INSERT INTO issues (motorcycleId, date, odo, description, priority, status) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO issues (motorcycleId, date, odo, title, description, priority, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(moto_id)
     .bind("2026-03-10")
     .bind(3000)
+    .bind("Tire low pressure")
     .bind("Tire low pressure")
     .bind("medium")
     .bind("open")

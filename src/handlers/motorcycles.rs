@@ -13,8 +13,8 @@ use crate::{
     config::Config,
     error::{AppError, AppResult},
     models::{
-        Document, Issue, MaintenanceRecord, Motorcycle, MotorcycleWithStats, PreviousOwner,
-        TorqueSpec,
+        Document, Issue, Location, MaintenanceRecord, Motorcycle, MotorcycleWithStats,
+        PreviousOwner, TorqueSpec,
     },
 };
 
@@ -248,37 +248,15 @@ pub async fn get_motorcycle(
     .fetch_all(&pool)
     .await?;
 
-    #[derive(sqlx::FromRow, serde::Serialize)]
-    struct MaintenanceLocation {
-        name: String,
-        latitude: Option<f64>,
-        longitude: Option<f64>,
-    }
-
-    let maintenance_locations = sqlx::query_as::<_, MaintenanceLocation>(
-        "SELECT DISTINCT name, latitude, longitude FROM ( \
-           SELECT locationName as name, latitude, longitude FROM maintenanceRecords \
-           WHERE motorcycleId = ? AND locationName IS NOT NULL AND locationName != '' \
-           UNION \
-           SELECT inspectionLocation as name, NULL as latitude, NULL as longitude FROM maintenanceRecords \
-           WHERE motorcycleId = ? AND inspectionLocation IS NOT NULL AND inspectionLocation != '' \
-         ) ORDER BY name ASC",
+    let maintenance_locations = sqlx::query_as::<_, Location>(
+        "SELECT DISTINCT l.* FROM locations l \
+         JOIN maintenanceRecords mr ON mr.locationId = l.id \
+         WHERE mr.motorcycleId = ? \
+         ORDER BY l.name ASC",
     )
-    .bind(id)
     .bind(id)
     .fetch_all(&pool)
     .await?;
-
-    let locations_json = maintenance_locations
-        .into_iter()
-        .map(|row| {
-            json!({
-                "name": row.name,
-                "latitude": row.latitude,
-                "longitude": row.longitude,
-            })
-        })
-        .collect::<Vec<_>>();
 
     let mut formatted_docs = Vec::new();
     for row in documents {
@@ -296,7 +274,7 @@ pub async fn get_motorcycle(
         "motorcycle": motorcycle,
         "issues": issues,
         "maintenanceRecords": maintenance,
-        "maintenanceLocations": locations_json,
+        "maintenanceLocations": maintenance_locations,
         "previousOwners": previous_owners,
         "torqueSpecs": torque_specs,
         "torqueSpecifications": torque_specs,

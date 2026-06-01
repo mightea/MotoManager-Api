@@ -139,14 +139,10 @@ pub struct MaintenanceRecord {
     pub fluid_type: Option<String>,
     pub viscosity: Option<String>,
     pub oil_type: Option<String>,
-    pub inspection_location: Option<String>,
     pub location_id: Option<i64>,
     pub fuel_type: Option<String>,
     pub fuel_amount: Option<f64>,
     pub price_per_unit: Option<f64>,
-    pub latitude: Option<f64>,
-    pub longitude: Option<f64>,
-    pub location_name: Option<String>,
     pub fuel_consumption: Option<f64>,
     pub trip_distance: Option<f64>,
     pub parent_id: Option<i64>,
@@ -159,10 +155,22 @@ pub struct Issue {
     pub id: i64,
     pub motorcycle_id: i64,
     pub odo: i64,
+    pub title: String,
     pub description: Option<String>,
     pub priority: String,
     pub status: String,
     pub date: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "snake_case")]
+pub enum LocationType {
+    Storage,
+    MaintenanceShop,
+    FuelStation,
+    Inspection,
+    Other,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -171,8 +179,15 @@ pub struct Issue {
 pub struct Location {
     pub id: i64,
     pub name: String,
+    #[serde(rename = "type")]
+    #[sqlx(rename = "type")]
+    pub location_type: LocationType,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
     pub country_code: String,
     pub user_id: i64,
+    pub created_at: String,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

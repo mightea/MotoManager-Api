@@ -10,7 +10,7 @@ use sqlx::SqlitePool;
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
-    handlers::motorcycles::verify_motorcycle_ownership,
+    handlers::{locations::verify_location_ownership, motorcycles::verify_motorcycle_ownership},
     models::MaintenanceRecord,
 };
 
@@ -127,14 +127,10 @@ pub struct MaintenanceRequest {
     pub fluid_type: Option<String>,
     pub viscosity: Option<String>,
     pub oil_type: Option<String>,
-    pub inspection_location: Option<String>,
     pub location_id: Option<i64>,
     pub fuel_type: Option<String>,
     pub fuel_amount: Option<f64>,
     pub price_per_unit: Option<f64>,
-    pub latitude: Option<f64>,
-    pub longitude: Option<f64>,
-    pub location_name: Option<String>,
     pub fuel_consumption: Option<f64>,
     pub trip_distance: Option<f64>,
     pub parent_id: Option<i64>,
@@ -153,6 +149,9 @@ pub async fn create_maintenance(
         user.id
     );
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
+    if let Some(lid) = body.location_id {
+        verify_location_ownership(&pool, lid, user.id).await?;
+    }
 
     let date = body
         .date
@@ -170,9 +169,9 @@ pub async fn create_maintenance(
         "INSERT INTO maintenanceRecords \
          (date, odo, motorcycleId, cost, normalizedCost, currency, description, type, \
           brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
-          oilType, inspectionLocation, locationId, fuelType, fuelAmount, pricePerUnit, \
-          latitude, longitude, locationName, fuelConsumption, tripDistance, parentId) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          oilType, locationId, fuelType, fuelAmount, pricePerUnit, \
+          fuelConsumption, tripDistance, parentId) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&date)
     .bind(odo)
@@ -191,14 +190,10 @@ pub async fn create_maintenance(
     .bind(&body.fluid_type)
     .bind(&body.viscosity)
     .bind(&body.oil_type)
-    .bind(&body.inspection_location)
     .bind(body.location_id)
     .bind(&body.fuel_type)
     .bind(body.fuel_amount)
     .bind(body.price_per_unit)
-    .bind(body.latitude)
-    .bind(body.longitude)
-    .bind(&body.location_name)
     .bind(body.fuel_consumption)
     .bind(body.trip_distance)
     .bind(body.parent_id)
@@ -276,6 +271,9 @@ pub async fn update_maintenance(
         user.id
     );
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
+    if let Some(lid) = body.location_id {
+        verify_location_ownership(&pool, lid, user.id).await?;
+    }
 
     let existing = sqlx::query_as::<_, MaintenanceRecord>(
         "SELECT * FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?",
@@ -302,15 +300,10 @@ pub async fn update_maintenance(
     let fluid_type: Option<String> = body.fluid_type.or(existing.fluid_type);
     let viscosity: Option<String> = body.viscosity.or(existing.viscosity);
     let oil_type: Option<String> = body.oil_type.or(existing.oil_type);
-    let inspection_location: Option<String> =
-        body.inspection_location.or(existing.inspection_location);
     let location_id: Option<i64> = body.location_id.or(existing.location_id);
     let fuel_type: Option<String> = body.fuel_type.or(existing.fuel_type);
     let fuel_amount: Option<f64> = body.fuel_amount.or(existing.fuel_amount);
     let price_per_unit: Option<f64> = body.price_per_unit.or(existing.price_per_unit);
-    let latitude: Option<f64> = body.latitude.or(existing.latitude);
-    let longitude: Option<f64> = body.longitude.or(existing.longitude);
-    let location_name: Option<String> = body.location_name.or(existing.location_name);
     let fuel_consumption: Option<f64> = body.fuel_consumption.or(existing.fuel_consumption);
     let trip_distance: Option<f64> = body.trip_distance.or(existing.trip_distance);
     let parent_id: Option<i64> = body.parent_id.or(existing.parent_id);
@@ -321,9 +314,9 @@ pub async fn update_maintenance(
         "UPDATE maintenanceRecords SET \
          date = ?, odo = ?, cost = ?, normalizedCost = ?, currency = ?, description = ?, \
          type = ?, brand = ?, model = ?, tirePosition = ?, tireSize = ?, dotCode = ?, \
-         batteryType = ?, fluidType = ?, viscosity = ?, oilType = ?, inspectionLocation = ?, \
-         locationId = ?, fuelType = ?, fuelAmount = ?, pricePerUnit = ?, latitude = ?, \
-         longitude = ?, locationName = ?, fuelConsumption = ?, tripDistance = ?, parentId = ? \
+         batteryType = ?, fluidType = ?, viscosity = ?, oilType = ?, \
+         locationId = ?, fuelType = ?, fuelAmount = ?, pricePerUnit = ?, \
+         fuelConsumption = ?, tripDistance = ?, parentId = ? \
          WHERE id = ?",
     )
     .bind(&date)
@@ -342,14 +335,10 @@ pub async fn update_maintenance(
     .bind(&fluid_type)
     .bind(&viscosity)
     .bind(&oil_type)
-    .bind(&inspection_location)
     .bind(location_id)
     .bind(&fuel_type)
     .bind(fuel_amount)
     .bind(price_per_unit)
-    .bind(latitude)
-    .bind(longitude)
-    .bind(&location_name)
     .bind(fuel_consumption)
     .bind(trip_distance)
     .bind(parent_id)

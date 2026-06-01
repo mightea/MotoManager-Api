@@ -35,6 +35,7 @@ pub async fn list_issues(
 #[derive(Debug, Deserialize)]
 pub struct CreateIssueRequest {
     pub odo: i64,
+    pub title: String,
     pub description: Option<String>,
     pub priority: Option<String>,
     pub status: Option<String>,
@@ -49,6 +50,17 @@ pub async fn create_issue(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
+    let title = body.title.trim().to_string();
+    if title.is_empty() {
+        return Err(AppError::BadRequest("title must not be empty".to_string()));
+    }
+    let description = body
+        .description
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
     let date = body
         .date
         .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string());
@@ -56,12 +68,13 @@ pub async fn create_issue(
     let status = body.status.unwrap_or_else(|| "new".to_string());
 
     let id = sqlx::query(
-        "INSERT INTO issues (motorcycleId, odo, description, priority, status, date) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO issues (motorcycleId, odo, title, description, priority, status, date) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
     .bind(body.odo)
-    .bind(&body.description)
+    .bind(&title)
+    .bind(&description)
     .bind(&priority)
     .bind(&status)
     .bind(&date)
@@ -80,10 +93,21 @@ pub async fn create_issue(
 #[derive(Debug, Deserialize)]
 pub struct UpdateIssueRequest {
     pub odo: Option<i64>,
-    pub description: Option<String>,
+    pub title: Option<String>,
+    // Use a double Option to distinguish "field absent" from "field
+    // explicitly set to null" — the latter clears description.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    pub description: Option<Option<String>>,
     pub priority: Option<String>,
     pub status: Option<String>,
     pub date: Option<String>,
+}
+
+fn deserialize_optional_field<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
 }
 
 pub async fn update_issue(
@@ -103,16 +127,34 @@ pub async fn update_issue(
             .ok_or_else(|| AppError::NotFound("Issue not found".to_string()))?;
 
     let odo = body.odo.unwrap_or(existing.odo);
-    let description: Option<String> = body.description.or(existing.description);
+    let title = match body.title {
+        Some(t) => {
+            let t = t.trim().to_string();
+            if t.is_empty() {
+                return Err(AppError::BadRequest("title must not be empty".to_string()));
+            }
+            t
+        }
+        None => existing.title,
+    };
+    let description: Option<String> = match body.description {
+        Some(new_desc) => new_desc
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+        None => existing.description,
+    };
     let priority = body.priority.unwrap_or(existing.priority);
     let status = body.status.unwrap_or(existing.status);
     let date = body.date.unwrap_or(existing.date);
 
     sqlx::query(
-        "UPDATE issues SET odo = ?, description = ?, priority = ?, status = ?, date = ? \
+        "UPDATE issues SET odo = ?, title = ?, description = ?, priority = ?, status = ?, date = ? \
          WHERE id = ?",
     )
     .bind(odo)
+    .bind(&title)
     .bind(&description)
     .bind(&priority)
     .bind(&status)
