@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.0](https://github.com/mightea/MotoManager-Api/compare/v0.4.1...v0.5.0) (2026-06-01)
+
+
+### Features
+
+* add tire pressure endpoint per motorcycle ([9cb4e6d](https://github.com/mightea/MotoManager-Api/commit/9cb4e6d9e46a5119bab862f8f4feedf6f45f602e))
+* typed locations, issue titles, and startup migration verification ([c15cd7b](https://github.com/mightea/MotoManager-Api/commit/c15cd7b07642e8ba2b9d0232fa1a254ca39d8edc))
+
+
+### Bug Fixes
+
+* apply rustfmt and add required title to issue lifecycle test ([4efd37c](https://github.com/mightea/MotoManager-Api/commit/4efd37c3b6459ff6766138aeac3eb7b805643191))
+
 ## [0.4.1](https://github.com/mightea/MotoManager-Api/compare/v0.4.0...v0.4.1) (2026-05-24)
 
 
