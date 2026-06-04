@@ -608,15 +608,18 @@ async fn test_home_data_location_logic() {
     .unwrap()
     .last_insert_rowid();
 
-    let loc1_id = sqlx::query("INSERT INTO locations (name, userId) VALUES (?, ?)")
+    // Storage-typed: only storage locations count as "where the bike lives".
+    let loc1_id = sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
         .bind("Location 1")
+        .bind("storage")
         .bind(1)
         .execute(&pool)
         .await
         .unwrap()
         .last_insert_rowid();
-    let loc2_id = sqlx::query("INSERT INTO locations (name, userId) VALUES (?, ?)")
+    let loc2_id = sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
         .bind("Location 2")
+        .bind("storage")
         .bind(1)
         .execute(&pool)
         .await

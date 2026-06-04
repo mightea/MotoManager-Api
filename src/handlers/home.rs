@@ -9,7 +9,7 @@ use crate::{
     auth::AuthUser,
     config::Config,
     error::AppResult,
-    models::{Issue, Location, LocationRecord, MaintenanceRecord, Motorcycle, UserSettings},
+    models::{Issue, Location, LocationRecord, LocationType, MaintenanceRecord, Motorcycle, UserSettings},
 };
 
 fn parse_date(date_str: &str) -> Option<NaiveDate> {
@@ -155,9 +155,18 @@ pub async fn get_home_data(
             .max(last_issues_date)
             .max(last_location_date);
 
-        // Current Location
-        let latest_loc_record = moto_loc_records.first();
-        let latest_m_with_loc = moto_maintenance.iter().find(|m| m.location_id.is_some());
+        // Current Location — only Storage-typed locations count as "where the bike lives".
+        // Fuel / workshop / inspection visits don't change the bike's home.
+        let is_storage_loc = |id: i64| -> bool {
+            location_map
+                .get(&id)
+                .map(|l| matches!(l.location_type, LocationType::Storage))
+                .unwrap_or(false)
+        };
+        let latest_loc_record = moto_loc_records.iter().find(|r| is_storage_loc(r.location_id));
+        let latest_m_with_loc = moto_maintenance
+            .iter()
+            .find(|m| m.location_id.is_some_and(is_storage_loc));
 
         let current_location_id = match (latest_loc_record, latest_m_with_loc) {
             (Some(lr), Some(mr)) => {
