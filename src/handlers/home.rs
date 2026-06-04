@@ -9,7 +9,9 @@ use crate::{
     auth::AuthUser,
     config::Config,
     error::AppResult,
-    models::{Issue, Location, LocationRecord, LocationType, MaintenanceRecord, Motorcycle, UserSettings},
+    models::{
+        Issue, Location, LocationRecord, LocationType, MaintenanceRecord, Motorcycle, UserSettings,
+    },
 };
 
 fn parse_date(date_str: &str) -> Option<NaiveDate> {
@@ -163,7 +165,9 @@ pub async fn get_home_data(
                 .map(|l| matches!(l.location_type, LocationType::Storage))
                 .unwrap_or(false)
         };
-        let latest_loc_record = moto_loc_records.iter().find(|r| is_storage_loc(r.location_id));
+        let latest_loc_record = moto_loc_records
+            .iter()
+            .find(|r| is_storage_loc(r.location_id));
         let latest_m_with_loc = moto_maintenance
             .iter()
             .find(|m| m.location_id.is_some_and(is_storage_loc));

@@ -372,15 +372,14 @@ async fn test_maintenance_rejects_foreign_location_id() {
     .last_insert_rowid();
 
     // Bob has a location (userId = 2)
-    let bob_lid =
-        sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
-            .bind("Bob Shop")
-            .bind("maintenance_shop")
-            .bind(2)
-            .execute(&pool)
-            .await
-            .unwrap()
-            .last_insert_rowid();
+    let bob_lid = sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
+        .bind("Bob Shop")
+        .bind("maintenance_shop")
+        .bind(2)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
 
     // Alice tries to attach a maintenance record to Bob's location — should fail
     let r = app
