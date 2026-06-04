@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/mightea/MotoManager-Api/compare/v0.5.0...v0.6.0) (2026-06-04)
+
+
+### Features
+
+* derive a motorcycle's current location only from storage locations ([d1f38c9](https://github.com/mightea/MotoManager-Api/commit/d1f38c9f78552757221068d094cd7c09bf856615))
+
+
+### Bug Fixes
+
+* revert migration 005 content so sqlx checksum validates again ([d9f5796](https://github.com/mightea/MotoManager-Api/commit/d9f5796b0e7bc21be6838ac1b09fe0d3812a8089))
+
 ## [0.5.0](https://github.com/mightea/MotoManager-Api/compare/v0.4.1...v0.5.0) (2026-06-01)
 
 
