@@ -103,8 +103,7 @@ async fn test_location_crud_with_type_and_coords() {
                         "name": "Home Garage",
                         "type": "storage",
                         "latitude": 47.3769,
-                        "longitude": 8.5417,
-                        "countryCode": "CH"
+                        "longitude": 8.5417
                     }))
                     .unwrap(),
                 ))
@@ -374,10 +373,9 @@ async fn test_maintenance_rejects_foreign_location_id() {
 
     // Bob has a location (userId = 2)
     let bob_lid =
-        sqlx::query("INSERT INTO locations (name, type, countryCode, userId) VALUES (?, ?, ?, ?)")
+        sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
             .bind("Bob Shop")
             .bind("maintenance_shop")
-            .bind("CH")
             .bind(2)
             .execute(&pool)
             .await

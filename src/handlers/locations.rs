@@ -107,7 +107,6 @@ pub struct CreateLocationRequest {
     pub location_type: LocationType,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
-    pub country_code: Option<String>,
 }
 
 pub async fn create_location(
@@ -119,18 +118,16 @@ pub async fn create_location(
         return Err(AppError::BadRequest("name is required".to_string()));
     }
     let (latitude, longitude) = validate_coords(body.latitude, body.longitude)?;
-    let country_code = body.country_code.unwrap_or_else(|| "CH".to_string());
     let now = Utc::now().to_rfc3339();
 
     let id = sqlx::query(
-        "INSERT INTO locations (name, type, latitude, longitude, countryCode, userId, createdAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO locations (name, type, latitude, longitude, userId, createdAt) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(body.name.trim())
     .bind(body.location_type)
     .bind(latitude)
     .bind(longitude)
-    .bind(&country_code)
     .bind(user.id)
     .bind(&now)
     .execute(&pool)
@@ -153,7 +150,6 @@ pub struct UpdateLocationRequest {
     pub location_type: Option<LocationType>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
-    pub country_code: Option<String>,
 }
 
 pub async fn update_location(
@@ -181,18 +177,16 @@ pub async fn update_location(
         (None, None) => (existing.latitude, existing.longitude),
         (lat, lon) => validate_coords(lat, lon)?,
     };
-    let country_code = body.country_code.unwrap_or(existing.country_code);
     let now = Utc::now().to_rfc3339();
 
     sqlx::query(
         "UPDATE locations SET name = ?, type = ?, latitude = ?, longitude = ?, \
-         countryCode = ?, updatedAt = ? WHERE id = ?",
+         updatedAt = ? WHERE id = ?",
     )
     .bind(&name)
     .bind(location_type)
     .bind(latitude)
     .bind(longitude)
-    .bind(&country_code)
     .bind(&now)
     .bind(lid)
     .execute(&pool)

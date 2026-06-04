@@ -397,7 +397,6 @@ pub async fn get_home_data(
             "nextInspection": next_inspection,
             "currentLocationId": current_location_id,
             "currentLocationName": current_location.map(|l| l.name.clone()),
-            "currentLocationCountryCode": current_location.map(|l| l.country_code.clone()),
             "hasOverdueMaintenance": !overdue_items.is_empty(),
             "overdueMaintenanceItems": overdue_items
         }));

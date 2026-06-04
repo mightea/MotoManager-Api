@@ -608,17 +608,15 @@ async fn test_home_data_location_logic() {
     .unwrap()
     .last_insert_rowid();
 
-    let loc1_id = sqlx::query("INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)")
+    let loc1_id = sqlx::query("INSERT INTO locations (name, userId) VALUES (?, ?)")
         .bind("Location 1")
-        .bind("CH")
         .bind(1)
         .execute(&pool)
         .await
         .unwrap()
         .last_insert_rowid();
-    let loc2_id = sqlx::query("INSERT INTO locations (name, countryCode, userId) VALUES (?, ?, ?)")
+    let loc2_id = sqlx::query("INSERT INTO locations (name, userId) VALUES (?, ?)")
         .bind("Location 2")
-        .bind("DE")
         .bind(1)
         .execute(&pool)
         .await

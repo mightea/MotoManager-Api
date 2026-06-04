@@ -18,15 +18,15 @@ WHERE createdAt IS NULL;
 CREATE INDEX IF NOT EXISTS idx_locations_userId_type ON locations(userId, type);
 
 -- Backfill: create one Location per (user, free-text name) found in maintenanceRecords
--- where no locationId is set yet. Type defaults to 'maintenance_shop' since the data
--- originated from maintenance entries.
+-- where no locationId is set yet. Type defaults to 'fuel_station' since most of the
+-- legacy free-text location data originated from fuel entries (locationName field).
 INSERT INTO locations (userId, name, type, latitude, longitude, countryCode, createdAt)
 SELECT DISTINCT
     m.userId,
     COALESCE(NULLIF(TRIM(mr.locationName), ''),
              NULLIF(TRIM(mr.inspectionLocation), ''),
              'Unknown'),
-    'maintenance_shop',
+    'fuel_station',
     mr.latitude,
     mr.longitude,
     'CH',
@@ -40,7 +40,7 @@ WHERE mr.locationId IS NULL
   AND NOT EXISTS (
       SELECT 1 FROM locations l
       WHERE l.userId = m.userId
-        AND l.type = 'maintenance_shop'
+        AND l.type = 'fuel_station'
         AND l.name = COALESCE(NULLIF(TRIM(mr.locationName), ''),
                               NULLIF(TRIM(mr.inspectionLocation), ''),
                               'Unknown')
@@ -53,7 +53,7 @@ SET locationId = (
     FROM locations l
     JOIN motorcycles m ON m.id = maintenanceRecords.motorcycleId
     WHERE l.userId = m.userId
-      AND l.type = 'maintenance_shop'
+      AND l.type = 'fuel_station'
       AND l.name = COALESCE(NULLIF(TRIM(maintenanceRecords.locationName), ''),
                             NULLIF(TRIM(maintenanceRecords.inspectionLocation), ''),
                             'Unknown')
