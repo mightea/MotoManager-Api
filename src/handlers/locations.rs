@@ -205,15 +205,44 @@ pub async fn delete_location(
     AuthUser(user): AuthUser,
     Path(lid): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    let result = sqlx::query("DELETE FROM locations WHERE id = ? AND userId = ?")
-        .bind(lid)
-        .bind(user.id)
-        .execute(&pool)
-        .await?;
+    // Locations are referenced by two tables with `ON DELETE NO ACTION`:
+    //   - maintenanceRecords.locationId (nullable) — historical entries we want to keep
+    //   - locationRecords.locationId    (NOT NULL) — explicit "the bike is here" markers
+    // A plain DELETE on the location row trips SQLite's FK check whenever the
+    // location is in use. Detach references inside a transaction so the user
+    // can drop a location without manually scrubbing every dependent row.
+    let mut tx = pool.begin().await?;
 
-    if result.rows_affected() == 0 {
+    let exists: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM locations WHERE id = ? AND userId = ?")
+            .bind(lid)
+            .bind(user.id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if exists.is_none() {
         return Err(AppError::NotFound("Location not found".to_string()));
     }
+
+    // Maintenance entries lose the locationId but otherwise survive — the
+    // historical date/odo/cost are still valuable on their own.
+    sqlx::query("UPDATE maintenanceRecords SET locationId = NULL WHERE locationId = ?")
+        .bind(lid)
+        .execute(&mut *tx)
+        .await?;
+
+    // locationRecords are meaningless without the location they point to.
+    sqlx::query("DELETE FROM locationRecords WHERE locationId = ?")
+        .bind(lid)
+        .execute(&mut *tx)
+        .await?;
+
+    sqlx::query("DELETE FROM locations WHERE id = ? AND userId = ?")
+        .bind(lid)
+        .bind(user.id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
 
     Ok(Json(json!({ "message": "Location deleted" })))
 }
