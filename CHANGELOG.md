@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/mightea/MotoManager-Api/compare/v0.6.0...v0.6.1) (2026-06-05)
+
+
+### Bug Fixes
+
+* allow deleting a location that is still referenced ([612fe65](https://github.com/mightea/MotoManager-Api/commit/612fe65b9960cb5ccba4ba8c7046474cf355f49c))
+
 ## [0.6.0](https://github.com/mightea/MotoManager-Api/compare/v0.5.0...v0.6.0) (2026-06-04)
 
 
