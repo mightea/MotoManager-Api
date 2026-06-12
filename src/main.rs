@@ -1,5 +1,9 @@
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{
+    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
+};
+use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 use tower_http::trace::TraceLayer;
 use url::Url;
 use webauthn_rs::WebauthnBuilder;
@@ -35,10 +39,17 @@ async fn main() -> anyhow::Result<()> {
         tokio::fs::create_dir_all(config.resized_images_dir()).await?;
     }
 
-    // Connect to database
+    // Connect to database. WAL is sticky: once enabled it persists in the DB file
+    // and creates `-wal`/`-shm` sibling files next to it.
+    let connect_options = SqliteConnectOptions::from_str(&config.database_url)?
+        .journal_mode(SqliteJournalMode::Wal)
+        .synchronous(SqliteSynchronous::Normal)
+        .busy_timeout(Duration::from_secs(5))
+        .foreign_keys(true);
+
     let pool = SqlitePoolOptions::new()
         .max_connections(10)
-        .connect(&config.database_url)
+        .connect_with(connect_options)
         .await?;
 
     // Run migrations
