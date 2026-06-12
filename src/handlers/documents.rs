@@ -170,10 +170,29 @@ pub async fn list_documents(
     .fetch_all(&pool)
     .await?;
 
+    // One bulk query feeds both the per-doc motorcycleIds and the assignments payload
+    let assignments_rows = sqlx::query!("SELECT documentId, motorcycleId FROM documentMotorcycles")
+        .fetch_all(&pool)
+        .await?;
+
+    let mut ids_by_doc: std::collections::HashMap<i64, Vec<i64>> =
+        std::collections::HashMap::new();
+    let mut assignments = Vec::new();
+    for r in assignments_rows {
+        ids_by_doc
+            .entry(r.documentId)
+            .or_default()
+            .push(r.motorcycleId);
+        assignments.push(json!({
+            "documentId": r.documentId,
+            "motorcycleId": r.motorcycleId,
+        }));
+    }
+
     let mut docs = Vec::new();
     for row in rows {
         let doc_id = row.id;
-        let motorcycle_ids = get_motorcycle_ids_for_doc(&pool, doc_id).await?;
+        let motorcycle_ids = ids_by_doc.remove(&doc_id).unwrap_or_default();
         let doc = format_doc_paths(row);
         let mut doc_val = serde_json::to_value(doc).unwrap_or(json!({}));
         if let Some(obj) = doc_val.as_object_mut() {
@@ -202,20 +221,6 @@ pub async fn list_documents(
                 "make": r.make,
                 "model": r.model,
                 "ownerName": r.ownerName,
-            })
-        })
-        .collect();
-
-    let assignments_rows = sqlx::query!("SELECT documentId, motorcycleId FROM documentMotorcycles")
-        .fetch_all(&pool)
-        .await?;
-
-    let assignments: Vec<Value> = assignments_rows
-        .into_iter()
-        .map(|r| {
-            json!({
-                "documentId": r.documentId,
-                "motorcycleId": r.motorcycleId,
             })
         })
         .collect();

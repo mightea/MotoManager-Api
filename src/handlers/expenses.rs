@@ -6,6 +6,7 @@ use axum::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
+use std::collections::HashMap;
 
 use crate::{
     auth::AuthUser,
@@ -39,17 +40,26 @@ pub async fn list_expenses(
     .fetch_all(&pool)
     .await?;
 
+    // Fetch all junction rows in one query instead of one query per expense
+    let assignment_rows = sqlx::query!(
+        "SELECT em.expenseId, em.motorcycleId FROM expenseMotorcycles em \
+         JOIN expenses e ON e.id = em.expenseId WHERE e.userId = ?",
+        user.id
+    )
+    .fetch_all(&pool)
+    .await?;
+
+    let mut ids_by_expense: HashMap<i64, Vec<i64>> = HashMap::new();
+    for row in assignment_rows {
+        ids_by_expense
+            .entry(row.expenseId)
+            .or_default()
+            .push(row.motorcycleId);
+    }
+
     let mut result = Vec::new();
     for expense in expenses {
-        let motorcycle_ids = sqlx::query!(
-            "SELECT motorcycleId FROM expenseMotorcycles WHERE expenseId = ?",
-            expense.id
-        )
-        .fetch_all(&pool)
-        .await?
-        .into_iter()
-        .map(|r| r.motorcycleId)
-        .collect::<Vec<_>>();
+        let motorcycle_ids = ids_by_expense.remove(&expense.id).unwrap_or_default();
 
         let mut val = serde_json::to_value(&expense).unwrap();
         if let Some(obj) = val.as_object_mut() {
