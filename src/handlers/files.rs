@@ -75,8 +75,15 @@ pub async fn serve_image(
                         .into_response();
                 }
 
-                match resize_image(&data, w, h, format) {
-                    Ok(resized) => {
+                // Decode + Lanczos3 resize is CPU-heavy; keep it off the async workers.
+                // Clone the source bytes: the error fallback below still needs them.
+                let data_for_resize = data.clone();
+                let resize_result =
+                    tokio::task::spawn_blocking(move || resize_image(&data_for_resize, w, h, format))
+                        .await;
+
+                match resize_result {
+                    Ok(Ok(resized)) => {
                         tracing::info!(
                             "Resized image {} to {}x{} (format: {:?})",
                             filename,
@@ -103,7 +110,8 @@ pub async fn serve_image(
                             .unwrap();
                         response.into_response()
                     }
-                    Err(_) => serve_raw(data, &filename).into_response(),
+                    // Resize failure or JoinError (panicked task): fall back to the original
+                    _ => serve_raw(data, &filename).into_response(),
                 }
             } else {
                 serve_raw(data, &filename).into_response()
