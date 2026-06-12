@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.6.2](https://github.com/mightea/MotoManager-Api/compare/v0.6.1...v0.6.2) (2026-06-12)
+
+
+### Performance Improvements
+
+* add indexes for per-motorcycle lookups ([5cc062a](https://github.com/mightea/MotoManager-Api/commit/5cc062add2929bdeb50f29457e4939571f5e3a57))
+* eliminate n+1 queries in expense and document listings ([88446ce](https://github.com/mightea/MotoManager-Api/commit/88446ce5a20e611aa7b32426157967e23f8ae958))
+* enable wal journal mode and tuned sqlite pragmas ([b97f22a](https://github.com/mightea/MotoManager-Api/commit/b97f22a544cc91a2886c4850de74aa19ac68d2dc))
+* offload image resizing to blocking thread pool ([19e105b](https://github.com/mightea/MotoManager-Api/commit/19e105b898be9bff72e35f571b800a81d8727f6d))
+
 ## [0.6.1](https://github.com/mightea/MotoManager-Api/compare/v0.6.0...v0.6.1) (2026-06-05)
 
 
