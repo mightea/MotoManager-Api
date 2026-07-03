@@ -27,13 +27,16 @@ pub async fn list_users(
         .fetch_all(&pool)
         .await?;
 
+    // Load all settings once and index by user instead of a query per user (N+1).
+    let all_settings = sqlx::query_as::<_, UserSettings>("SELECT * FROM userSettings")
+        .fetch_all(&pool)
+        .await?;
+    let mut settings_by_user: std::collections::HashMap<i64, UserSettings> =
+        all_settings.into_iter().map(|s| (s.user_id, s)).collect();
+
     let mut users = Vec::new();
     for user in rows {
-        let settings =
-            sqlx::query_as::<_, UserSettings>("SELECT * FROM userSettings WHERE userId = ?")
-                .bind(user.id)
-                .fetch_optional(&pool)
-                .await?;
+        let settings = settings_by_user.remove(&user.id);
 
         let pub_user = PublicUser::from(user);
         let mut user_val = serde_json::to_value(pub_user).unwrap_or(json!({}));
@@ -230,12 +233,14 @@ pub async fn regenerate_previews(
             .unwrap_or("")
             .to_lowercase();
 
-        if ["jpg", "jpeg", "png", "webp", "gif"].contains(&ext.as_str()) {
+        let is_image = ["jpg", "jpeg", "png", "webp", "gif"].contains(&ext.as_str());
+        if is_image || ext == "pdf" {
             let full_path = config.documents_dir().join(&filename);
             if let Ok(file_data) = tokio::fs::read(&full_path).await {
                 let uuid = Uuid::new_v4().to_string();
-                match generate_image_preview_internal(&config, &file_data, &uuid) {
-                    Ok(preview_filename) => {
+                // CPU-bound decode/render off the async worker.
+                match regenerate_doc_preview(&config, file_data, uuid, is_image).await {
+                    Some(preview_filename) => {
                         sqlx::query!(
                             "UPDATE documents SET previewPath = ? WHERE id = ?",
                             preview_filename,
@@ -245,29 +250,7 @@ pub async fn regenerate_previews(
                         .await?;
                         doc_count += 1;
                     }
-                    Err(e) => {
-                        tracing::warn!("Failed to generate preview for doc {}: {}", doc.id, e)
-                    }
-                }
-            }
-        } else if ext == "pdf" {
-            let full_path = config.documents_dir().join(&filename);
-            if let Ok(file_data) = tokio::fs::read(&full_path).await {
-                let uuid = Uuid::new_v4().to_string();
-                match generate_pdf_preview_internal(&config, &file_data, &uuid) {
-                    Ok(preview_filename) => {
-                        sqlx::query!(
-                            "UPDATE documents SET previewPath = ? WHERE id = ?",
-                            preview_filename,
-                            doc.id
-                        )
-                        .execute(&pool)
-                        .await?;
-                        doc_count += 1;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to generate PDF preview for doc {}: {}", doc.id, e)
-                    }
+                    None => tracing::warn!("Failed to generate preview for doc {}", doc.id),
                 }
             }
         }
@@ -317,11 +300,19 @@ pub async fn regenerate_previews(
                 let cache_filename = format!("{}_400x400.{}", stem, cache_ext);
                 let cache_path = config.resized_images_dir().join(&cache_filename);
 
-                if let Ok(img) = image::load_from_memory(&file_data) {
-                    let thumbnail = img.thumbnail(400, 400);
-                    if thumbnail.save_with_format(&cache_path, format).is_ok() {
-                        moto_count += 1;
-                    }
+                // Decode + thumbnail + encode off the async worker.
+                let generated = tokio::task::spawn_blocking(move || {
+                    let Ok(img) = image::load_from_memory(&file_data) else {
+                        return false;
+                    };
+                    img.thumbnail(400, 400)
+                        .save_with_format(&cache_path, format)
+                        .is_ok()
+                })
+                .await
+                .unwrap_or(false);
+                if generated {
+                    moto_count += 1;
                 }
             }
         }
@@ -332,6 +323,27 @@ pub async fn regenerate_previews(
         "docCount": doc_count,
         "motoCount": moto_count
     })))
+}
+
+/// Regenerate a single document's preview on a blocking thread. Returns the
+/// preview filename, or `None` on failure.
+async fn regenerate_doc_preview(
+    config: &Config,
+    data: Vec<u8>,
+    uuid: String,
+    is_image: bool,
+) -> Option<String> {
+    let config = config.clone();
+    tokio::task::spawn_blocking(move || {
+        if is_image {
+            generate_image_preview_internal(&config, &data, &uuid)
+        } else {
+            generate_pdf_preview_internal(&config, &data, &uuid)
+        }
+    })
+    .await
+    .ok()
+    .and_then(|r| r.ok())
 }
 
 fn generate_image_preview_internal(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {

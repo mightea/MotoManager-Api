@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
-use crate::handlers::documents::{format_doc_paths, get_motorcycle_ids_for_doc};
+use crate::handlers::documents::format_doc_paths;
 use crate::{
     auth::AuthUser,
     config::Config,
@@ -57,9 +57,9 @@ pub async fn list_motorcycles(
     let motorcycles = sqlx::query_as::<_, MotorcycleWithStats>(r"
         SELECT 
             m.*,
-            (SELECT COUNT(*) FROM issues i WHERE i.motorcycleId = m.id AND i.status != 'done') as openIssues,
-            (SELECT COUNT(*) FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id) as maintenanceCount,
-            (SELECT MAX(odo) FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id) as latestOdo
+            (SELECT COUNT(*) FROM issues i WHERE i.motorcycleId = m.id AND i.status != 'done' AND i.deletedAt IS NULL) as openIssues,
+            (SELECT COUNT(*) FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id AND mr.deletedAt IS NULL) as maintenanceCount,
+            (SELECT MAX(odo) FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id AND mr.deletedAt IS NULL) as latestOdo
         FROM motorcycles m
         WHERE m.userId = ?
         ORDER BY m.id ASC
@@ -213,14 +213,14 @@ pub async fn get_motorcycle(
     motorcycle.image = format_image_url(motorcycle.image);
 
     let issues = sqlx::query_as::<_, Issue>(
-        "SELECT * FROM issues WHERE motorcycleId = ? ORDER BY date DESC",
+        "SELECT * FROM issues WHERE motorcycleId = ? AND deletedAt IS NULL ORDER BY date DESC",
     )
     .bind(id)
     .fetch_all(&pool)
     .await?;
 
     let maintenance = sqlx::query_as::<_, MaintenanceRecord>(
-        "SELECT * FROM maintenanceRecords WHERE motorcycleId = ? ORDER BY date DESC, id DESC",
+        "SELECT * FROM maintenanceRecords WHERE motorcycleId = ? AND deletedAt IS NULL ORDER BY date DESC, id DESC",
     )
     .bind(id)
     .fetch_all(&pool)
@@ -234,7 +234,7 @@ pub async fn get_motorcycle(
     .await?;
 
     let torque_specs = sqlx::query_as::<_, TorqueSpec>(
-        "SELECT * FROM torqueSpecs WHERE motorcycleId = ? ORDER BY category ASC, name ASC",
+        "SELECT * FROM torqueSpecs WHERE motorcycleId = ? AND deletedAt IS NULL ORDER BY category ASC, name ASC",
     )
     .bind(id)
     .fetch_all(&pool)
@@ -258,10 +258,22 @@ pub async fn get_motorcycle(
     .fetch_all(&pool)
     .await?;
 
+    // Bulk-load document→motorcycle associations once instead of a query per
+    // document (was an N+1 over this motorcycle's documents).
+    let assoc_rows = sqlx::query!("SELECT documentId, motorcycleId FROM documentMotorcycles")
+        .fetch_all(&pool)
+        .await?;
+    let mut ids_by_doc: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
+    for r in assoc_rows {
+        ids_by_doc
+            .entry(r.documentId)
+            .or_default()
+            .push(r.motorcycleId);
+    }
+
     let mut formatted_docs = Vec::new();
     for row in documents {
-        let doc_id = row.id;
-        let motorcycle_ids = get_motorcycle_ids_for_doc(&pool, doc_id).await?;
+        let motorcycle_ids = ids_by_doc.get(&row.id).cloned().unwrap_or_default();
         let doc = format_doc_paths(row);
         let mut doc_val = serde_json::to_value(doc).unwrap_or(json!({}));
         if let Some(obj) = doc_val.as_object_mut() {
@@ -277,7 +289,6 @@ pub async fn get_motorcycle(
         "maintenanceLocations": maintenance_locations,
         "previousOwners": previous_owners,
         "torqueSpecs": torque_specs,
-        "torqueSpecifications": torque_specs,
         "documents": formatted_docs,
     })))
 }
@@ -439,15 +450,38 @@ pub async fn delete_motorcycle(
             .await?
             .ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
 
+    // `maintenanceRecords`, `issues`, and `locationRecords` reference motorcycles
+    // with `ON DELETE NO ACTION` (unlike the sibling tables, which cascade), so a
+    // bare `DELETE FROM motorcycles` raises `FOREIGN KEY constraint failed` for any
+    // bike that has history. Delete those children first, inside one transaction so
+    // a mid-way failure can't leave the motorcycle half-deleted.
+    let mut tx = pool.begin().await?;
+
+    sqlx::query("DELETE FROM maintenanceRecords WHERE motorcycleId = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM issues WHERE motorcycleId = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM locationRecords WHERE motorcycleId = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+
     let result = sqlx::query("DELETE FROM motorcycles WHERE id = ? AND userId = ?")
         .bind(id)
         .bind(user.id)
-        .execute(&pool)
+        .execute(&mut *tx)
         .await?;
 
     if result.rows_affected() == 0 {
+        // Ownership re-check already passed above; this guards a concurrent delete.
         return Err(AppError::NotFound("Motorcycle not found".to_string()));
     }
+
+    tx.commit().await?;
 
     // Delete image and resized cache
     if let Some(path_str) = motorcycle.image {

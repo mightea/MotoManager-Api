@@ -5,7 +5,7 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
 ## Stack
 
 - **Framework**: Axum 0.8
-- **Database**: SQLite via SQLx 0.8 (runtime queries, camelCase table and column names)
+- **Database**: SQLite via SQLx 0.9 (mix of compile-time `query!`/`query_as!` macros and runtime string queries, camelCase table and column names)
 - **Auth**: Passkey (WebAuthn) and Bearer token sessions (`Authorization: Bearer <token>`)
 - **Password hashing**: Argon2id (OWASP-recommended parameters)
 
@@ -47,8 +47,9 @@ cargo clippy --all-targets --all-features -- -D warnings
 
 ### Integration Tests
 Integration tests use an in-memory SQLite database and isolated `DATA_DIR` for file operations. They are located in the `tests/` directory:
-- `tests/motorcycles_test.rs`: Covers motorcycles, issues, and maintenance records lifecycle.
-- `tests/documents_test.rs`: Covers document listing and deletion.
+- `tests/motorcycles_test.rs`: motorcycles/issues/maintenance lifecycle, home data, delete-with-history cascade (runs with `foreign_keys` on, matching production).
+- `tests/documents_test.rs`: document listing/deletion and private-file access control.
+- `tests/issues_test.rs`, `tests/expenses_test.rs`, `tests/locations_test.rs`, `tests/tire_pressure_test.rs`: per-resource CRUD.
 
 The server runs migrations on startup and creates the `data/` and `cache/` directories automatically.
 

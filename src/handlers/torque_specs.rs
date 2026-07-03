@@ -1,9 +1,8 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
-use chrono::Utc;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -11,23 +10,43 @@ use sqlx::SqlitePool;
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
-    handlers::motorcycles::verify_motorcycle_ownership,
+    handlers::{maintenance::sync_now, motorcycles::verify_motorcycle_ownership},
     models::TorqueSpec,
 };
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TorqueFilter {
+    /// Incremental-sync cursor; see maintenance `?since`.
+    pub since: Option<String>,
+}
 
 pub async fn list_torque_specs(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
     Path(motorcycle_id): Path<i64>,
+    Query(filter): Query<TorqueFilter>,
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let specs = sqlx::query_as::<_, TorqueSpec>(
-        "SELECT * FROM torqueSpecs WHERE motorcycleId = ? ORDER BY category ASC, name ASC",
-    )
-    .bind(motorcycle_id)
-    .fetch_all(&pool)
-    .await?;
+    let specs = if let Some(since) = filter.since {
+        sqlx::query_as::<_, TorqueSpec>(
+            "SELECT * FROM torqueSpecs WHERE motorcycleId = ? AND updatedAt > ? \
+             ORDER BY category ASC, name ASC",
+        )
+        .bind(motorcycle_id)
+        .bind(since)
+        .fetch_all(&pool)
+        .await?
+    } else {
+        sqlx::query_as::<_, TorqueSpec>(
+            "SELECT * FROM torqueSpecs WHERE motorcycleId = ? AND deletedAt IS NULL \
+             ORDER BY category ASC, name ASC",
+        )
+        .bind(motorcycle_id)
+        .fetch_all(&pool)
+        .await?
+    };
 
     Ok(Json(json!({
         "torqueSpecs": specs,
@@ -45,6 +64,8 @@ pub struct CreateTorqueSpecRequest {
     pub variation: Option<f64>,
     pub tool_size: Option<String>,
     pub description: Option<String>,
+    /// Client-generated idempotency key (UUID).
+    pub client_id: Option<String>,
 }
 
 pub async fn create_torque_spec(
@@ -55,12 +76,26 @@ pub async fn create_torque_spec(
 ) -> AppResult<(StatusCode, Json<Value>)> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let now = Utc::now().to_rfc3339();
+    // Idempotency on clientId (see maintenance create).
+    if let Some(client_id) = &body.client_id {
+        if let Some(existing) = sqlx::query_as::<_, TorqueSpec>(
+            "SELECT * FROM torqueSpecs WHERE clientId = ? AND motorcycleId = ?",
+        )
+        .bind(client_id)
+        .bind(motorcycle_id)
+        .fetch_optional(&pool)
+        .await?
+        {
+            return Ok((StatusCode::CREATED, Json(json!({ "torqueSpec": existing }))));
+        }
+    }
+
+    let now = sync_now();
 
     let id = sqlx::query(
         "INSERT INTO torqueSpecs \
-         (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
     .bind(&body.category)
@@ -70,6 +105,8 @@ pub async fn create_torque_spec(
     .bind(body.variation)
     .bind(&body.tool_size)
     .bind(&body.description)
+    .bind(&now)
+    .bind(&body.client_id)
     .bind(&now)
     .execute(&pool)
     .await?
@@ -97,7 +134,7 @@ pub async fn import_torque_specs(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let now = Utc::now().to_rfc3339();
+    let now = sync_now();
     let mut imported_count: i64 = 0;
 
     for spec_id in &body.source_spec_ids {
@@ -115,8 +152,8 @@ pub async fn import_torque_specs(
 
         sqlx::query(
             "INSERT INTO torqueSpecs \
-             (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt, updatedAt) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(motorcycle_id)
         .bind(&spec.category)
@@ -126,6 +163,7 @@ pub async fn import_torque_specs(
         .bind(spec.variation)
         .bind(&spec.tool_size)
         .bind(&spec.description)
+        .bind(&now)
         .bind(&now)
         .execute(&pool)
         .await?;
@@ -176,10 +214,12 @@ pub async fn update_torque_spec(
     let tool_size = body.tool_size.or(existing.tool_size);
     let description = body.description.or(existing.description);
 
+    let now = sync_now();
+
     sqlx::query(
         "UPDATE torqueSpecs SET \
          category = ?, name = ?, torque = ?, torqueEnd = ?, variation = ?, \
-         toolSize = ?, description = ? \
+         toolSize = ?, description = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&category)
@@ -189,6 +229,7 @@ pub async fn update_torque_spec(
     .bind(variation)
     .bind(&tool_size)
     .bind(&description)
+    .bind(&now)
     .bind(tid)
     .execute(&pool)
     .await?;
@@ -208,11 +249,17 @@ pub async fn delete_torque_spec(
 ) -> AppResult<Json<Value>> {
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let result = sqlx::query("DELETE FROM torqueSpecs WHERE id = ? AND motorcycleId = ?")
-        .bind(tid)
-        .bind(motorcycle_id)
-        .execute(&pool)
-        .await?;
+    let now = sync_now();
+    let result = sqlx::query(
+        "UPDATE torqueSpecs SET deletedAt = ?, updatedAt = ? \
+         WHERE id = ? AND motorcycleId = ? AND deletedAt IS NULL",
+    )
+    .bind(&now)
+    .bind(&now)
+    .bind(tid)
+    .bind(motorcycle_id)
+    .execute(&pool)
+    .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Torque spec not found".to_string()));

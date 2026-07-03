@@ -1,0 +1,27 @@
+meta {
+  name: Create Expense
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/expenses
+  body: json
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{token}}
+}
+
+body:json {
+  {
+    "date": "2026-07-01",
+    "amount": 120.50,
+    "currency": "CHF",
+    "category": "insurance",
+    "description": "Annual insurance",
+    "intervalMonths": 12,
+    "motorcycleIds": [1]
+  }
+}

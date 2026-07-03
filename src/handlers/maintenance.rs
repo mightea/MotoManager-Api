@@ -3,6 +3,7 @@ use axum::{
     http::StatusCode,
     Json,
 };
+use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sqlx::SqlitePool;
@@ -14,10 +15,20 @@ use crate::{
     models::MaintenanceRecord,
 };
 
+/// Server-authoritative sync timestamp, kept in one canonical format
+/// (RFC3339, millis, `Z`) so lexical `updatedAt > since` comparisons are
+/// chronologically correct. Mirrors the backfill format in migration 011.
+pub(crate) fn sync_now() -> String {
+    Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MaintenanceFilter {
     pub types: Option<String>,
+    /// When present, return rows changed after this `updatedAt` cursor,
+    /// including soft-deleted tombstones, for incremental sync.
+    pub since: Option<String>,
 }
 
 async fn recalculate_fuel_consumption(
@@ -82,6 +93,14 @@ pub async fn list_maintenance(
     let mut query_str = "SELECT * FROM maintenanceRecords WHERE motorcycleId = ?".to_string();
     let mut types_list = Vec::new();
 
+    // Incremental sync: with ?since, return changed rows (incl. tombstones);
+    // otherwise the normal listing hides soft-deleted rows.
+    if filter.since.is_some() {
+        query_str.push_str(" AND updatedAt > ?");
+    } else {
+        query_str.push_str(" AND deletedAt IS NULL");
+    }
+
     if let Some(types) = filter.types {
         if !types.is_empty() {
             let parts: Vec<String> = types.split(',').map(|s| s.trim().to_string()).collect();
@@ -98,6 +117,10 @@ pub async fn list_maintenance(
     let mut query =
         sqlx::query_as::<_, MaintenanceRecord>(sqlx::AssertSqlSafe(query_str)).bind(motorcycle_id);
 
+    // Bind order must match the placeholder order above: motorcycleId, since, types.
+    if let Some(since) = filter.since {
+        query = query.bind(since);
+    }
     for t in types_list {
         query = query.bind(t);
     }
@@ -135,6 +158,9 @@ pub struct MaintenanceRequest {
     pub trip_distance: Option<f64>,
     pub parent_id: Option<i64>,
     pub bundled_items: Option<Vec<String>>,
+    /// Client-generated idempotency key (UUID). Retried creates with the same
+    /// value return the existing record instead of duplicating.
+    pub client_id: Option<String>,
 }
 
 pub async fn create_maintenance(
@@ -153,6 +179,24 @@ pub async fn create_maintenance(
         verify_location_ownership(&pool, lid, user.id).await?;
     }
 
+    // Idempotency: a retried create with the same clientId returns the
+    // already-stored record instead of inserting a duplicate.
+    if let Some(client_id) = &body.client_id {
+        if let Some(existing) = sqlx::query_as::<_, MaintenanceRecord>(
+            "SELECT * FROM maintenanceRecords WHERE clientId = ? AND motorcycleId = ?",
+        )
+        .bind(client_id)
+        .bind(motorcycle_id)
+        .fetch_optional(&pool)
+        .await?
+        {
+            return Ok((
+                StatusCode::CREATED,
+                Json(json!({ "maintenanceRecord": existing })),
+            ));
+        }
+    }
+
     let date = body
         .date
         .ok_or_else(|| AppError::BadRequest("date is required".to_string()))?;
@@ -163,6 +207,7 @@ pub async fn create_maintenance(
         .record_type
         .ok_or_else(|| AppError::BadRequest("type is required".to_string()))?;
 
+    let now = sync_now();
     let mut tx = pool.begin().await?;
 
     let id = sqlx::query(
@@ -170,8 +215,8 @@ pub async fn create_maintenance(
          (date, odo, motorcycleId, cost, normalizedCost, currency, description, type, \
           brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
           oilType, locationId, fuelType, fuelAmount, pricePerUnit, \
-          fuelConsumption, tripDistance, parentId) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          fuelConsumption, tripDistance, parentId, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&date)
     .bind(odo)
@@ -197,6 +242,8 @@ pub async fn create_maintenance(
     .bind(body.fuel_consumption)
     .bind(body.trip_distance)
     .bind(body.parent_id)
+    .bind(&body.client_id)
+    .bind(&now)
     .execute(&mut *tx)
     .await?
     .last_insert_rowid();
@@ -211,8 +258,8 @@ pub async fn create_maintenance(
             };
 
             sqlx::query(
-                "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type, fluidType, parentId) \
-                 VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type, fluidType, parentId, updatedAt) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&date)
             .bind(odo)
@@ -220,6 +267,7 @@ pub async fn create_maintenance(
             .bind(rec_type)
             .bind(fluid_type)
             .bind(id)
+            .bind(&now)
             .execute(&mut *tx)
             .await?;
         }
@@ -308,6 +356,7 @@ pub async fn update_maintenance(
     let trip_distance: Option<f64> = body.trip_distance.or(existing.trip_distance);
     let parent_id: Option<i64> = body.parent_id.or(existing.parent_id);
 
+    let now = sync_now();
     let mut tx = pool.begin().await?;
 
     sqlx::query(
@@ -316,7 +365,7 @@ pub async fn update_maintenance(
          type = ?, brand = ?, model = ?, tirePosition = ?, tireSize = ?, dotCode = ?, \
          batteryType = ?, fluidType = ?, viscosity = ?, oilType = ?, \
          locationId = ?, fuelType = ?, fuelAmount = ?, pricePerUnit = ?, \
-         fuelConsumption = ?, tripDistance = ?, parentId = ? \
+         fuelConsumption = ?, tripDistance = ?, parentId = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&date)
@@ -342,6 +391,7 @@ pub async fn update_maintenance(
     .bind(fuel_consumption)
     .bind(trip_distance)
     .bind(parent_id)
+    .bind(&now)
     .bind(mid)
     .execute(&mut *tx)
     .await?;
@@ -456,11 +506,19 @@ pub async fn delete_maintenance(
     );
     verify_motorcycle_ownership(&pool, motorcycle_id, user.id).await?;
 
-    let result = sqlx::query("DELETE FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?")
-        .bind(mid)
-        .bind(motorcycle_id)
-        .execute(&pool)
-        .await?;
+    // Soft-delete: keep the row as a tombstone (with bumped updatedAt) so
+    // offline clients learn about the deletion on their next ?since pull.
+    let now = sync_now();
+    let result = sqlx::query(
+        "UPDATE maintenanceRecords SET deletedAt = ?, updatedAt = ? \
+         WHERE id = ? AND motorcycleId = ? AND deletedAt IS NULL",
+    )
+    .bind(&now)
+    .bind(&now)
+    .bind(mid)
+    .bind(motorcycle_id)
+    .execute(&pool)
+    .await?;
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound(
@@ -468,6 +526,6 @@ pub async fn delete_maintenance(
         ));
     }
 
-    tracing::info!("Maintenance record deleted ID: {}", mid);
+    tracing::info!("Maintenance record soft-deleted ID: {}", mid);
     Ok(Json(json!({ "message": "Maintenance record deleted" })))
 }

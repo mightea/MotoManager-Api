@@ -146,6 +146,10 @@ pub struct MaintenanceRecord {
     pub fuel_consumption: Option<f64>,
     pub trip_distance: Option<f64>,
     pub parent_id: Option<i64>,
+    // Sync metadata (see migration 011).
+    pub client_id: Option<String>,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -160,6 +164,10 @@ pub struct Issue {
     pub priority: String,
     pub status: String,
     pub date: String,
+    // Sync metadata (see migration 011).
+    pub client_id: Option<String>,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
@@ -214,6 +222,10 @@ pub struct TorqueSpec {
     pub tool_size: Option<String>,
     pub description: Option<String>,
     pub created_at: String,
+    // Sync metadata (see migration 011).
+    pub client_id: Option<String>,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

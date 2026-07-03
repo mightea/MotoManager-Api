@@ -23,10 +23,13 @@ jobs:
       
       - name: Set up database for sqlx macros
         run: |
-          sqlite3 db.sqlite < migrations/001_initial_schema.sql
-          sqlite3 db.sqlite < migrations/002_camelcase.sql
-          sqlite3 db.sqlite < migrations/003_maintenance_parent_id.sql
-          sqlite3 db.sqlite < migrations/004_shared_expenses.sql
+          # Apply ALL migrations in order so the compile-time sqlx macros are
+          # checked against the real (latest) schema. Globbing keeps this
+          # drift-proof: new migrations are picked up automatically.
+          for f in migrations/*.sql; do
+            echo "Applying $f"
+            sqlite3 db.sqlite < "$f"
+          done
           echo "DATABASE_URL=sqlite:$(pwd)/db.sqlite" >> $GITHUB_ENV
       
       - name: Install Rust
@@ -55,10 +58,13 @@ jobs:
       
       - name: Set up database for sqlx macros
         run: |
-          sqlite3 db.sqlite < migrations/001_initial_schema.sql
-          sqlite3 db.sqlite < migrations/002_camelcase.sql
-          sqlite3 db.sqlite < migrations/003_maintenance_parent_id.sql
-          sqlite3 db.sqlite < migrations/004_shared_expenses.sql
+          # Apply ALL migrations in order so the compile-time sqlx macros are
+          # checked against the real (latest) schema. Globbing keeps this
+          # drift-proof: new migrations are picked up automatically.
+          for f in migrations/*.sql; do
+            echo "Applying $f"
+            sqlite3 db.sqlite < "$f"
+          done
           echo "DATABASE_URL=sqlite:$(pwd)/db.sqlite" >> $GITHUB_ENV
       
       - name: Install Rust

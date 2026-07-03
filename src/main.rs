@@ -1,6 +1,4 @@
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
-};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -99,7 +97,13 @@ async fn main() -> anyhow::Result<()> {
     let addr = format!("0.0.0.0:{}", config.port);
     tracing::info!("Listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+    // `into_make_service_with_connect_info` exposes the peer socket address so the
+    // rate limiter's IP key extractor has a fallback when no forwarded header is set.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
