@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/mightea/MotoManager-Api/compare/v0.6.2...v0.7.0) (2026-07-04)
+
+
+### Features
+
+* harden, optimize and document the API with an offline-sync backend ([a62b2c9](https://github.com/mightea/MotoManager-Api/commit/a62b2c9416e9b163d69dcfc5c9d3227924c7d0d6))
+
 ## [0.6.2](https://github.com/mightea/MotoManager-Api/compare/v0.6.1...v0.6.2) (2026-06-12)
 
 
