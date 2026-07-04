@@ -5,6 +5,7 @@ pub mod handlers;
 pub mod models;
 
 use axum::{
+    extract::DefaultBodyLimit,
     http::{HeaderValue, Method},
     routing::{delete, get, post, put},
     Json, Router,
@@ -12,6 +13,9 @@ use axum::{
 use serde_json::json;
 use sqlx::SqlitePool;
 use std::sync::Arc;
+use tower_governor::{
+    governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
+};
 use tower_http::cors::CorsLayer;
 use webauthn_rs::Webauthn;
 
@@ -42,45 +46,42 @@ impl axum::extract::FromRef<AppState> for Arc<Webauthn> {
     }
 }
 
+/// Body-size cap for the multipart upload routes (motorcycle images, documents).
+/// Axum's default is 2 MB, which silently 413s ordinary phone photos; everything
+/// else keeps the small default so JSON endpoints can't be used to buffer megabytes.
+const UPLOAD_BODY_LIMIT: usize = 30 * 1024 * 1024;
+
 pub fn build_app(state: AppState) -> Router {
     let app_version = state.config.app_version.clone();
 
-    Router::new()
+    let router = Router::new()
         .route(
             "/api/health",
             get(move || async move { Json(json!({ "status": "ok", "version": app_version })) }),
         )
         .route("/api/auth/status", get(handlers::auth::status))
-        .route("/api/auth/login", post(handlers::auth::login))
         .route("/api/auth/logout", post(handlers::auth::logout))
-        .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/auth/me", get(handlers::auth::me))
         .route(
             "/api/auth/passkey/register-options",
             get(handlers::passkey::register_options),
         )
         .route(
-            "/api/auth/passkey/register-verify",
-            post(handlers::passkey::register_verify),
-        )
-        .route(
             "/api/auth/passkey/login-options",
             get(handlers::passkey::login_options),
         )
         .route(
-            "/api/auth/passkey/login-verify",
-            post(handlers::passkey::login_verify),
-        )
-        .route(
             "/api/motorcycles",
             get(handlers::motorcycles::list_motorcycles)
-                .post(handlers::motorcycles::create_motorcycle),
+                .post(handlers::motorcycles::create_motorcycle)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
         )
         .route(
             "/api/motorcycles/{id}",
             get(handlers::motorcycles::get_motorcycle)
                 .put(handlers::motorcycles::update_motorcycle)
-                .delete(handlers::motorcycles::delete_motorcycle),
+                .delete(handlers::motorcycles::delete_motorcycle)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
         )
         .route(
             "/api/motorcycles/{id}/issues",
@@ -132,11 +133,15 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route(
             "/api/documents",
-            get(handlers::documents::list_documents).post(handlers::documents::create_document),
+            get(handlers::documents::list_documents)
+                .post(handlers::documents::create_document)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
         )
         .route(
             "/api/documents/{doc_id}",
-            put(handlers::documents::update_document).delete(handlers::documents::delete_document),
+            put(handlers::documents::update_document)
+                .delete(handlers::documents::delete_document)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
         )
         .route(
             "/api/locations",
@@ -201,8 +206,37 @@ pub fn build_app(state: AppState) -> Router {
             "/documents/{filename}",
             get(handlers::files::serve_document),
         )
-        .route("/previews/{filename}", get(handlers::files::serve_preview))
-        .with_state(state)
+        .route("/previews/{filename}", get(handlers::files::serve_preview));
+
+    // Rate-limit the credential-guessing endpoints (login, register, passkey
+    // verification). Argon2id already slows each guess; this caps flood attempts
+    // per client IP. `SmartIpKeyExtractor` honours `X-Forwarded-For`/`Forwarded`
+    // for the reverse-proxy deployment, falling back to the peer IP (which
+    // requires `ConnectInfo`, wired up in `main`).
+    let governor_conf = Arc::new(
+        GovernorConfigBuilder::default()
+            .per_second(2)
+            .burst_size(15)
+            .key_extractor(SmartIpKeyExtractor)
+            .finish()
+            .expect("valid governor config"),
+    );
+    let auth_routes = Router::new()
+        .route("/api/auth/login", post(handlers::auth::login))
+        .route("/api/auth/register", post(handlers::auth::register))
+        .route(
+            "/api/auth/passkey/register-verify",
+            post(handlers::passkey::register_verify),
+        )
+        .route(
+            "/api/auth/passkey/login-verify",
+            post(handlers::passkey::login_verify),
+        )
+        .layer(GovernorLayer {
+            config: governor_conf,
+        });
+
+    router.merge(auth_routes).with_state(state)
 }
 
 pub fn build_cors(origin: &str) -> CorsLayer {

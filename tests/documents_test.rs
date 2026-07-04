@@ -247,3 +247,76 @@ async fn test_list_all_motorcycles_independent_of_user() {
         .unwrap();
     assert_eq!(honda["ownerName"], "Other User");
 }
+
+#[tokio::test]
+async fn test_serve_document_enforces_privacy() {
+    // The raw document file route used to be unauthenticated: anyone with the URL
+    // could fetch a "private" document. It now requires auth + ownership.
+    let (app, pool, owner_token) = setup_test_app().await;
+
+    // A second user who does NOT own the document.
+    let other_hash = hash_password("password123").unwrap();
+    let other_id = sqlx::query(
+        "INSERT INTO users (email, username, name, passwordHash, role) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("other@example.com")
+    .bind("otheruser")
+    .bind("Other User")
+    .bind(other_hash)
+    .bind("user")
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let other_token = create_session(&pool, other_id).await.unwrap();
+
+    // A real private document file on disk, owned by user 1.
+    tokio::fs::create_dir_all("./test_data/documents")
+        .await
+        .unwrap();
+    let filename = "priv-doc-test.pdf";
+    tokio::fs::write(
+        "./test_data/documents/priv-doc-test.pdf",
+        b"%PDF-1.4 secret",
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO documents (title, filePath, ownerId, isPrivate, createdAt, updatedAt) \
+         VALUES (?, ?, ?, 1, ?, ?)",
+    )
+    .bind("Secret")
+    .bind(filename)
+    .bind(1_i64)
+    .bind("2025-01-01T00:00:00Z")
+    .bind("2025-01-01T00:00:00Z")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let build = |token: Option<&str>| {
+        let mut b = Request::builder().uri(format!("/documents/{}", filename));
+        if let Some(t) = token {
+            b = b.header(header::AUTHORIZATION, format!("Bearer {}", t));
+        }
+        b.body(Body::empty()).unwrap()
+    };
+
+    // No token → 401.
+    let r = app.clone().oneshot(build(None)).await.unwrap();
+    assert_eq!(r.status(), StatusCode::UNAUTHORIZED);
+
+    // Authenticated non-owner → 404 (existence masked).
+    let r = app
+        .clone()
+        .oneshot(build(Some(&other_token)))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+
+    // Owner → 200 with the bytes.
+    let r = app.oneshot(build(Some(&owner_token))).await.unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+
+    let _ = tokio::fs::remove_file("./test_data/documents/priv-doc-test.pdf").await;
+}

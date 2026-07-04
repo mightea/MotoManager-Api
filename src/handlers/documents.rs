@@ -33,6 +33,50 @@ pub fn format_doc_paths(mut doc: Document) -> Document {
     doc
 }
 
+/// Which stored path a served file corresponds to.
+#[derive(Clone, Copy)]
+pub enum DocFileKind {
+    Document,
+    Preview,
+}
+
+/// Authorize access to a stored document/preview file by its bare filename,
+/// enforcing the same visibility rule as `list_documents`: a private document is
+/// only readable by its owner. Non-owners (and unregistered files) get NotFound
+/// so a private document's existence isn't disclosed. This closes the gap where
+/// the static file routes served "private" documents to anyone with the URL.
+pub async fn authorize_doc_file(
+    pool: &SqlitePool,
+    user_id: i64,
+    kind: DocFileKind,
+    filename: &str,
+) -> AppResult<()> {
+    // Stored paths are usually bare (`{uuid}.ext`) but legacy rows carry a
+    // `data/documents/` (or leading-slash) prefix — match every observed form.
+    let (dir, sql) = match kind {
+        DocFileKind::Document => (
+            "documents",
+            "SELECT isPrivate, ownerId FROM documents WHERE filePath IN (?, ?, ?)",
+        ),
+        DocFileKind::Preview => (
+            "previews",
+            "SELECT isPrivate, ownerId FROM documents WHERE previewPath IN (?, ?, ?)",
+        ),
+    };
+    let row: Option<(bool, Option<i64>)> = sqlx::query_as(sql)
+        .bind(filename)
+        .bind(format!("data/{dir}/{filename}"))
+        .bind(format!("/data/{dir}/{filename}"))
+        .fetch_optional(pool)
+        .await?;
+
+    match row {
+        Some((is_private, owner_id)) if !is_private || owner_id == Some(user_id) => Ok(()),
+        // Private-and-not-owned, or no such registered file: mask as NotFound.
+        _ => Err(AppError::NotFound("Not found".to_string())),
+    }
+}
+
 pub async fn get_motorcycle_ids_for_doc(pool: &SqlitePool, doc_id: i64) -> AppResult<Vec<i64>> {
     let rows = sqlx::query!(
         "SELECT motorcycleId FROM documentMotorcycles WHERE documentId = ?",
@@ -61,42 +105,58 @@ async fn save_document_file(
     tracing::info!("Saving document file: {} as {}", filename, stored_filename);
     tokio::fs::write(&file_path, &data).await?;
 
-    // Generate preview for images or PDFs
+    // Generate preview for images or PDFs. Image decode/Lanczos thumbnailing and
+    // Pdfium rendering are CPU-bound; run them on a blocking thread so they don't
+    // stall the async worker (and every other in-flight request) during an upload.
     let image_extensions = ["jpg", "jpeg", "png", "webp", "gif"];
     let preview_filename = if image_extensions.contains(&ext.as_str()) {
         tracing::info!("Generating preview for image document: {}", stored_filename);
-        match generate_image_preview(config, &data, &uuid) {
-            Ok(pf) => {
-                tracing::info!("Preview generated successfully: {}", pf);
-                Some(pf)
-            }
-            Err(e) => {
-                tracing::error!("Failed to generate preview for {}: {}", stored_filename, e);
-                None
-            }
-        }
+        generate_preview_blocking(config, data, uuid, PreviewKind::Image).await
     } else if ext == "pdf" {
         tracing::info!("Generating preview for PDF document: {}", stored_filename);
-        match generate_pdf_preview(config, &data, &uuid) {
-            Ok(pf) => {
-                tracing::info!("PDF preview generated successfully: {}", pf);
-                Some(pf)
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to generate PDF preview for {}: {}",
-                    stored_filename,
-                    e
-                );
-                None
-            }
-        }
+        generate_preview_blocking(config, data, uuid, PreviewKind::Pdf).await
     } else {
         tracing::debug!("Skipping preview generation for extension: {}", ext);
         None
     };
 
     Ok((stored_filename, preview_filename))
+}
+
+enum PreviewKind {
+    Image,
+    Pdf,
+}
+
+/// Run the CPU-bound preview generation on a blocking thread. Returns the preview
+/// filename, or `None` on failure (a missing preview is non-fatal for an upload).
+async fn generate_preview_blocking(
+    config: &Config,
+    data: Vec<u8>,
+    uuid: String,
+    kind: PreviewKind,
+) -> Option<String> {
+    let config = config.clone();
+    let result = tokio::task::spawn_blocking(move || match kind {
+        PreviewKind::Image => generate_image_preview(&config, &data, &uuid),
+        PreviewKind::Pdf => generate_pdf_preview(&config, &data, &uuid),
+    })
+    .await;
+
+    match result {
+        Ok(Ok(pf)) => {
+            tracing::info!("Preview generated successfully: {}", pf);
+            Some(pf)
+        }
+        Ok(Err(e)) => {
+            tracing::error!("Failed to generate preview: {}", e);
+            None
+        }
+        Err(e) => {
+            tracing::error!("Preview generation task panicked: {}", e);
+            None
+        }
+    }
 }
 
 fn generate_pdf_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
@@ -175,8 +235,7 @@ pub async fn list_documents(
         .fetch_all(&pool)
         .await?;
 
-    let mut ids_by_doc: std::collections::HashMap<i64, Vec<i64>> =
-        std::collections::HashMap::new();
+    let mut ids_by_doc: std::collections::HashMap<i64, Vec<i64>> = std::collections::HashMap::new();
     let mut assignments = Vec::new();
     for r in assignments_rows {
         ids_by_doc

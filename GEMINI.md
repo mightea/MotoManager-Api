@@ -7,7 +7,7 @@ You are Gemini CLI, the expert backend architect for MotoManager. Follow these p
 - **Library/Binary Split**: Core logic resides in `src/lib.rs`. `src/main.rs` is only for server entry. Integration tests in `tests/` must use the library.
 - **CamelCase Consistency**: All database tables, columns, and JSON API keys MUST be camelCase.
 - **Axum Handlers**: Return `AppResult<T>` and use the proper extractors (`AuthUser`, `AdminUser`, `State(pool)`, etc.).
-- **Latest Stack**: Use Axum 0.8 and SQLx 0.8. Note the `{id}` syntax for path parameters in Axum 0.8.
+- **Latest Stack**: Use Axum 0.8 and SQLx 0.9. Note the `{id}` syntax for path parameters in Axum 0.8.
 
 ### Testing & Quality Standards
 - **Validation is Mandatory**: Every feature or bug fix MUST include corresponding tests.
@@ -40,11 +40,10 @@ You are Gemini CLI, the expert backend architect for MotoManager. Follow these p
 5.  Add integration test in `tests/`.
 
 ### Modifying the Schema
-1.  Add a new migration file in `migrations/`.
+1.  Add a new migration file in `migrations/` (zero-padded prefix, e.g. `012_...sql`).
 2.  Update the models and handlers.
-3.  **Crucial**: Update the `Dockerfile` schema preparation step (the `RUN touch db.sqlite && ...` block) to include the new migration file. This is required for `sqlx` macro validation during the Docker build.
-4.  **Crucial**: Update the `.github/workflows/ci.yml` schema preparation step (the `Set up database for sqlx macros` block) in BOTH the `check` and `test` jobs to include the new migration file. This is required for `sqlx` macro validation during the CI run.
-5.  **Crucial**: The dev database `db.sqlite` might need to be recreated if schema changes are destructive (no auto-migration tool currently beyond what SQLx provides).
+3.  The `Dockerfile` and `.github/workflows/ci.yml` now apply **all** migrations via a glob (`for f in migrations/*.sql`), so a new migration is picked up automatically for `sqlx` macro validation — no manual per-file edit needed. (This replaced the old, drift-prone practice of listing migrations 001–004 by hand.)
+4.  **Crucial**: The dev database `db.sqlite` might need to be recreated if schema changes are destructive (no auto-migration tool currently beyond what SQLx provides). Keep `db.sqlite` fully migrated locally so the compile-time `sqlx` macros validate against the real schema.
 
 ### File Uploads
 - Use `save_image` or `save_document_file` helpers in handlers.

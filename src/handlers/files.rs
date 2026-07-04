@@ -5,8 +5,16 @@ use axum::{
     response::IntoResponse,
 };
 use serde::Deserialize;
+use sqlx::SqlitePool;
 
+use crate::auth::AuthUser;
 use crate::config::Config;
+use crate::handlers::documents::{authorize_doc_file, DocFileKind};
+
+/// Upper bound on a requested resize dimension. Without this, a client could ask
+/// for e.g. `?width=100000`, forcing a multi-gigabyte allocation/encode (a memory
+/// amplification DoS) and flooding the resize cache with arbitrary sizes.
+const MAX_IMAGE_DIMENSION: u32 = 2048;
 
 #[derive(Debug, Deserialize)]
 pub struct ImageQuery {
@@ -27,8 +35,10 @@ pub async fn serve_image(
         Ok(data) => {
             // If width/height requested, resize
             if query.width.is_some() || query.height.is_some() {
-                let w = query.width.unwrap_or(0);
-                let h = query.height.unwrap_or(0);
+                // Clamp to a sane maximum to prevent memory-amplification via huge
+                // dimensions and cache flooding.
+                let w = query.width.unwrap_or(0).min(MAX_IMAGE_DIMENSION);
+                let h = query.height.unwrap_or(0).min(MAX_IMAGE_DIMENSION);
 
                 let format = if filename.to_lowercase().ends_with(".webp") {
                     image::ImageFormat::WebP
@@ -78,9 +88,10 @@ pub async fn serve_image(
                 // Decode + Lanczos3 resize is CPU-heavy; keep it off the async workers.
                 // Clone the source bytes: the error fallback below still needs them.
                 let data_for_resize = data.clone();
-                let resize_result =
-                    tokio::task::spawn_blocking(move || resize_image(&data_for_resize, w, h, format))
-                        .await;
+                let resize_result = tokio::task::spawn_blocking(move || {
+                    resize_image(&data_for_resize, w, h, format)
+                })
+                .await;
 
                 match resize_result {
                     Ok(Ok(resized)) => {
@@ -123,9 +134,17 @@ pub async fn serve_image(
 
 pub async fn serve_document(
     State(config): State<Config>,
+    State(pool): State<SqlitePool>,
+    AuthUser(user): AuthUser,
     Path(filename): Path<String>,
 ) -> impl IntoResponse {
     let filename = sanitize_filename(&filename);
+
+    // Enforce document ownership/privacy — these files are no longer public.
+    if let Err(e) = authorize_doc_file(&pool, user.id, DocFileKind::Document, &filename).await {
+        return e.into_response();
+    }
+
     let path = config.documents_dir().join(&filename);
 
     match tokio::fs::read(&path).await {
@@ -137,6 +156,10 @@ pub async fn serve_document(
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, content_type)
+                // Content-addressed (UUID) filename → immutable. `private` because
+                // the file is auth-gated and may be a private document (never cache
+                // it in a shared proxy).
+                .header(header::CACHE_CONTROL, "private, max-age=31536000")
                 .header(
                     header::CONTENT_DISPOSITION,
                     format!("inline; filename=\"{}\"", filename),
@@ -151,16 +174,27 @@ pub async fn serve_document(
 
 pub async fn serve_preview(
     State(config): State<Config>,
+    State(pool): State<SqlitePool>,
+    AuthUser(user): AuthUser,
     Path(filename): Path<String>,
 ) -> impl IntoResponse {
     let filename = sanitize_filename(&filename);
+
+    // A preview is a thumbnail of its document, so it inherits the document's
+    // privacy — authorize before serving.
+    if let Err(e) = authorize_doc_file(&pool, user.id, DocFileKind::Preview, &filename).await {
+        return e.into_response();
+    }
+
     let path = config.previews_dir().join(&filename);
 
     match tokio::fs::read(&path).await {
         Ok(data) => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "image/jpeg")
-            .header(header::CACHE_CONTROL, "public, max-age=31536000")
+            // `private`: a preview is a thumbnail of an auth-gated (possibly
+            // private) document, so it must not be cached by shared proxies.
+            .header(header::CACHE_CONTROL, "private, max-age=31536000")
             .body(Body::from(data))
             .unwrap()
             .into_response(),

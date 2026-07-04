@@ -1,0 +1,15 @@
+meta {
+  name: Regenerate Previews
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/api/admin/regenerate-previews
+  body: none
+  auth: none
+}
+
+headers {
+  Authorization: Bearer {{token}}
+}

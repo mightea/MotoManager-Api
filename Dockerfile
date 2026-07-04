@@ -21,12 +21,12 @@ RUN rm -f target/release/deps/moto_manager_api*
 COPY . .
 
 # Build the application
-# We need a real-ish database schema for sqlx macros to verify against
+# The compile-time sqlx macros are verified against this schema, so apply ALL
+# migrations in order (globbing keeps it drift-proof as new ones are added) —
+# not just an early subset, which would let dropped/renamed columns pass here
+# yet fail at runtime against the real database.
 RUN touch db.sqlite && \
-    sqlite3 db.sqlite < migrations/001_initial_schema.sql && \
-    sqlite3 db.sqlite < migrations/002_camelcase.sql && \
-    sqlite3 db.sqlite < migrations/003_maintenance_parent_id.sql && \
-    sqlite3 db.sqlite < migrations/004_shared_expenses.sql && \
+    for f in migrations/*.sql; do echo "Applying $f"; sqlite3 db.sqlite < "$f"; done && \
     DATABASE_URL=sqlite:db.sqlite cargo build --release
 
 # --- Runtime Stage ---

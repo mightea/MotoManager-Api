@@ -10,11 +10,21 @@ use moto_manager_api::{
 };
 use serde_json::{json, Value};
 use sqlx::{sqlite::SqlitePoolOptions, Row};
+use std::str::FromStr;
 use tower::ServiceExt;
 
 async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {
+    // Match production connection options: `foreign_keys(true)` so tests exercise
+    // real FK/cascade behaviour (the delete-with-history bug slipped past because
+    // the old setup left FK enforcement off). `max_connections(1)` keeps every
+    // query on the same in-memory database — each `sqlite::memory:` connection is
+    // otherwise a distinct, empty DB.
+    let options = sqlx::sqlite::SqliteConnectOptions::from_str("sqlite::memory:")
+        .unwrap()
+        .foreign_keys(true);
     let pool = SqlitePoolOptions::new()
-        .connect("sqlite::memory:")
+        .max_connections(1)
+        .connect_with(options)
         .await
         .unwrap();
 
@@ -210,6 +220,129 @@ async fn test_motorcycle_lifecycle() {
         .unwrap()
         .get(0);
     assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn test_delete_motorcycle_with_history() {
+    // Regression: deleting a bike that has maintenance/issue/location history used
+    // to raise `FOREIGN KEY constraint failed` (those tables are ON DELETE NO ACTION)
+    // and surface as a 500. The handler now cascades them in a transaction.
+    let (app, pool, token) = setup_test_app().await;
+
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("Triumph")
+    .bind("Bonneville")
+    .bind(1)
+    .bind(12000)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // History across all three NO ACTION child tables.
+    sqlx::query(
+        "INSERT INTO maintenanceRecords (motorcycleId, date, odo, type) VALUES (?, ?, ?, ?)",
+    )
+    .bind(moto_id)
+    .bind("2025-06-01")
+    .bind(12500)
+    .bind("oil_change")
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO issues (motorcycleId, odo, title) VALUES (?, ?, ?)")
+        .bind(moto_id)
+        .bind(12600)
+        .bind("Rattle")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let loc_id = sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
+        .bind("Garage")
+        .bind("storage")
+        .bind(1)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO locationRecords (motorcycleId, locationId, odometer, date) VALUES (?, ?, ?, ?)",
+    )
+    .bind(moto_id)
+    .bind(loc_id)
+    .bind(12700)
+    .bind("2025-06-02")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    // Delete must succeed (not 500).
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/motorcycles/{}", moto_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // Motorcycle and all its history are gone.
+    let counts: [(&str, i64); 4] = [
+        (
+            "motorcycles",
+            scalar_count(
+                &pool,
+                "SELECT COUNT(*) FROM motorcycles WHERE id = ?",
+                moto_id,
+            )
+            .await,
+        ),
+        (
+            "maintenanceRecords",
+            scalar_count(
+                &pool,
+                "SELECT COUNT(*) FROM maintenanceRecords WHERE motorcycleId = ?",
+                moto_id,
+            )
+            .await,
+        ),
+        (
+            "issues",
+            scalar_count(
+                &pool,
+                "SELECT COUNT(*) FROM issues WHERE motorcycleId = ?",
+                moto_id,
+            )
+            .await,
+        ),
+        (
+            "locationRecords",
+            scalar_count(
+                &pool,
+                "SELECT COUNT(*) FROM locationRecords WHERE motorcycleId = ?",
+                moto_id,
+            )
+            .await,
+        ),
+    ];
+    for (table, count) in counts {
+        assert_eq!(count, 0, "expected no rows left in {table}");
+    }
+}
+
+async fn scalar_count(pool: &sqlx::SqlitePool, sql: &'static str, moto_id: i64) -> i64 {
+    sqlx::query(sql)
+        .bind(moto_id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+        .get(0)
 }
 
 #[tokio::test]

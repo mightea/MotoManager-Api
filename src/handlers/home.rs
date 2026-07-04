@@ -54,14 +54,14 @@ pub async fn get_home_data(
 
     // 2. Fetch all related data in bulk to avoid N+1
     let maintenance = sqlx::query_as::<_, MaintenanceRecord>(
-        "SELECT * FROM maintenanceRecords WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?) ORDER BY date DESC, odo DESC",
+        "SELECT * FROM maintenanceRecords WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?) AND deletedAt IS NULL ORDER BY date DESC, odo DESC",
     )
     .bind(user.id)
     .fetch_all(&pool)
     .await?;
 
     let issues = sqlx::query_as::<_, Issue>(
-        "SELECT * FROM issues WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)",
+        "SELECT * FROM issues WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?) AND deletedAt IS NULL",
     )
     .bind(user.id)
     .fetch_all(&pool)
@@ -443,7 +443,6 @@ pub async fn get_home_data(
 
     Ok(Json(json!({
         "stats": stats_data,
-        "fleetStats": stats_data,
         "motorcycles": motorcycles_json,
         "version": config.app_version,
     })))

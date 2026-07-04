@@ -32,56 +32,35 @@ pub async fn get_stats(
     State(config): State<Config>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Json<Value>> {
-    // 1. Global / Instance Counts
-    let users_count = sqlx::query!("SELECT COUNT(*) as cnt FROM users")
-        .fetch_one(&pool)
-        .await?
-        .cnt;
-    let motorcycles_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles")
-        .fetch_one(&pool)
-        .await?
-        .cnt;
-    let archived_count_global =
-        sqlx::query!("SELECT COUNT(*) as cnt FROM motorcycles WHERE isArchived = 1")
-            .fetch_one(&pool)
-            .await?
-            .cnt;
-    let docs_count_global = sqlx::query!("SELECT COUNT(*) as cnt FROM documents")
-        .fetch_one(&pool)
-        .await?
-        .cnt;
-    let doc_assignments_count_global =
-        sqlx::query!("SELECT COUNT(*) as cnt FROM documentMotorcycles")
-            .fetch_one(&pool)
-            .await?
-            .cnt;
-    let maintenance_count_total_global =
-        sqlx::query!("SELECT COUNT(*) as cnt FROM maintenanceRecords")
-            .fetch_one(&pool)
-            .await?
-            .cnt;
-    let issues_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM issues")
-        .fetch_one(&pool)
-        .await?
-        .cnt;
-    let open_issues_count_total_global =
-        sqlx::query!("SELECT COUNT(*) as cnt FROM issues WHERE status != 'done'")
-            .fetch_one(&pool)
-            .await?
-            .cnt;
-    let locations_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM locations")
-        .fetch_one(&pool)
-        .await?
-        .cnt;
-    let location_history_count_total_global =
-        sqlx::query!("SELECT COUNT(*) as cnt FROM locationRecords")
-            .fetch_one(&pool)
-            .await?
-            .cnt;
-    let torque_specs_count_total_global = sqlx::query!("SELECT COUNT(*) as cnt FROM torqueSpecs")
-        .fetch_one(&pool)
-        .await?
-        .cnt;
+    // 1. Global / Instance Counts — one round trip instead of 11 serial queries.
+    let counts = sqlx::query!(
+        r#"SELECT
+            (SELECT COUNT(*) FROM users)                                  AS "users_count!: i64",
+            (SELECT COUNT(*) FROM motorcycles)                            AS "motorcycles_count_global!: i64",
+            (SELECT COUNT(*) FROM motorcycles WHERE isArchived = 1)       AS "archived_count_global!: i64",
+            (SELECT COUNT(*) FROM documents)                              AS "docs_count_global!: i64",
+            (SELECT COUNT(*) FROM documentMotorcycles)                    AS "doc_assignments_count_global!: i64",
+            (SELECT COUNT(*) FROM maintenanceRecords)                     AS "maintenance_count_total_global!: i64",
+            (SELECT COUNT(*) FROM issues)                                 AS "issues_count_total_global!: i64",
+            (SELECT COUNT(*) FROM issues WHERE status != 'done')          AS "open_issues_count_total_global!: i64",
+            (SELECT COUNT(*) FROM locations)                              AS "locations_count_total_global!: i64",
+            (SELECT COUNT(*) FROM locationRecords)                        AS "location_history_count_total_global!: i64",
+            (SELECT COUNT(*) FROM torqueSpecs)                            AS "torque_specs_count_total_global!: i64"
+        "#
+    )
+    .fetch_one(&pool)
+    .await?;
+    let users_count = counts.users_count;
+    let motorcycles_count_global = counts.motorcycles_count_global;
+    let archived_count_global = counts.archived_count_global;
+    let docs_count_global = counts.docs_count_global;
+    let doc_assignments_count_global = counts.doc_assignments_count_global;
+    let maintenance_count_total_global = counts.maintenance_count_total_global;
+    let issues_count_total_global = counts.issues_count_total_global;
+    let open_issues_count_total_global = counts.open_issues_count_total_global;
+    let locations_count_total_global = counts.locations_count_total_global;
+    let location_history_count_total_global = counts.location_history_count_total_global;
+    let torque_specs_count_total_global = counts.torque_specs_count_total_global;
 
     // 2. Fetch all user data for computation
     let motorcycles = sqlx::query_as::<_, Motorcycle>("SELECT * FROM motorcycles WHERE userId = ?")
@@ -89,13 +68,13 @@ pub async fn get_stats(
         .fetch_all(&pool)
         .await?;
 
-    let maintenance = sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)")
+    let maintenance = sqlx::query_as::<_, MaintenanceRecord>("SELECT * FROM maintenanceRecords WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?) AND deletedAt IS NULL")
         .bind(user.id)
         .fetch_all(&pool)
         .await?;
 
     let issues = sqlx::query_as::<_, Issue>(
-        "SELECT * FROM issues WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?)",
+        "SELECT * FROM issues WHERE motorcycleId IN (SELECT id FROM motorcycles WHERE userId = ?) AND deletedAt IS NULL",
     )
     .bind(user.id)
     .fetch_all(&pool)
@@ -314,7 +293,6 @@ pub async fn get_stats(
 
     Ok(Json(json!({
         "stats": stats_data,
-        "fleetStats": stats_data,
         "motorcycles": motorcycles_json,
         "version": config.app_version,
     })))
