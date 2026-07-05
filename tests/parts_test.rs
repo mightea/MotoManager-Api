@@ -1241,6 +1241,24 @@ async fn test_vin_decode() {
         "K589 (K 100, RS, RT, LT)",
         "{body}"
     );
+
+    // Swiss R 80 GS Paris-Dakar, plate stamped "011 825 4 R80GS": the
+    // 0118001-0119999 block resolves to the PD (CH) Modell (deepest match,
+    // below the GS Serie).
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=011%20825%204R8%200GS",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(body["vin"], "0118254");
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "R 80 GS PD (CH) (ECE, 08/1990-06/1995)",
+        "{body}"
+    );
 }
 
 #[tokio::test]
