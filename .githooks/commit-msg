@@ -1,0 +1,39 @@
+#!/bin/sh
+#
+# Enforce Conventional Commits so release-please picks up every change.
+# (The API is a Rust project, so this is a dependency-free equivalent of the
+#  husky + commitlint `config-conventional` guard used in the webapp repo.)
+#
+# Install for a fresh clone:  git config core.hooksPath .githooks
+
+msg_file="$1"
+
+# The subject is the first non-empty, non-comment line.
+subject=$(grep -vE '^[[:space:]]*#' "$msg_file" | grep -vE '^[[:space:]]*$' | head -n1)
+
+# Allow git's own generated messages (merges, reverts, fixup/squash).
+case "$subject" in
+  "Merge "* | "Revert "* | "fixup! "* | "squash! "* | "amend! "*)
+    exit 0
+    ;;
+esac
+
+# <type>[optional scope][!]: <description>
+pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9._-]+\))?!?: .+'
+
+if printf '%s' "$subject" | grep -qE "$pattern"; then
+  exit 0
+fi
+
+cat >&2 <<EOF
+✖ Commit message is not a Conventional Commit.
+  Subject: ${subject}
+
+  Expected: <type>[optional scope][!]: <description>
+  Types:    build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test
+  Example:  feat: add rate limiting to the auth endpoints
+
+  This guard keeps release-please working — it only reads conventional commits,
+  so a non-conforming message would silently be skipped from the next release.
+EOF
+exit 1

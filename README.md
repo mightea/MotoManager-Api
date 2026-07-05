@@ -31,6 +31,15 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
    cargo run
    ```
 
+4. Enable the git hooks (one-time, per clone):
+   ```sh
+   git config core.hooksPath .githooks
+   ```
+   This installs a `commit-msg` hook that enforces
+   [Conventional Commits](https://www.conventionalcommits.org/) — required for
+   `release-please` to pick up changes and cut releases. Commits like
+   `feat: …`, `fix: …`, `chore: …` pass; a plain subject is rejected.
+
 ## Testing
 
 The project includes a comprehensive test suite covering unit tests and integration tests for the HTTP layer.
