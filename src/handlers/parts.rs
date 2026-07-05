@@ -119,9 +119,11 @@ pub async fn list_parts(
     AuthUser(user): AuthUser,
     Query(filter): Query<PartsFilter>,
 ) -> AppResult<Json<Value>> {
-    // Derived compatibility: filter through the motorcycle's series, if set.
-    // A bike without a series has no derivable fitment -> empty result.
-    let mut series_filter: Option<i64> = None;
+    // Derived compatibility: filter through the motorcycle's catalog node, if
+    // set. Matching is hierarchy-aware — a part linked anywhere on the node's
+    // ancestor/descendant chain fits. A bike without a node has no derivable
+    // fitment -> empty result.
+    let mut series_filter: Option<Vec<i64>> = None;
     if let Some(motorcycle_id) = filter.motorcycle_id {
         let series_id: Option<Option<i64>> = sqlx::query_scalar(
             "SELECT seriesId FROM motorcycles WHERE id = ? AND userId = ?",
@@ -133,7 +135,10 @@ pub async fn list_parts(
         let series_id =
             series_id.ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
         match series_id {
-            Some(sid) => series_filter = Some(sid),
+            Some(sid) => {
+                series_filter =
+                    Some(crate::handlers::model_series::compatible_series_ids(&pool, sid, user.id).await?)
+            }
             None => return Ok(Json(json!({ "parts": [] }))),
         }
     }
@@ -144,8 +149,12 @@ pub async fn list_parts(
     } else {
         query_str.push_str(" AND deletedAt IS NULL");
     }
-    if series_filter.is_some() {
-        query_str.push_str(" AND id IN (SELECT partId FROM partSeriesCompat WHERE seriesId = ?)");
+    if let Some(series_ids) = &series_filter {
+        let placeholders = vec!["?"; series_ids.len().max(1)].join(", ");
+        query_str.push_str(&format!(
+            " AND id IN (SELECT partId FROM partSeriesCompat WHERE seriesId IN ({}))",
+            placeholders
+        ));
     }
     query_str.push_str(" ORDER BY name ASC, id ASC");
 
@@ -153,8 +162,13 @@ pub async fn list_parts(
     if let Some(since) = filter.since {
         query = query.bind(since);
     }
-    if let Some(sid) = series_filter {
-        query = query.bind(sid);
+    if let Some(series_ids) = &series_filter {
+        if series_ids.is_empty() {
+            query = query.bind(-1); // impossible id keeps the IN clause valid
+        }
+        for sid in series_ids {
+            query = query.bind(sid);
+        }
     }
     let parts = query.fetch_all(&pool).await?;
 

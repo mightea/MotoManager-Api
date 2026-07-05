@@ -343,8 +343,11 @@ pub struct Challenge {
     pub created_at: String,
 }
 
-/// Model-series lookup (migration 012). Global seed rows have `user_id` NULL;
-/// user-created custom series carry the creator's id.
+/// Model-catalog node (migrations 012/015). Hierarchical, realoem-style:
+/// Familie (root) -> Serie -> Modell, max depth 3. Global seed rows have
+/// `user_id` NULL; user-created custom entries carry the creator's id.
+/// Parts and motorcycles may link to a node at ANY level — compatibility
+/// matching walks the tree (ancestor-or-self in either direction).
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 #[sqlx(rename_all = "camelCase")]
@@ -352,6 +355,10 @@ pub struct ModelSeries {
     pub id: i64,
     pub name: String,
     pub manufacturer: String,
+    pub parent_id: Option<i64>,
+    /// Comma-separated BMW type codes (Baumuster, VIN chars 4-7) for VIN
+    /// decoding, e.g. "0502,0503,0513".
+    pub type_codes: Option<String>,
     pub user_id: Option<i64>,
     pub created_at: String,
 }

@@ -144,7 +144,7 @@ async fn seed_motorcycle(pool: &sqlx::SqlitePool, user_id: i64) -> i64 {
 async fn test_parts_lifecycle() {
     let (app, pool, token) = setup_test_app().await;
     let series_gs = seed_series_id(&pool, "R 1150 GS").await;
-    let series_r = seed_series_id(&pool, "R 1150 R").await;
+    let series_r = seed_series_id(&pool, "R 1100 GS").await;
 
     // Create a part with fitment.
     let (status, body) = request(
@@ -790,9 +790,45 @@ async fn test_model_series_scoping() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 
-    // Global rows cannot be deleted either.
-    let (status, _) = request(&app, Method::DELETE, "/api/model-series/1", &token_a, None).await;
-    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Users curate the catalog: an unused global leaf can be removed…
+    let unused_global = seed_series_id(&pool, "R 45").await;
+    let (status, _) = request(
+        &app,
+        Method::DELETE,
+        &format!("/api/model-series/{unused_global}"),
+        &token_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = request(&app, Method::GET, "/api/model-series", &token_b, None).await;
+    assert!(body["modelSeries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["name"] != "R 45"));
+
+    // …but a global family whose subtree is referenced anywhere is protected:
+    // link a part to the child "K 75", then try to delete the whole family.
+    let k75 = seed_series_id(&pool, "K 75").await;
+    request(
+        &app,
+        Method::POST,
+        "/api/parts",
+        &token_a,
+        Some(json!({ "partNumber": "PN-K75", "name": "Tachoritzel", "seriesIds": [k75] })),
+    )
+    .await;
+    let familie = seed_series_id(&pool, "K-Modelle 3-Zyl.").await;
+    let (status, _) = request(
+        &app,
+        Method::DELETE,
+        &format!("/api/model-series/{familie}"),
+        &token_a,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 
     // Referenced custom series cannot be deleted.
     request(
@@ -917,6 +953,215 @@ async fn test_part_image_lifecycle() {
     .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert!(body["part"]["image"].is_null());
+}
+
+#[tokio::test]
+async fn test_model_series_hierarchy() {
+    let (app, pool, token) = setup_test_app().await;
+
+    // Seeded hierarchy: Familie "R-Modelle 2V (1978-1996)" contains the
+    // re-parented "R 80 GS" and the Serie "R 80 GS, R 100 GS, PD (90-95)"
+    // which contains Modell "R 100 GS (ECE, 04/1990-07/1996)".
+    let familie = seed_series_id(&pool, "R-Modelle 2V (1978-1996)").await;
+    let serie = seed_series_id(&pool, "R 80 GS, R 100 GS, PD (90-95)").await;
+    let modell = seed_series_id(&pool, "R 100 GS (ECE, 04/1990-07/1996)").await;
+    let other_familie = seed_series_id(&pool, "K-Modelle 3-Zyl.").await;
+
+    // Depth cap: a child under a Modell (depth 3) is rejected.
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        "/api/model-series",
+        &token,
+        Some(json!({ "name": "Zu tief", "parentId": modell })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Custom child under a global Serie is fine and carries the parent.
+    let (status, body) = request(
+        &app,
+        Method::POST,
+        "/api/model-series",
+        &token,
+        Some(json!({ "name": "R 80 GS PD (CH) (ECE, 08/1991-12/1995)", "parentId": serie })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let custom_id = body["modelSeries"]["id"].as_i64().unwrap();
+    assert_eq!(body["modelSeries"]["parentId"].as_i64(), Some(serie));
+
+    // Re-parenting to inside the own subtree is rejected; to root works.
+    let (status, _) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/model-series/{custom_id}"),
+        &token,
+        Some(json!({ "parentId": custom_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/model-series/{custom_id}"),
+        &token,
+        Some(json!({ "parentId": null })),
+    )
+    .await;
+    assert!(body["modelSeries"]["parentId"].is_null(), "{body}");
+
+    // Hierarchy-aware compatibility: bike on the Serie level.
+    let moto_id = seed_motorcycle(&pool, 1).await;
+    sqlx::query("UPDATE motorcycles SET seriesId = ? WHERE id = ?")
+        .bind(serie)
+        .bind(moto_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Part linked to the Familie (ancestor) fits; part linked to the Modell
+    // (descendant) fits; part linked to another Familie does not.
+    for (part_number, series_id) in [
+        ("HIER-FAM", familie),
+        ("HIER-MOD", modell),
+        ("HIER-OTHER", other_familie),
+    ] {
+        request(
+            &app,
+            Method::POST,
+            "/api/parts",
+            &token,
+            Some(json!({ "partNumber": part_number, "name": part_number, "seriesIds": [series_id] })),
+        )
+        .await;
+    }
+
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        &format!("/api/parts?motorcycleId={moto_id}"),
+        &token,
+        None,
+    )
+    .await;
+    let numbers: Vec<String> = body["parts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["partNumber"].as_str().unwrap().to_string())
+        .collect();
+    assert!(numbers.contains(&"HIER-FAM".to_string()), "{numbers:?}");
+    assert!(numbers.contains(&"HIER-MOD".to_string()), "{numbers:?}");
+    assert!(!numbers.contains(&"HIER-OTHER".to_string()), "{numbers:?}");
+
+    // Deleting a node cascades through its (unused) subtree.
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        "/api/model-series",
+        &token,
+        Some(json!({ "name": "Eigene Familie" })),
+    )
+    .await;
+    let own_family = body["modelSeries"]["id"].as_i64().unwrap();
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        "/api/model-series",
+        &token,
+        Some(json!({ "name": "Eigene Serie", "parentId": own_family })),
+    )
+    .await;
+    let own_series = body["modelSeries"]["id"].as_i64().unwrap();
+    let (status, _) = request(
+        &app,
+        Method::DELETE,
+        &format!("/api/model-series/{own_family}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = request(&app, Method::GET, "/api/model-series", &token, None).await;
+    let remaining_ids: Vec<i64> = body["modelSeries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["id"].as_i64().unwrap())
+        .collect();
+    assert!(!remaining_ids.contains(&own_family));
+    assert!(!remaining_ids.contains(&own_series));
+}
+
+#[tokio::test]
+async fn test_vin_decode() {
+    let (app, _pool, token) = setup_test_app().await;
+
+    // K 100 RS, ECE type code 0513 (USA variant), model year letter F = 1985.
+    // Deepest match wins: the Modell "K 100 RS 83 (0502,0503,0513) (ECE)"
+    // sits below the K589 Serie which carries the same code.
+    let (status, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=WB1051300F0042335",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["isBmw"], true);
+    assert_eq!(body["typeCode"], "0513");
+    assert_eq!(body["modelYear"], 1985);
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "K 100 RS 83 (0502,0503,0513) (ECE)",
+        "{body}"
+    );
+
+    // Monolever R 80: code 0453 hits the seeded Modell below the Serie.
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=WB1045300H6123456",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "R 80 (ECE, 03/1984-01/1995)",
+        "{body}"
+    );
+    assert_eq!(body["modelYear"], 1987);
+
+    // Unknown type code: BMW VIN but no catalog match.
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=WB1999900F0042335",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(body["isBmw"], true);
+    assert!(body["match"].is_null());
+
+    // Non-BMW WMI: decoded structurally, but never matched.
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=JYA045300F0042335",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(body["isBmw"], false);
+    assert!(body["match"].is_null());
+
+    // Malformed VIN is rejected.
+    let (status, _) = request(&app, Method::GET, "/api/vin/decode?vin=WB105", &token, None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }
 
 #[tokio::test]

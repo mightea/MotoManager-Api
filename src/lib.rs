@@ -169,6 +169,7 @@ pub fn build_app(state: AppState) -> Router {
             put(handlers::model_series::update_model_series)
                 .delete(handlers::model_series::delete_model_series),
         )
+        .route("/api/vin/decode", get(handlers::model_series::decode_vin))
         .route(
             "/api/storage-locations",
             get(handlers::storage_locations::list_storage_locations)
