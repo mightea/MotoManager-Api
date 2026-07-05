@@ -151,8 +151,10 @@ async fn test_document_lifecycle() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    // cleanup
-    let _ = tokio::fs::remove_dir_all("./test_data").await;
+    // Cleanup: remove only this test's file — ./test_data is shared across
+    // concurrently running test binaries (e.g. the part-image upload test),
+    // so a remove_dir_all here intermittently breaks their file writes.
+    let _ = tokio::fs::remove_file("./test_data/documents/manual.pdf").await;
 }
 
 #[tokio::test]

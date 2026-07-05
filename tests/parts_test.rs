@@ -661,6 +661,86 @@ async fn test_storage_location_hierarchy() {
 }
 
 #[tokio::test]
+async fn test_storage_location_place_link() {
+    let (app, pool, token) = setup_test_app().await;
+
+    // A workshop place from the existing locations entity.
+    let place_id = sqlx::query(
+        "INSERT INTO locations (name, userId, type) VALUES (?, ?, 'storage')",
+    )
+    .bind("Garage Zuhause")
+    .bind(1)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // Root-level storage location can link to the place.
+    let (status, body) = request(
+        &app,
+        Method::POST,
+        "/api/storage-locations",
+        &token,
+        Some(json!({ "name": "Regal A", "locationId": place_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let root_id = body["storageLocation"]["id"].as_i64().unwrap();
+    assert_eq!(body["storageLocation"]["locationId"].as_i64(), Some(place_id));
+
+    // A nested location must not carry its own place link.
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        "/api/storage-locations",
+        &token,
+        Some(json!({ "name": "Kiste 1", "parentId": root_id, "locationId": place_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Explicit null clears the link; absent leaves it untouched.
+    let (_, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/storage-locations/{root_id}"),
+        &token,
+        Some(json!({ "name": "Regal A1" })),
+    )
+    .await;
+    assert_eq!(body["storageLocation"]["locationId"].as_i64(), Some(place_id));
+    let (_, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/storage-locations/{root_id}"),
+        &token,
+        Some(json!({ "locationId": null })),
+    )
+    .await;
+    assert!(body["storageLocation"]["locationId"].is_null());
+
+    // Nesting a linked root under a parent clears its place link.
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        "/api/storage-locations",
+        &token,
+        Some(json!({ "name": "Keller", "locationId": place_id })),
+    )
+    .await;
+    let linked_id = body["storageLocation"]["id"].as_i64().unwrap();
+    let (_, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/storage-locations/{linked_id}"),
+        &token,
+        Some(json!({ "parentId": root_id })),
+    )
+    .await;
+    assert!(body["storageLocation"]["locationId"].is_null(), "{body}");
+}
+
+#[tokio::test]
 async fn test_model_series_scoping() {
     let (app, pool, token_a) = setup_test_app().await;
     let (_user_b, token_b) = create_second_user(&pool).await;

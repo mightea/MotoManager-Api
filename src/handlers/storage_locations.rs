@@ -10,7 +10,7 @@ use sqlx::{Row, SqlitePool};
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
-    handlers::maintenance::sync_now,
+    handlers::{locations::verify_location_ownership, maintenance::sync_now},
     models::StorageLocation,
 };
 
@@ -99,6 +99,8 @@ pub async fn list_storage_locations(
 pub struct CreateStorageLocationRequest {
     pub name: String,
     pub parent_id: Option<i64>,
+    /// Physical place (locations entity); root-level entries only.
+    pub location_id: Option<i64>,
     /// Client-generated idempotency key (UUID).
     pub client_id: Option<String>,
 }
@@ -133,15 +135,25 @@ pub async fn create_storage_location(
     if let Some(parent_id) = body.parent_id {
         verify_parent(&pool, parent_id, user.id).await?;
     }
+    // The physical place lives on the tree root only; children inherit it.
+    if body.location_id.is_some() && body.parent_id.is_some() {
+        return Err(AppError::BadRequest(
+            "Only root-level storage locations can be linked to a place".to_string(),
+        ));
+    }
+    if let Some(location_id) = body.location_id {
+        verify_location_ownership(&pool, location_id, user.id).await?;
+    }
 
     let now = sync_now();
     let id = sqlx::query(
-        "INSERT INTO storageLocations (userId, name, parentId, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO storageLocations (userId, name, parentId, locationId, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(user.id)
     .bind(&name)
     .bind(body.parent_id)
+    .bind(body.location_id)
     .bind(&body.client_id)
     .bind(&now)
     .execute(&pool)
@@ -161,11 +173,27 @@ pub async fn create_storage_location(
     ))
 }
 
+/// Distinguish "field absent" (outer None via `default`) from "explicit null"
+/// (Some(None)) from "value" (Some(Some(v))) — plain serde flattens both null
+/// and absent to None otherwise.
+fn double_option<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize as _;
+    Ok(Some(Option::<i64>::deserialize(deserializer)?))
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateStorageLocationRequest {
     pub name: Option<String>,
-    pub parent_id: Option<i64>,
+    /// Absent = keep, null = move to root level, value = re-parent.
+    #[serde(default, deserialize_with = "double_option")]
+    pub parent_id: Option<Option<i64>>,
+    /// Absent = keep, null = clear, value = set (see `double_option`).
+    #[serde(default, deserialize_with = "double_option")]
+    pub location_id: Option<Option<i64>>,
 }
 
 pub async fn update_storage_location(
@@ -184,18 +212,42 @@ pub async fn update_storage_location(
     .ok_or_else(|| AppError::NotFound("Storage location not found".to_string()))?;
 
     let name = body.name.unwrap_or(existing.name);
-    if let Some(parent_id) = body.parent_id {
-        verify_parent(&pool, parent_id, user.id).await?;
-        verify_no_cycle(&pool, id, parent_id).await?;
-    }
-    let parent_id = body.parent_id.or(existing.parent_id);
+    let parent_id = match body.parent_id {
+        None => existing.parent_id,
+        Some(None) => None, // explicit null: move to root level
+        Some(Some(parent_id)) => {
+            verify_parent(&pool, parent_id, user.id).await?;
+            verify_no_cycle(&pool, id, parent_id).await?;
+            Some(parent_id)
+        }
+    };
+
+    // Place link: absent = keep, null = clear, value = validate and set —
+    // but never on a nested location (the root of the tree owns the place).
+    let location_id = match body.location_id {
+        None => existing.location_id,
+        Some(None) => None,
+        Some(Some(lid)) => {
+            if parent_id.is_some() {
+                return Err(AppError::BadRequest(
+                    "Only root-level storage locations can be linked to a place".to_string(),
+                ));
+            }
+            verify_location_ownership(&pool, lid, user.id).await?;
+            Some(lid)
+        }
+    };
+    // Nesting a previously-linked root clears its place link.
+    let location_id = if parent_id.is_some() { None } else { location_id };
 
     let now = sync_now();
     sqlx::query(
-        "UPDATE storageLocations SET name = ?, parentId = ?, updatedAt = ? WHERE id = ?",
+        "UPDATE storageLocations SET name = ?, parentId = ?, locationId = ?, updatedAt = ? \
+         WHERE id = ?",
     )
     .bind(&name)
     .bind(parent_id)
+    .bind(location_id)
     .bind(&now)
     .bind(id)
     .execute(&pool)

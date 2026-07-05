@@ -364,6 +364,9 @@ pub struct StorageLocation {
     pub user_id: i64,
     pub name: String,
     pub parent_id: Option<i64>,
+    /// Physical place (garage/workshop from the `locations` entity); only set
+    /// on root-level entries — children inherit it from the tree root.
+    pub location_id: Option<i64>,
     pub created_at: String,
     // Sync metadata (see migration 012).
     pub client_id: Option<String>,
