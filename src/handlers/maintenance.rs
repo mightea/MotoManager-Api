@@ -509,6 +509,8 @@ pub async fn delete_maintenance(
     // Soft-delete: keep the row as a tombstone (with bumped updatedAt) so
     // offline clients learn about the deletion on their next ?since pull.
     let now = sync_now();
+    let mut tx = pool.begin().await?;
+
     let result = sqlx::query(
         "UPDATE maintenanceRecords SET deletedAt = ?, updatedAt = ? \
          WHERE id = ? AND motorcycleId = ? AND deletedAt IS NULL",
@@ -517,7 +519,7 @@ pub async fn delete_maintenance(
     .bind(&now)
     .bind(mid)
     .bind(motorcycle_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await?;
 
     if result.rows_affected() == 0 {
@@ -525,6 +527,21 @@ pub async fn delete_maintenance(
             "Maintenance record not found".to_string(),
         ));
     }
+
+    // Deleting a repair restores the parts it consumed: tombstone the linked
+    // consumptions so on-hand (a pure derivation) recovers and offline clients
+    // remove them via tombstone pull.
+    sqlx::query(
+        "UPDATE partConsumptions SET deletedAt = ?, updatedAt = ? \
+         WHERE maintenanceRecordId = ? AND deletedAt IS NULL",
+    )
+    .bind(&now)
+    .bind(&now)
+    .bind(mid)
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
 
     tracing::info!("Maintenance record soft-deleted ID: {}", mid);
     Ok(Json(json!({ "message": "Maintenance record deleted" })))

@@ -82,6 +82,7 @@ pub struct Motorcycle {
     pub normalized_purchase_price: Option<f64>,
     pub currency_code: Option<String>,
     pub fuel_tank_size: Option<f64>,
+    pub series_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -110,6 +111,7 @@ pub struct MotorcycleWithStats {
     pub normalized_purchase_price: Option<f64>,
     pub currency_code: Option<String>,
     pub fuel_tank_size: Option<f64>,
+    pub series_id: Option<i64>,
     pub open_issues: i64,
     pub maintenance_count: i64,
     pub latest_odo: Option<i64>,
@@ -339,6 +341,120 @@ pub struct Challenge {
     pub challenge: String,
     pub expires_at: String,
     pub created_at: String,
+}
+
+/// Model-series lookup (migration 012). Global seed rows have `user_id` NULL;
+/// user-created custom series carry the creator's id.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct ModelSeries {
+    pub id: i64,
+    pub name: String,
+    pub manufacturer: String,
+    pub user_id: Option<i64>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct StorageLocation {
+    pub id: i64,
+    pub user_id: i64,
+    pub name: String,
+    pub parent_id: Option<i64>,
+    pub created_at: String,
+    // Sync metadata (see migration 012).
+    pub client_id: Option<String>,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct Part {
+    pub id: i64,
+    pub user_id: i64,
+    pub part_number: String,
+    pub name: String,
+    pub manufacturer: String,
+    pub description: Option<String>,
+    pub is_public: bool,
+    pub image: Option<String>,
+    pub created_at: String,
+    // Sync metadata (see migration 012).
+    pub client_id: Option<String>,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<String>,
+}
+
+/// Owner-facing part representation: catalog row plus fitment and the derived
+/// inventory numbers (on-hand is never stored, always SUM(stock) - SUM(consumed)).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PartWithMeta {
+    #[serde(flatten)]
+    pub part: Part,
+    pub series_ids: Vec<i64>,
+    pub on_hand: i64,
+    pub stock_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct PartStock {
+    pub id: i64,
+    pub part_id: i64,
+    pub quantity: i64,
+    pub price: Option<f64>,
+    pub currency: Option<String>,
+    pub normalized_price: Option<f64>,
+    pub purchase_date: Option<String>,
+    pub storage_location_id: Option<i64>,
+    pub notes: Option<String>,
+    pub created_at: String,
+    // Sync metadata (see migration 012).
+    pub client_id: Option<String>,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct PartConsumption {
+    pub id: i64,
+    pub part_id: i64,
+    pub maintenance_record_id: Option<i64>,
+    pub quantity: i64,
+    pub date: String,
+    pub notes: Option<String>,
+    pub created_at: String,
+    // Sync metadata (see migration 012).
+    pub client_id: Option<String>,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<String>,
+}
+
+/// Public-browse projection of another user's shared part. Deliberately a
+/// whitelist: prices, purchase dates and storage locations must never appear
+/// here, only catalog data plus aggregated availability.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicPart {
+    pub id: i64,
+    pub part_number: String,
+    pub name: String,
+    pub manufacturer: String,
+    pub description: Option<String>,
+    pub image: Option<String>,
+    pub series_ids: Vec<i64>,
+    pub owner_name: String,
+    pub has_stock: bool,
+    pub total_quantity: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

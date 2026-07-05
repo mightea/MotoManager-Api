@@ -18,7 +18,7 @@ use crate::{
     },
 };
 
-async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppResult<String> {
+pub(crate) async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppResult<String> {
     let ext = if content_type.contains("png") {
         "png"
     } else if content_type.contains("webp") {
@@ -35,7 +35,7 @@ async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppRe
     Ok(filename)
 }
 
-fn format_image_url(image: Option<String>) -> Option<String> {
+pub(crate) fn format_image_url(image: Option<String>) -> Option<String> {
     image.map(|i| {
         format!(
             "/images/{}",
@@ -151,13 +151,17 @@ pub async fn create_motorcycle(
     let first_registration = fields.get("firstRegistration").cloned();
     let purchase_date = fields.get("purchaseDate").cloned();
     let currency_code = fields.get("currencyCode").cloned();
+    let series_id: Option<i64> = fields.get("seriesId").and_then(|v| v.parse().ok());
+    if let Some(sid) = series_id {
+        crate::handlers::model_series::verify_series_accessible(&pool, sid, user.id).await?;
+    }
 
     let id = sqlx::query(
         "INSERT INTO motorcycles
            (make, model, modelYear, userId, vin, engineNumber, vehicleNr, numberPlate,
             image, isVeteran, isArchived, firstRegistration, initialOdo, manualOdo,
-            purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize, seriesId)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&make)
     .bind(&model)
@@ -178,6 +182,7 @@ pub async fn create_motorcycle(
     .bind(normalized_purchase_price)
     .bind(&currency_code)
     .bind(fuel_tank_size)
+    .bind(series_id)
     .execute(&pool)
     .await?
     .last_insert_rowid();
@@ -390,13 +395,19 @@ pub async fn update_motorcycle(
         .get("currencyCode")
         .cloned()
         .or(existing.currency_code);
+    let new_series_id: Option<i64> = fields.get("seriesId").and_then(|v| v.parse().ok());
+    if let Some(sid) = new_series_id {
+        crate::handlers::model_series::verify_series_accessible(&pool, sid, user.id).await?;
+    }
+    let series_id: Option<i64> = new_series_id.or(existing.series_id);
 
     sqlx::query(
         "UPDATE motorcycles SET
            make = ?, model = ?, modelYear = ?, vin = ?, engineNumber = ?,
            vehicleNr = ?, numberPlate = ?, image = ?, isVeteran = ?, isArchived = ?,
            firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
-           purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?
+           purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?,
+           seriesId = ?
            WHERE id = ? AND userId = ?",
     )
     .bind(&make)
@@ -417,6 +428,7 @@ pub async fn update_motorcycle(
     .bind(normalized_purchase_price)
     .bind(&currency_code)
     .bind(fuel_tank_size)
+    .bind(series_id)
     .bind(id)
     .bind(user.id)
     .execute(&pool)

@@ -160,6 +160,59 @@ pub fn build_app(state: AppState) -> Router {
             put(handlers::expenses::update_expense).delete(handlers::expenses::delete_expense),
         )
         .route(
+            "/api/model-series",
+            get(handlers::model_series::list_model_series)
+                .post(handlers::model_series::create_model_series),
+        )
+        .route(
+            "/api/model-series/{sid}",
+            put(handlers::model_series::update_model_series)
+                .delete(handlers::model_series::delete_model_series),
+        )
+        .route(
+            "/api/storage-locations",
+            get(handlers::storage_locations::list_storage_locations)
+                .post(handlers::storage_locations::create_storage_location),
+        )
+        .route(
+            "/api/storage-locations/{id}",
+            put(handlers::storage_locations::update_storage_location)
+                .delete(handlers::storage_locations::delete_storage_location),
+        )
+        .route(
+            "/api/parts",
+            get(handlers::parts::list_parts).post(handlers::parts::create_part),
+        )
+        .route("/api/parts/public", get(handlers::parts::list_public_parts))
+        .route(
+            "/api/parts/{id}",
+            put(handlers::parts::update_part).delete(handlers::parts::delete_part),
+        )
+        .route(
+            "/api/parts/{id}/image",
+            post(handlers::parts::upload_part_image)
+                .delete(handlers::parts::delete_part_image)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
+        .route(
+            "/api/part-stocks",
+            get(handlers::parts::list_part_stocks).post(handlers::parts::create_part_stock),
+        )
+        .route(
+            "/api/part-stocks/{id}",
+            put(handlers::parts::update_part_stock).delete(handlers::parts::delete_part_stock),
+        )
+        .route(
+            "/api/part-consumptions",
+            get(handlers::parts::list_part_consumptions)
+                .post(handlers::parts::create_part_consumption),
+        )
+        .route(
+            "/api/part-consumptions/{id}",
+            put(handlers::parts::update_part_consumption)
+                .delete(handlers::parts::delete_part_consumption),
+        )
+        .route(
             "/api/settings",
             get(handlers::settings::get_settings).put(handlers::settings::update_settings),
         )
