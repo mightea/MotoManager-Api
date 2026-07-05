@@ -35,6 +35,41 @@ pub(crate) async fn save_image(config: &Config, data: Vec<u8>, content_type: &st
     Ok(filename)
 }
 
+type FieldMap = std::collections::HashMap<String, String>;
+
+/// Read an optional text field with clear semantics: absent = keep `existing`,
+/// empty = clear (NULL), value = replace. Multipart forms can't send null, so
+/// the empty string is the explicit "clear" signal.
+fn merge_text(fields: &FieldMap, key: &str, existing: Option<String>) -> Option<String> {
+    match fields.get(key) {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => Some(value.clone()),
+        None => existing,
+    }
+}
+
+/// Numeric twin of `merge_text`; an unparseable value keeps `existing` so a
+/// typo can't silently wipe data.
+fn merge_number<T: std::str::FromStr>(
+    fields: &FieldMap,
+    key: &str,
+    existing: Option<T>,
+) -> Option<T> {
+    match fields.get(key) {
+        Some(value) if value.trim().is_empty() => None,
+        Some(value) => value.trim().parse().ok().or(existing),
+        None => existing,
+    }
+}
+
+/// A new (non-empty) text value, present or not — for optional create fields.
+fn create_text(fields: &FieldMap, key: &str) -> Option<String> {
+    fields
+        .get(key)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 pub(crate) fn format_image_url(image: Option<String>) -> Option<String> {
     image.map(|i| {
         format!(
@@ -144,13 +179,14 @@ pub async fn create_motorcycle(
         .and_then(|v| v.parse().ok());
     let fuel_tank_size: Option<f64> = fields.get("fuelTankSize").and_then(|v| v.parse().ok());
     let manual_odo: Option<i64> = fields.get("manualOdo").and_then(|v| v.parse().ok());
-    let vin = fields.get("vin").cloned();
-    let engine_number = fields.get("engineNumber").cloned();
-    let vehicle_nr = fields.get("vehicleNr").cloned();
-    let number_plate = fields.get("numberPlate").cloned();
-    let first_registration = fields.get("firstRegistration").cloned();
-    let purchase_date = fields.get("purchaseDate").cloned();
-    let currency_code = fields.get("currencyCode").cloned();
+    let vin = create_text(&fields, "vin");
+    let engine_number = create_text(&fields, "engineNumber");
+    // The webapp historically posts the Stammnummer as "vehicleIdNr".
+    let vehicle_nr = create_text(&fields, "vehicleNr").or_else(|| create_text(&fields, "vehicleIdNr"));
+    let number_plate = create_text(&fields, "numberPlate");
+    let first_registration = create_text(&fields, "firstRegistration");
+    let purchase_date = create_text(&fields, "purchaseDate");
+    let currency_code = create_text(&fields, "currencyCode");
     let series_id: Option<i64> = fields.get("seriesId").and_then(|v| v.parse().ok());
     if let Some(sid) = series_id {
         crate::handlers::model_series::verify_series_accessible(&pool, sid, user.id).await?;
@@ -342,12 +378,20 @@ pub async fn update_motorcycle(
         }
     }
 
-    let make: String = fields.get("make").cloned().unwrap_or(existing.make);
-    let model: String = fields.get("model").cloned().unwrap_or(existing.model);
-    let model_year: Option<String> = fields
-        .get("fabricationDate")
+    // Field semantics for every optional column: absent = keep, empty string =
+    // clear, value = replace. Multipart can't express null, so this is the only
+    // way the edit form can actually unset a field.
+    let make: String = fields
+        .get("make")
         .cloned()
-        .or(existing.model_year);
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(existing.make);
+    let model: String = fields
+        .get("model")
+        .cloned()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or(existing.model);
+    let model_year = merge_text(&fields, "fabricationDate", existing.model_year);
     let is_veteran: bool = fields
         .get("isVeteran")
         .map(|v| v == "true")
@@ -360,46 +404,38 @@ pub async fn update_motorcycle(
         .get("initialOdo")
         .and_then(|v| v.parse().ok())
         .unwrap_or(existing.initial_odo);
-    let purchase_price: Option<f64> = fields
-        .get("purchasePrice")
-        .and_then(|v| v.parse().ok())
-        .or(existing.purchase_price);
-    let normalized_purchase_price: Option<f64> = fields
-        .get("normalizedPurchasePrice")
-        .and_then(|v| v.parse().ok())
-        .or(existing.normalized_purchase_price);
-    let fuel_tank_size: Option<f64> = fields
-        .get("fuelTankSize")
-        .and_then(|v| v.parse().ok())
-        .or(existing.fuel_tank_size);
-    let manual_odo: Option<i64> = fields
-        .get("manualOdo")
-        .and_then(|v| v.parse().ok())
-        .or(existing.manual_odo);
-    let vin: Option<String> = fields.get("vin").cloned().or(existing.vin);
-    let engine_number: Option<String> = fields
-        .get("engineNumber")
-        .cloned()
-        .or(existing.engine_number);
-    let vehicle_nr: Option<String> = fields.get("vehicleNr").cloned().or(existing.vehicle_nr);
-    let number_plate: Option<String> = fields.get("numberPlate").cloned().or(existing.number_plate);
-    let first_registration: Option<String> = fields
-        .get("firstRegistration")
-        .cloned()
-        .or(existing.first_registration);
-    let purchase_date: Option<String> = fields
-        .get("purchaseDate")
-        .cloned()
-        .or(existing.purchase_date);
-    let currency_code: Option<String> = fields
-        .get("currencyCode")
-        .cloned()
-        .or(existing.currency_code);
-    let new_series_id: Option<i64> = fields.get("seriesId").and_then(|v| v.parse().ok());
-    if let Some(sid) = new_series_id {
-        crate::handlers::model_series::verify_series_accessible(&pool, sid, user.id).await?;
-    }
-    let series_id: Option<i64> = new_series_id.or(existing.series_id);
+    let purchase_price = merge_number(&fields, "purchasePrice", existing.purchase_price);
+    let normalized_purchase_price = merge_number(
+        &fields,
+        "normalizedPurchasePrice",
+        existing.normalized_purchase_price,
+    );
+    let fuel_tank_size = merge_number(&fields, "fuelTankSize", existing.fuel_tank_size);
+    let manual_odo = merge_number(&fields, "manualOdo", existing.manual_odo);
+    let vin = merge_text(&fields, "vin", existing.vin);
+    let engine_number = merge_text(&fields, "engineNumber", existing.engine_number);
+    // The webapp historically posts the Stammnummer as "vehicleIdNr".
+    let vehicle_nr = if fields.contains_key("vehicleNr") {
+        merge_text(&fields, "vehicleNr", existing.vehicle_nr)
+    } else {
+        merge_text(&fields, "vehicleIdNr", existing.vehicle_nr)
+    };
+    let number_plate = merge_text(&fields, "numberPlate", existing.number_plate);
+    let first_registration = merge_text(&fields, "firstRegistration", existing.first_registration);
+    let purchase_date = merge_text(&fields, "purchaseDate", existing.purchase_date);
+    let currency_code = merge_text(&fields, "currencyCode", existing.currency_code);
+    let series_id: Option<i64> = match fields.get("seriesId") {
+        Some(value) if value.trim().is_empty() => None, // explicit clear
+        Some(value) => match value.trim().parse::<i64>() {
+            Ok(sid) => {
+                crate::handlers::model_series::verify_series_accessible(&pool, sid, user.id)
+                    .await?;
+                Some(sid)
+            }
+            Err(_) => existing.series_id,
+        },
+        None => existing.series_id,
+    };
 
     sqlx::query(
         "UPDATE motorcycles SET

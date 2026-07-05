@@ -167,6 +167,36 @@ fn normalize_type_codes(raw: Option<String>) -> Option<String> {
     }
 }
 
+/// Parse a comma-separated "start-end" range list into numeric pairs.
+fn parse_frame_ranges(raw: &str) -> Vec<(u64, u64)> {
+    raw.split(',')
+        .filter_map(|part| {
+            let (start, end) = part.trim().split_once('-')?;
+            let start: u64 = start.trim().parse().ok()?;
+            let end: u64 = end.trim().parse().ok()?;
+            (start <= end).then_some((start, end))
+        })
+        .collect()
+}
+
+/// Normalize a user-supplied frame-range list; returns None when nothing
+/// valid remains.
+fn normalize_frame_ranges(raw: Option<String>) -> Option<String> {
+    let raw = raw?;
+    let ranges = parse_frame_ranges(&raw);
+    if ranges.is_empty() {
+        None
+    } else {
+        Some(
+            ranges
+                .iter()
+                .map(|(start, end)| format!("{}-{}", start, end))
+                .collect::<Vec<_>>()
+                .join(","),
+        )
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateModelSeriesRequest {
@@ -176,6 +206,8 @@ pub struct CreateModelSeriesRequest {
     pub parent_id: Option<i64>,
     /// Comma-separated 4-digit BMW type codes for VIN decoding.
     pub type_codes: Option<String>,
+    /// Comma-separated "start-end" frame-number ranges (pre-1981 bikes).
+    pub frame_ranges: Option<String>,
 }
 
 pub async fn create_model_series(
@@ -222,12 +254,14 @@ pub async fn create_model_series(
     }
 
     let id = sqlx::query(
-        "INSERT INTO modelSeries (name, manufacturer, parentId, typeCodes, userId) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO modelSeries (name, manufacturer, parentId, typeCodes, frameRanges, userId) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&name)
     .bind(&manufacturer)
     .bind(body.parent_id)
     .bind(normalize_type_codes(body.type_codes))
+    .bind(normalize_frame_ranges(body.frame_ranges))
     .bind(user.id)
     .execute(&pool)
     .await?
@@ -261,6 +295,9 @@ pub struct UpdateModelSeriesRequest {
     /// Absent = keep, null/empty = clear, value = replace.
     #[serde(default, deserialize_with = "double_option_string")]
     pub type_codes: Option<Option<String>>,
+    /// Absent = keep, null/empty = clear, value = replace.
+    #[serde(default, deserialize_with = "double_option_string")]
+    pub frame_ranges: Option<Option<String>>,
 }
 
 /// String twin of `double_option`.
@@ -325,15 +362,20 @@ pub async fn update_model_series(
         None => existing.type_codes,
         Some(raw) => normalize_type_codes(raw),
     };
+    let frame_ranges = match body.frame_ranges {
+        None => existing.frame_ranges,
+        Some(raw) => normalize_frame_ranges(raw),
+    };
 
     sqlx::query(
-        "UPDATE modelSeries SET name = ?, manufacturer = ?, parentId = ?, typeCodes = ? \
-         WHERE id = ? AND userId = ?",
+        "UPDATE modelSeries SET name = ?, manufacturer = ?, parentId = ?, typeCodes = ?, \
+         frameRanges = ? WHERE id = ? AND userId = ?",
     )
     .bind(&name)
     .bind(&manufacturer)
     .bind(parent_id)
     .bind(&type_codes)
+    .bind(&frame_ranges)
     .bind(sid)
     .bind(user.id)
     .execute(&pool)
@@ -408,9 +450,12 @@ pub struct VinQuery {
     pub vin: String,
 }
 
-/// Decode a BMW Motorrad VIN: characters 4-7 carry the 4-digit type code
-/// (Baumuster), which maps to a catalog entry via `typeCodes`. The deepest
-/// matching node wins (Modell over Serie over Familie).
+/// Decode a BMW Motorrad VIN or a pre-1981 frame number.
+///
+/// 17-char VINs: characters 4-7 carry the 4-digit type code (Baumuster),
+/// which maps to a catalog entry via `typeCodes`. 6-7 digit numbers are
+/// treated as classic frame numbers and matched against `frameRanges`.
+/// In both cases the deepest matching node wins (Modell > Serie > Familie).
 pub async fn decode_vin(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
@@ -423,9 +468,63 @@ pub async fn decode_vin(
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect();
+
+    // Classic frame numbers: pre-1981 bikes AND ECE-market bikes into the
+    // 90s carry 6-8 digit serials (often with leading zeros), sometimes
+    // stamped with the model designation appended — "0103596 K75S". Take the
+    // leading digit run and tolerate a short alphanumeric suffix.
+    let leading_digits: String = vin.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let suffix_len = vin.len() - leading_digits.len();
+    if vin.len() != 17 && (6..=8).contains(&leading_digits.len()) && suffix_len <= 6 {
+        let frame_number: u64 = leading_digits.parse().map_err(|_| {
+            AppError::BadRequest("Invalid frame number".to_string())
+        })?;
+        let vin = leading_digits;
+
+        let candidates = sqlx::query_as::<_, ModelSeries>(
+            "SELECT * FROM modelSeries WHERE (userId IS NULL OR userId = ?) \
+             AND frameRanges IS NOT NULL",
+        )
+        .bind(user.id)
+        .fetch_all(&pool)
+        .await?;
+
+        let matching: Vec<ModelSeries> = candidates
+            .into_iter()
+            .filter(|candidate| {
+                candidate
+                    .frame_ranges
+                    .as_deref()
+                    .map(parse_frame_ranges)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|(start, end)| (*start..=*end).contains(&frame_number))
+            })
+            .collect();
+
+        let matched = if matching.is_empty() {
+            None
+        } else {
+            let tree = accessible_tree(&pool, user.id).await?;
+            matching
+                .into_iter()
+                .max_by_key(|candidate| depth_of(candidate.id, &tree))
+        };
+
+        return Ok(Json(json!({
+            "vin": vin,
+            "kind": "frameNumber",
+            "isBmw": matched.is_some(),
+            "typeCode": Value::Null,
+            "modelYear": Value::Null,
+            "checkDigitValid": Value::Null,
+            "match": matched,
+        })));
+    }
+
     if vin.len() != 17 || !vin.chars().all(|c| c.is_ascii_alphanumeric()) {
         return Err(AppError::BadRequest(
-            "VIN must be 17 alphanumeric characters".to_string(),
+            "Input must be a 17-character VIN or a 6-8 digit frame number".to_string(),
         ));
     }
     let chars: Vec<char> = vin.chars().collect();
@@ -456,6 +555,7 @@ pub async fn decode_vin(
 
     Ok(Json(json!({
         "vin": vin,
+        "kind": "vin",
         "isBmw": is_bmw,
         "typeCode": type_code,
         "modelYear": model_year,

@@ -1162,6 +1162,85 @@ async fn test_vin_decode() {
     // Malformed VIN is rejected.
     let (status, _) = request(&app, Method::GET, "/api/vin/decode?vin=WB105", &token, None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Pre-1981 frame numbers: R69S (655004-666320) resolves to its Serie.
+    let (status, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=655500",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["kind"], "frameNumber");
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "R 50, R 60, R 69 S (Boxer /2)",
+        "{body}"
+    );
+
+    // R25/2 (245001-283650) has no seeded Serie -> resolves at Familie level.
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=245500",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "R-Modelle /2 (1950-1969)",
+        "{body}"
+    );
+
+    // /7 frame number lands in the /7 Serie.
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=6045123",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "R 60/7, R 75/7, R 80/7, R 100/7-T-S-RS-RT (76-84)",
+        "{body}"
+    );
+
+    // A serial outside every range yields no match.
+    let (_, body) = request(&app, Method::GET, "/api/vin/decode?vin=999999", &token, None).await;
+    assert_eq!(body["kind"], "frameNumber");
+    assert!(body["match"].is_null());
+
+    // ECE short VIN with leading zero and stamped model designation, as on a
+    // K 75 S plate: "010 359 6 K75S" -> frame 0103596 in 0100001-0110000.
+    let (status, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=010%20359%206K7%205S",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["kind"], "frameNumber");
+    assert_eq!(body["vin"], "0103596");
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "K569 (K 75, K 75 C, K 75 S, K 75 RT)",
+        "{body}"
+    );
+
+    // Bare leading-zero serial works too (ECE K100: 0000001-0010000).
+    let (_, body) = request(&app, Method::GET, "/api/vin/decode?vin=0004711", &token, None).await;
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "K589 (K 100, RS, RT, LT)",
+        "{body}"
+    );
 }
 
 #[tokio::test]

@@ -359,6 +359,9 @@ pub struct ModelSeries {
     /// Comma-separated BMW type codes (Baumuster, VIN chars 4-7) for VIN
     /// decoding, e.g. "0502,0503,0513".
     pub type_codes: Option<String>,
+    /// Comma-separated frame-number ranges ("start-end") for pre-1981 bikes
+    /// without a 17-char VIN, e.g. "550001-563515,630001-649037".
+    pub frame_ranges: Option<String>,
     pub user_id: Option<i64>,
     pub created_at: String,
 }

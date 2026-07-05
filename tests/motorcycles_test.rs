@@ -968,3 +968,127 @@ async fn test_maintenance_filtering() {
     .unwrap();
     assert_eq!(body["maintenanceRecords"].as_array().unwrap().len(), 4);
 }
+
+fn multipart_field(boundary: &str, name: &str, value: &str) -> String {
+    format!("--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n")
+}
+
+/// Every field on the edit screen must round-trip: values save, empty fields
+/// clear (multipart can't send null), absent fields keep their value, and the
+/// webapp's legacy "vehicleIdNr" key still reaches the vehicleNr column.
+#[tokio::test]
+async fn test_update_motorcycle_saves_all_fields() {
+    let (app, pool, token) = setup_test_app().await;
+
+    let series_id =
+        sqlx::query("SELECT id FROM modelSeries WHERE name = 'K569 (K 75, K 75 C, K 75 S, K 75 RT)' AND userId IS NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get::<i64, _>("id");
+
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles \
+         (make, model, userId, initialOdo, vehicleNr, purchasePrice, normalizedPurchasePrice, \
+          currencyCode, isArchived, isVeteran, seriesId, numberPlate, fuelTankSize) \
+         VALUES ('BMW', 'K75S', 1, 1000, 'OLD-NR', 5000, 5000, 'CHF', 1, 1, ?, 'ZH 1', 21)",
+    )
+    .bind(series_id)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // Full edit: change values, clear others, uncheck isArchived, and use the
+    // legacy vehicleIdNr field name the webapp posted historically.
+    let boundary = "moto-update-boundary";
+    let mut body = String::new();
+    for (name, value) in [
+        ("make", "BMW"),
+        ("model", "K 75 S"),
+        ("fabricationDate", "07/1986"),
+        ("vin", "0103596"),
+        ("vehicleIdNr", "010 359 6"),
+        ("numberPlate", ""),      // clear
+        ("purchasePrice", ""),    // clear
+        ("normalizedPurchasePrice", ""), // clear (webapp action mirrors this)
+        ("fuelTankSize", "22.5"),
+        ("isArchived", "false"),
+        ("isVeteran", "true"),
+        ("seriesId", ""),         // clear
+        ("initialOdo", "1200"),
+    ] {
+        body.push_str(&multipart_field(boundary, name, value));
+    }
+    body.push_str(&format!("--{boundary}--\r\n"));
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/motorcycles/{moto_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    let m = &json["motorcycle"];
+    assert_eq!(m["model"], "K 75 S");
+    assert_eq!(m["fabricationDate"], "07/1986");
+    assert_eq!(m["vin"], "0103596");
+    assert_eq!(m["vehicleNr"], "010 359 6", "legacy vehicleIdNr key must save");
+    assert!(m["numberPlate"].is_null(), "empty field must clear: {m}");
+    assert!(m["purchasePrice"].is_null(), "empty field must clear: {m}");
+    assert!(m["normalizedPurchasePrice"].is_null(), "{m}");
+    assert_eq!(m["fuelTankSize"], 22.5);
+    assert_eq!(m["isArchived"], false, "unchecking must save");
+    assert_eq!(m["isVeteran"], true);
+    assert!(m["seriesId"].is_null(), "empty seriesId must clear: {m}");
+    assert_eq!(m["initialOdo"], 1200);
+    assert_eq!(m["currencyCode"], "CHF", "absent field must keep its value");
+
+    // Partial edit: absent fields keep their values.
+    let mut body = String::new();
+    for (name, value) in [("make", "BMW"), ("model", "K 75 S Sport")] {
+        body.push_str(&multipart_field(boundary, name, value));
+    }
+    body.push_str(&format!("--{boundary}--\r\n"));
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/motorcycles/{moto_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    let m = &json["motorcycle"];
+    assert_eq!(m["model"], "K 75 S Sport");
+    assert_eq!(m["vehicleNr"], "010 359 6");
+    assert_eq!(m["fuelTankSize"], 22.5);
+    assert_eq!(m["isVeteran"], true);
+}
