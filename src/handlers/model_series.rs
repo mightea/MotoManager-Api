@@ -149,14 +149,18 @@ pub async fn list_model_series(
     Ok(Json(json!({ "modelSeries": series })))
 }
 
-/// Normalize a user-supplied type-code list: digits only, 4 chars each,
-/// comma-separated, deduplicated. Returns None when nothing valid remains.
+/// Normalize a user-supplied type-code list: 4 alphanumeric chars starting
+/// with a digit (classic "0502" and modern "0A01" style), comma-separated,
+/// uppercased, deduplicated. Returns None when nothing valid remains.
 fn normalize_type_codes(raw: Option<String>) -> Option<String> {
     let raw = raw?;
     let mut codes: Vec<String> = Vec::new();
     for part in raw.split(',') {
-        let code = part.trim().to_string();
-        if code.len() == 4 && code.chars().all(|c| c.is_ascii_digit()) && !codes.contains(&code) {
+        let code = part.trim().to_uppercase();
+        let valid = code.len() == 4
+            && code.chars().all(|c| c.is_ascii_alphanumeric())
+            && code.chars().next().is_some_and(|c| c.is_ascii_digit());
+        if valid && !codes.contains(&code) {
             codes.push(code);
         }
     }

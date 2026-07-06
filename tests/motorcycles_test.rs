@@ -981,7 +981,7 @@ async fn test_update_motorcycle_saves_all_fields() {
     let (app, pool, token) = setup_test_app().await;
 
     let series_id =
-        sqlx::query("SELECT id FROM modelSeries WHERE name = 'K569 (K 75, K 75 C, K 75 S, K 75 RT)' AND userId IS NULL")
+        sqlx::query("SELECT id FROM modelSeries WHERE name = 'K569 (K 75, K 75 c, K 75 s, K 75 RT)' AND userId IS NULL")
             .fetch_one(&pool)
             .await
             .unwrap()

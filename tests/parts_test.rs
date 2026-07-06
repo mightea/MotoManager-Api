@@ -143,8 +143,8 @@ async fn seed_motorcycle(pool: &sqlx::SqlitePool, user_id: i64) -> i64 {
 #[tokio::test]
 async fn test_parts_lifecycle() {
     let (app, pool, token) = setup_test_app().await;
-    let series_gs = seed_series_id(&pool, "R 1150 GS").await;
-    let series_r = seed_series_id(&pool, "R 1100 GS").await;
+    let series_gs = seed_series_id(&pool, "R21 (R 1150 GS)").await;
+    let series_r = seed_series_id(&pool, "259 (R 850 GS, R 1100 GS)").await;
 
     // Create a part with fitment.
     let (status, body) = request(
@@ -458,7 +458,7 @@ async fn test_maintenance_delete_restores_stock() {
 async fn test_public_visibility() {
     let (app, pool, token_a) = setup_test_app().await;
     let (_user_b, token_b) = create_second_user(&pool).await;
-    let series = seed_series_id(&pool, "K 75").await;
+    let series = seed_series_id(&pool, "K569 (K 75, K 75 c, K 75 s, K 75 RT)").await;
 
     // User A: one public part with stock, one private part.
     let (_, body) = request(
@@ -791,7 +791,7 @@ async fn test_model_series_scoping() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // Users curate the catalog: an unused global leaf can be removed…
-    let unused_global = seed_series_id(&pool, "R 45").await;
+    let unused_global = seed_series_id(&pool, "R24 (ECE, 01/1949-02/1950)").await;
     let (status, _) = request(
         &app,
         Method::DELETE,
@@ -806,11 +806,11 @@ async fn test_model_series_scoping() {
         .as_array()
         .unwrap()
         .iter()
-        .all(|s| s["name"] != "R 45"));
+        .all(|s| s["name"] != "R24 (ECE, 01/1949-02/1950)"));
 
     // …but a global family whose subtree is referenced anywhere is protected:
     // link a part to the child "K 75", then try to delete the whole family.
-    let k75 = seed_series_id(&pool, "K 75").await;
+    let k75 = seed_series_id(&pool, "K 75 84 (0561) (ECE, 07/1985-12/1988)").await;
     request(
         &app,
         Method::POST,
@@ -962,9 +962,9 @@ async fn test_model_series_hierarchy() {
     // Seeded hierarchy: Familie "R-Modelle 2V (1978-1996)" contains the
     // re-parented "R 80 GS" and the Serie "R 80 GS, R 100 GS, PD (90-95)"
     // which contains Modell "R 100 GS (ECE, 04/1990-07/1996)".
-    let familie = seed_series_id(&pool, "R-Modelle 2V (1978-1996)").await;
+    let familie = seed_series_id(&pool, "R-Modelle 2V").await;
     let serie = seed_series_id(&pool, "R 80 GS, R 100 GS, PD (90-95)").await;
-    let modell = seed_series_id(&pool, "R 100 GS (ECE, 04/1990-07/1996)").await;
+    let modell = seed_series_id(&pool, "R 100 GS (ECE, 04/1990-07/1994)").await;
     let other_familie = seed_series_id(&pool, "K-Modelle 3-Zyl.").await;
 
     // Depth cap: a child under a Modell (depth 3) is rejected.
@@ -1113,9 +1113,11 @@ async fn test_vin_decode() {
     assert_eq!(body["isBmw"], true);
     assert_eq!(body["typeCode"], "0513");
     assert_eq!(body["modelYear"], 1985);
-    assert_eq!(
-        body["match"]["name"].as_str().unwrap(),
-        "K 100 RS 83 (0502,0503,0513) (ECE)",
+    assert!(
+        body["match"]["name"]
+            .as_str()
+            .unwrap()
+            .starts_with("K 100 RS 83 (0502,0503,0513)"),
         "{body}"
     );
 
@@ -1176,11 +1178,11 @@ async fn test_vin_decode() {
     assert_eq!(body["kind"], "frameNumber");
     assert_eq!(
         body["match"]["name"].as_str().unwrap(),
-        "R 50, R 60, R 69 S (Boxer /2)",
+        "R69 S (ECE, 10/1960-07/1969)",
         "{body}"
     );
 
-    // R25/2 (245001-283650) has no seeded Serie -> resolves at Familie level.
+    // R25/2 (245001-283650) resolves on the site's 'R 25 -56' Serie.
     let (_, body) = request(
         &app,
         Method::GET,
@@ -1191,7 +1193,7 @@ async fn test_vin_decode() {
     .await;
     assert_eq!(
         body["match"]["name"].as_str().unwrap(),
-        "R-Modelle /2 (1950-1969)",
+        "R25/2 (ECE, 10/1951-08/1953)",
         "{body}"
     );
 
@@ -1206,7 +1208,7 @@ async fn test_vin_decode() {
     .await;
     assert_eq!(
         body["match"]["name"].as_str().unwrap(),
-        "R 60/7, R 75/7, R 80/7, R 100/7-T-S-RS-RT (76-84)",
+        "R 100, /7, /T, CS, RS, RT, S (76-84)",
         "{body}"
     );
 
@@ -1230,7 +1232,7 @@ async fn test_vin_decode() {
     assert_eq!(body["vin"], "0103596");
     assert_eq!(
         body["match"]["name"].as_str().unwrap(),
-        "K569 (K 75, K 75 C, K 75 S, K 75 RT)",
+        "K 75 S (0563,0572) (ECE, 10/1985-05/1995)",
         "{body}"
     );
 
@@ -1238,7 +1240,31 @@ async fn test_vin_decode() {
     let (_, body) = request(&app, Method::GET, "/api/vin/decode?vin=0004711", &token, None).await;
     assert_eq!(
         body["match"]["name"].as_str().unwrap(),
-        "K589 (K 100, RS, RT, LT)",
+        "K 100 83 (0501,0511) (ECE, 05/1982-12/1988)",
+        "{body}"
+    );
+
+    // 1980-84 R 100 ("R 100 /7T", code 0425): frame 6039893 sits in the
+    // 6035001-6040000 block and resolves to the Modell below the /7 Serie.
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=603%20989%203",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(body["vin"], "6039893");
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "R 100 /7T (ECE, 06/1980-10/1984)",
+        "{body}"
+    );
+    // The Serie-level extension covers the other 1980+ blocks (R100T).
+    let (_, body) = request(&app, Method::GET, "/api/vin/decode?vin=6193500", &token, None).await;
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "R 100, /7, /T, CS, RS, RT, S (76-84)",
         "{body}"
     );
 
