@@ -40,6 +40,9 @@ async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {
         app_version: "test".to_string(),
         data_dir: "./test_data".to_string(),
         cache_dir: "./cache".to_string(),
+        llm_base_url: None,
+        llm_model: "test".to_string(),
+        llm_api_key: "test".to_string(),
     };
 
     let rp_origin = url::Url::parse("http://localhost:5173").unwrap();

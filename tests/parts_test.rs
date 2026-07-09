@@ -35,6 +35,9 @@ async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {
         app_version: "test".to_string(),
         data_dir: "./test_data".to_string(),
         cache_dir: "./cache".to_string(),
+        llm_base_url: None,
+        llm_model: "test".to_string(),
+        llm_api_key: "test".to_string(),
     };
 
     let rp_origin = url::Url::parse("http://localhost:5173").unwrap();
@@ -171,7 +174,7 @@ async fn test_parts_lifecycle() {
         "{body}"
     );
 
-    // Add stock: 3 pieces with price and purchase date.
+    // Add stock: 3 pieces with price and purchase date. isUsed defaults false.
     let (status, body) = request(
         &app,
         Method::POST,
@@ -189,6 +192,30 @@ async fn test_parts_lifecycle() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let stock_id = body["partStock"]["id"].as_i64().unwrap();
+    assert_eq!(body["partStock"]["isUsed"], false, "{body}");
+
+    // Mark it as a used/salvaged piece; the flag round-trips and survives
+    // a payload that doesn't mention it (merge keeps the existing value).
+    let (status, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/part-stocks/{stock_id}"),
+        &token,
+        Some(json!({ "isUsed": true })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["partStock"]["isUsed"], true, "{body}");
+    let (status, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/part-stocks/{stock_id}"),
+        &token,
+        Some(json!({ "quantity": 3 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["partStock"]["isUsed"], true, "{body}");
 
     // List shows derived on-hand.
     let (status, body) = request(&app, Method::GET, "/api/parts", &token, None).await;
@@ -498,22 +525,34 @@ async fn test_public_visibility() {
     )
     .await;
 
-    // User B browses public parts: sees only the public one, with availability.
+    // User B browses: sees BOTH parts (catalog data is always shared) — but
+    // stock, prices, purchase dates and locations only on the public one.
     let (status, body) = request(&app, Method::GET, "/api/parts/public", &token_b, None).await;
     assert_eq!(status, StatusCode::OK, "{body}");
     let parts = body["parts"].as_array().unwrap();
-    assert_eq!(parts.len(), 1);
-    let p = &parts[0];
-    assert_eq!(p["partNumber"], "PUB-1");
+    assert_eq!(parts.len(), 2, "{body}");
+
+    let p = parts.iter().find(|p| p["partNumber"] == "PUB-1").unwrap();
     assert_eq!(p["ownerName"], "testuser");
+    assert_eq!(p["isPublic"], true);
     assert_eq!(p["hasStock"], true);
     assert_eq!(p["totalQuantity"], 3);
     assert_eq!(p["seriesIds"][0], series);
-    // Whitelist projection: no price/purchase/location keys may leak.
-    let obj = p.as_object().unwrap();
-    assert!(!obj.contains_key("price"));
-    assert!(!obj.contains_key("purchaseDate"));
-    assert!(!obj.contains_key("storageLocationId"));
+    // Public = everything: stock detail incl. price and purchase date.
+    let stocks = p["stocks"].as_array().unwrap();
+    assert_eq!(stocks.len(), 1, "{p}");
+    assert_eq!(stocks[0]["quantity"], 3);
+    assert_eq!(stocks[0]["price"], 49.0);
+    assert_eq!(stocks[0]["currency"], "CHF");
+    assert_eq!(stocks[0]["purchaseDate"], "2026-01-01");
+
+    // Private part: catalog visible, everything sensitive stays null.
+    let p = parts.iter().find(|p| p["partNumber"] == "PRIV-1").unwrap();
+    assert_eq!(p["name"], "Geheimteil");
+    assert_eq!(p["isPublic"], false);
+    assert!(p["hasStock"].is_null(), "{p}");
+    assert!(p["totalQuantity"].is_null(), "{p}");
+    assert!(p["stocks"].is_null(), "{p}");
 
     // The owner's own public parts are excluded from their browse view.
     let (_, body) = request(&app, Method::GET, "/api/parts/public", &token_a, None).await;
@@ -1334,4 +1373,55 @@ async fn test_since_delta() {
     assert!(!body["parts"][0]["deletedAt"].is_null());
     let (_, body) = request(&app, Method::GET, "/api/parts", &token, None).await;
     assert_eq!(body["parts"].as_array().unwrap().len(), 0);
+}
+
+/// The image-from-url endpoint must be unusable as an SSRF proxy: foreign
+/// parts are masked 404, non-allowlisted sources rejected before any request.
+#[tokio::test]
+async fn test_part_image_from_url_guards() {
+    let (app, pool, token) = setup_test_app().await;
+
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        "/api/parts",
+        &token,
+        Some(json!({ "partNumber": "62 12 1 351 554", "name": "Gummitülle", "clientId": "imp-1" })),
+    )
+    .await;
+    let part_id = body["part"]["id"].as_i64().unwrap();
+
+    // Non-allowlisted host: rejected without any outbound request.
+    let (status, body) = request(
+        &app,
+        Method::POST,
+        &format!("/api/parts/{part_id}/image-from-url"),
+        &token,
+        Some(json!({ "url": "https://example.com/x.png" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    // http scheme: rejected.
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        &format!("/api/parts/{part_id}/image-from-url"),
+        &token,
+        Some(json!({ "url": "http://admin.bmwbike.com/x.png" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+
+    // Foreign user's part: masked 404 even with a valid source URL.
+    let (_, other_token) = create_second_user(&pool).await;
+    let (status, _) = request(
+        &app,
+        Method::POST,
+        &format!("/api/parts/{part_id}/image-from-url"),
+        &other_token,
+        Some(json!({ "url": "https://admin.bmwbike.com/x.png" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }

@@ -3,6 +3,7 @@ pub mod config;
 pub mod error;
 pub mod handlers;
 pub mod models;
+pub mod pdfium_lib;
 
 use axum::{
     extract::DefaultBodyLimit,
@@ -193,6 +194,15 @@ pub fn build_app(state: AppState) -> Router {
             "/api/parts/{id}/image",
             post(handlers::parts::upload_part_image)
                 .delete(handlers::parts::delete_part_image)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
+        .route(
+            "/api/parts/{id}/image-from-url",
+            post(handlers::parts::import_part_image_from_url),
+        )
+        .route(
+            "/api/part-imports/parse",
+            post(handlers::part_import::parse_invoice)
                 .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
         )
         .route(

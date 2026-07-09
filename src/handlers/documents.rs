@@ -160,11 +160,9 @@ async fn generate_preview_blocking(
 }
 
 fn generate_pdf_preview(config: &Config, data: &[u8], uuid: &str) -> AppResult<String> {
-    let pdfium = Pdfium::new(
-        Pdfium::bind_to_library(Pdfium::pdfium_platform_library_name_at_path("./"))
-            .or_else(|_| Pdfium::bind_to_system_library())
-            .map_err(|e| AppError::Image(format!("Could not bind to Pdfium library: {}", e)))?,
-    );
+    // Shared instance — a second Pdfium::bind_to_library in the same process
+    // fails, which used to silently break every preview after the first.
+    let pdfium = crate::pdfium_lib::shared_pdfium().map_err(AppError::Image)?;
 
     let document = pdfium
         .load_pdf_from_byte_slice(data, None)

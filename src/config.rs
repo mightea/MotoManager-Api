@@ -11,6 +11,13 @@ pub struct Config {
     pub app_version: String,
     pub data_dir: String,
     pub cache_dir: String,
+    /// OpenAI-compatible LLM endpoint for invoice parsing (e.g. a local vLLM,
+    /// "http://10.0.0.2:8542/v1"). Only ever called from this server — the
+    /// LLM is never exposed to clients. None disables LLM structuring; the
+    /// deterministic fallback parser then carries the feature alone.
+    pub llm_base_url: Option<String>,
+    pub llm_model: String,
+    pub llm_api_key: String,
 }
 
 impl Config {
@@ -33,6 +40,10 @@ impl Config {
                 .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
             data_dir: env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string()),
             cache_dir: env::var("CACHE_DIR").unwrap_or_else(|_| "./cache".to_string()),
+            llm_base_url: env::var("LLM_BASE_URL").ok().filter(|v| !v.trim().is_empty()),
+            llm_model: env::var("LLM_MODEL")
+                .unwrap_or_else(|_| "Qwen/Qwen2.5-1.5B-Instruct-AWQ".to_string()),
+            llm_api_key: env::var("LLM_API_KEY").unwrap_or_else(|_| "local-vllm".to_string()),
         })
     }
 
