@@ -428,6 +428,8 @@ pub struct PartStock {
     pub purchase_date: Option<String>,
     pub storage_location_id: Option<i64>,
     pub notes: Option<String>,
+    /// Used/salvaged piece (e.g. pulled from a donor motorcycle).
+    pub is_used: bool,
     pub created_at: String,
     // Sync metadata (see migration 012).
     pub client_id: Option<String>,
@@ -452,9 +454,10 @@ pub struct PartConsumption {
     pub deleted_at: Option<String>,
 }
 
-/// Public-browse projection of another user's shared part. Deliberately a
-/// whitelist: prices, purchase dates and storage locations must never appear
-/// here, only catalog data plus aggregated availability.
+/// Community-browse projection of another user's part. Catalog data is
+/// always visible; availability and stock detail (prices, purchase dates,
+/// storage locations) appear ONLY when the owner marked the part public —
+/// private parts keep those fields None (whitelist, not a filter).
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicPart {
@@ -466,8 +469,24 @@ pub struct PublicPart {
     pub image: Option<String>,
     pub series_ids: Vec<i64>,
     pub owner_name: String,
-    pub has_stock: bool,
-    pub total_quantity: i64,
+    pub is_public: bool,
+    pub has_stock: Option<bool>,
+    pub total_quantity: Option<i64>,
+    pub stocks: Option<Vec<PublicStock>>,
+}
+
+/// A stock entry of a publicly shared part, as visible to other users.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicStock {
+    pub quantity: i64,
+    pub price: Option<f64>,
+    pub currency: Option<String>,
+    pub purchase_date: Option<String>,
+    /// Readable "Garage › Regal A" path in the owner's location hierarchy.
+    pub storage_location: Option<String>,
+    /// Used/salvaged piece — condition matters to potential takers.
+    pub is_used: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

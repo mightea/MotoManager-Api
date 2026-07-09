@@ -550,6 +550,148 @@ pub async fn upload_part_image(
     Ok(Json(json!({ "part": meta })))
 }
 
+/// Hosts we are willing to fetch part images from. The endpoint takes a raw
+/// URL, so without this allowlist it would be an SSRF proxy into whatever
+/// network the API runs in.
+const IMAGE_SOURCE_HOSTS: &[&str] = &[
+    "bmw-classic-media-prod.s3.eu-central-1.amazonaws.com",
+    "admin.bmwbike.com",
+];
+
+const IMAGE_DOWNLOAD_LIMIT: usize = 15 * 1024 * 1024; // matches the upload cap
+
+/// Validate a user-supplied image source URL: https only, allowlisted host,
+/// no credentials or port games. Returns the parsed URL.
+fn validate_image_source(raw: &str) -> Result<url::Url, AppError> {
+    let parsed = url::Url::parse(raw)
+        .map_err(|_| AppError::BadRequest("Ungültige Bild-URL".to_string()))?;
+    let valid = parsed.scheme() == "https"
+        && parsed.username().is_empty()
+        && parsed.password().is_none()
+        && parsed.port().is_none()
+        && parsed
+            .host_str()
+            .is_some_and(|host| IMAGE_SOURCE_HOSTS.contains(&host));
+    if valid {
+        Ok(parsed)
+    } else {
+        Err(AppError::BadRequest(
+            "Bild-URL wird nicht unterstützt (nur BMWBike-Quellen)".to_string(),
+        ))
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct ImportImagePayload {
+    pub url: String,
+}
+
+/// Download a part image from an allowlisted source (BMWBike import) and
+/// store it exactly like an uploaded one.
+pub async fn import_part_image_from_url(
+    State(pool): State<SqlitePool>,
+    State(config): State<Config>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<i64>,
+    Json(payload): Json<ImportImagePayload>,
+) -> AppResult<Json<Value>> {
+    verify_part_ownership(&pool, id, user.id).await?;
+    let source = validate_image_source(&payload.url)?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let response = client
+        .get(source)
+        .send()
+        .await
+        .map_err(|_| AppError::BadRequest("Bild konnte nicht geladen werden".to_string()))?;
+    if !response.status().is_success() {
+        return Err(AppError::BadRequest(
+            "Bild konnte nicht geladen werden".to_string(),
+        ));
+    }
+    let content_type = response
+        .headers()
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg")
+        .to_string();
+    if !content_type.starts_with("image/") {
+        return Err(AppError::BadRequest(
+            "Die URL liefert kein Bild".to_string(),
+        ));
+    }
+    let data = response
+        .bytes()
+        .await
+        .map_err(|_| AppError::BadRequest("Bild konnte nicht geladen werden".to_string()))?;
+    if data.is_empty() || data.len() > IMAGE_DOWNLOAD_LIMIT {
+        return Err(AppError::BadRequest(
+            "Bild ist leer oder zu gross".to_string(),
+        ));
+    }
+
+    let filename = save_image(&config, data.to_vec(), &content_type).await?;
+
+    let old_image: Option<String> = sqlx::query_scalar("SELECT image FROM parts WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
+
+    let now = sync_now();
+    sqlx::query("UPDATE parts SET image = ?, updatedAt = ? WHERE id = ?")
+        .bind(&filename)
+        .bind(&now)
+        .bind(id)
+        .execute(&pool)
+        .await?;
+
+    if let Some(old) = old_image {
+        remove_image_file(&config, &old).await;
+    }
+
+    let part = sqlx::query_as::<_, Part>("SELECT * FROM parts WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await?;
+    let meta = part_with_meta(&pool, part).await?;
+
+    Ok(Json(json!({ "part": meta })))
+}
+
+#[cfg(test)]
+mod image_source_tests {
+    use super::validate_image_source;
+
+    #[test]
+    fn accepts_allowlisted_https_hosts() {
+        assert!(validate_image_source(
+            "https://bmw-classic-media-prod.s3.eu-central-1.amazonaws.com/some-image.png"
+        )
+        .is_ok());
+        assert!(validate_image_source("https://admin.bmwbike.com/media/x.jpg").is_ok());
+    }
+
+    #[test]
+    fn rejects_everything_else() {
+        // Wrong host, wrong scheme, embedded credentials, explicit port, garbage.
+        for url in [
+            "https://example.com/x.png",
+            "https://evil.bmwbike.com.attacker.net/x.png",
+            "http://admin.bmwbike.com/x.png",
+            "https://user:pw@admin.bmwbike.com/x.png",
+            "https://admin.bmwbike.com:8443/x.png",
+            "not a url",
+            "file:///etc/passwd",
+        ] {
+            assert!(validate_image_source(url).is_err(), "{url}");
+        }
+    }
+}
+
 pub async fn delete_part_image(
     State(pool): State<SqlitePool>,
     State(config): State<Config>,
@@ -599,16 +741,16 @@ pub async fn list_public_parts(
     AuthUser(user): AuthUser,
     Query(filter): Query<PublicPartsFilter>,
 ) -> AppResult<Json<Value>> {
-    // Whitelist projection: prices, purchase dates and storage locations are
-    // never selected here — other users only see catalog data + availability.
+    // Catalog data of every other user's part is visible; availability and
+    // stock detail are added below ONLY for parts marked public.
     let mut query_str = "SELECT p.id, p.partNumber, p.name, p.manufacturer, p.description, \
-         p.image, u.username as ownerName, \
+         p.image, p.isPublic, u.username as ownerName, \
          COALESCE((SELECT SUM(s.quantity) FROM partStocks s \
                    WHERE s.partId = p.id AND s.deletedAt IS NULL), 0) \
        - COALESCE((SELECT SUM(c.quantity) FROM partConsumptions c \
                    WHERE c.partId = p.id AND c.deletedAt IS NULL), 0) as totalQuantity \
          FROM parts p JOIN users u ON u.id = p.userId \
-         WHERE p.isPublic = 1 AND p.deletedAt IS NULL AND p.userId != ?"
+         WHERE p.deletedAt IS NULL AND p.userId != ?"
         .to_string();
 
     let search = filter
@@ -655,10 +797,75 @@ pub async fn list_public_parts(
         }
     }
 
+    // Full stock detail for the PUBLIC parts in the result set (whitelist:
+    // private part ids never enter this query).
+    let public_ids: Vec<i64> = rows
+        .iter()
+        .filter(|r| r.get::<i64, _>("isPublic") != 0)
+        .map(|r| r.get::<i64, _>("id"))
+        .collect();
+    let mut stocks_by_part: HashMap<i64, Vec<crate::models::PublicStock>> = HashMap::new();
+    if !public_ids.is_empty() {
+        // Owner location hierarchies, for readable "Garage › Regal A" paths.
+        let location_rows = sqlx::query(
+            "SELECT id, name, parentId FROM storageLocations WHERE deletedAt IS NULL",
+        )
+        .fetch_all(&pool)
+        .await?;
+        let locations: HashMap<i64, (String, Option<i64>)> = location_rows
+            .into_iter()
+            .map(|r| {
+                (
+                    r.get::<i64, _>("id"),
+                    (r.get::<String, _>("name"), r.get::<Option<i64>, _>("parentId")),
+                )
+            })
+            .collect();
+        let location_path = |start: Option<i64>| -> Option<String> {
+            let mut names = Vec::new();
+            let mut cursor = start;
+            while let Some(id) = cursor {
+                let (name, parent) = locations.get(&id)?;
+                names.push(name.clone());
+                cursor = *parent;
+                if names.len() > 10 {
+                    break; // defensive: never loop on corrupt hierarchies
+                }
+            }
+            names.reverse();
+            Some(names.join(" › "))
+        };
+
+        let placeholders = vec!["?"; public_ids.len()].join(", ");
+        let mut stock_query = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT partId, quantity, price, currency, purchaseDate, storageLocationId, isUsed \
+             FROM partStocks WHERE deletedAt IS NULL AND partId IN ({}) \
+             ORDER BY purchaseDate ASC, id ASC",
+            placeholders
+        )));
+        for id in &public_ids {
+            stock_query = stock_query.bind(id);
+        }
+        for row in stock_query.fetch_all(&pool).await? {
+            stocks_by_part
+                .entry(row.get("partId"))
+                .or_default()
+                .push(crate::models::PublicStock {
+                    quantity: row.get("quantity"),
+                    price: row.get("price"),
+                    currency: row.get("currency"),
+                    purchase_date: row.get("purchaseDate"),
+                    storage_location: location_path(row.get("storageLocationId")),
+                    is_used: row.get::<i64, _>("isUsed") != 0,
+                });
+        }
+    }
+
     let parts: Vec<PublicPart> = rows
         .into_iter()
         .map(|row| {
             let id: i64 = row.get("id");
+            let is_public = row.get::<i64, _>("isPublic") != 0;
             // Negative on-hand can result from stock-deletion corrections;
             // clamp for display so availability never reads below zero.
             let total_quantity = row.get::<i64, _>("totalQuantity").max(0);
@@ -671,8 +878,10 @@ pub async fn list_public_parts(
                 image: format_image_url(row.get("image")),
                 series_ids: series_by_part.get(&id).cloned().unwrap_or_default(),
                 owner_name: row.get("ownerName"),
-                has_stock: total_quantity > 0,
-                total_quantity,
+                is_public,
+                has_stock: is_public.then_some(total_quantity > 0),
+                total_quantity: is_public.then_some(total_quantity),
+                stocks: is_public.then(|| stocks_by_part.remove(&id).unwrap_or_default()),
             }
         })
         .collect();
@@ -754,6 +963,7 @@ pub struct CreatePartStockRequest {
     pub purchase_date: Option<String>,
     pub storage_location_id: Option<i64>,
     pub notes: Option<String>,
+    pub is_used: Option<bool>,
     /// Client-generated idempotency key (UUID).
     pub client_id: Option<String>,
 }
@@ -793,8 +1003,8 @@ pub async fn create_part_stock(
     let id = sqlx::query(
         "INSERT INTO partStocks \
          (partId, quantity, price, currency, normalizedPrice, purchaseDate, \
-          storageLocationId, notes, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          storageLocationId, notes, isUsed, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(body.part_id)
     .bind(quantity)
@@ -804,6 +1014,7 @@ pub async fn create_part_stock(
     .bind(&body.purchase_date)
     .bind(body.storage_location_id)
     .bind(&body.notes)
+    .bind(body.is_used.unwrap_or(false))
     .bind(&body.client_id)
     .bind(&now)
     .execute(&pool)
@@ -828,6 +1039,7 @@ pub struct UpdatePartStockRequest {
     pub purchase_date: Option<String>,
     pub storage_location_id: Option<i64>,
     pub notes: Option<String>,
+    pub is_used: Option<bool>,
 }
 
 pub async fn update_part_stock(
@@ -861,11 +1073,12 @@ pub async fn update_part_stock(
     let purchase_date = body.purchase_date.or(existing.purchase_date);
     let storage_location_id = body.storage_location_id.or(existing.storage_location_id);
     let notes = body.notes.or(existing.notes);
+    let is_used = body.is_used.unwrap_or(existing.is_used);
 
     let now = sync_now();
     sqlx::query(
         "UPDATE partStocks SET quantity = ?, price = ?, currency = ?, normalizedPrice = ?, \
-         purchaseDate = ?, storageLocationId = ?, notes = ?, updatedAt = ? WHERE id = ?",
+         purchaseDate = ?, storageLocationId = ?, notes = ?, isUsed = ?, updatedAt = ? WHERE id = ?",
     )
     .bind(quantity)
     .bind(price)
@@ -874,6 +1087,7 @@ pub async fn update_part_stock(
     .bind(&purchase_date)
     .bind(storage_location_id)
     .bind(&notes)
+    .bind(is_used)
     .bind(&now)
     .bind(id)
     .execute(&pool)
