@@ -34,19 +34,27 @@ FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies
+# Install runtime dependencies:
+#  - ca-certificates: HTTPS to allowlisted image sources (BMWBike import)
+#  - libssl3: sqlx native-tls
+#  - libstdc++6: required by libpdfium.so (present in the base image today,
+#    but named explicitly so a slimmer base can't silently break PDF parsing)
+#  - curl: pdfium download below + container healthchecks
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
+    libstdc++6 \
     curl \
-    xz-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and install PDFium (required for PDF previews)
-# Using a stable release of PDFium binaries for Linux x64
-# We extract only the library from the 'lib' folder in the tarball
-RUN curl -L https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-x64.tgz | tar -xz -C /usr/local/lib/ --strip-components=1 lib/libpdfium.so && \
-    chmod +x /usr/local/lib/libpdfium.so
+# Download and install PDFium — required for document previews AND the
+# invoice import's text extraction (a missing library is a hard error there).
+# Arch-aware: TARGETARCH is set automatically by BuildKit (amd64/arm64);
+# default to x64 for legacy builders.
+ARG TARGETARCH
+RUN PDFIUM_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo arm64 || echo x64) && \
+    curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-${PDFIUM_ARCH}.tgz" \
+    | tar -xz -C /usr/local/lib/ --strip-components=1 lib/libpdfium.so
 
 # Ensure the library path includes /usr/local/lib
 ENV LD_LIBRARY_PATH=/usr/local/lib
@@ -63,6 +71,8 @@ ENV DATA_DIR=/app/data
 ENV CACHE_DIR=/app/cache
 ENV RUST_LOG=info
 ENV ENABLE_REGISTRATION=false
+# Invoice-import LLM (optional): set LLM_BASE_URL (e.g. http://10.0.0.2:8542/v1),
+# LLM_MODEL and LLM_API_KEY at deploy time. Unset = deterministic parser only.
 
 # Expose the API port
 EXPOSE 3001

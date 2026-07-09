@@ -29,3 +29,5 @@
 
 # Direnv
 .direnv/
+libpdfium.dylib
+*.sqlite.bak
