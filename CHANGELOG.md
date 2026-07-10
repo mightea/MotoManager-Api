@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.0](https://github.com/mightea/MotoManager-Api/compare/v0.7.0...v0.8.0) (2026-07-10)
+
+
+### Features
+
+* add parts inventory with model series, storage locations and part images ([52ead64](https://github.com/mightea/MotoManager-Api/commit/52ead64e340ac03dc2fe93bea7e8a8087ba384ba))
+* add R 80 GS PD (CH) catalog model with its Swiss serial block ([2797f70](https://github.com/mightea/MotoManager-Api/commit/2797f70d8e9164651429bd3acbbdade7704899c7))
+* add the 1980-84 R 100 catalog model with its frame block ([f52e125](https://github.com/mightea/MotoManager-Api/commit/f52e12504946eed9c8e367fb06d0a2b7687183ac))
+* anchor root storage locations to workshop/garage places ([5e8f77e](https://github.com/mightea/MotoManager-Api/commit/5e8f77e1c60df1cb1a1fa03364bc5253d2aefa34))
+* decode classic frame numbers and fix motorcycle field merging ([89378b4](https://github.com/mightea/MotoManager-Api/commit/89378b4eddf281c2b48d5d808f53c9911aa8be09))
+* hierarchical model catalog with curation and VIN decoding ([35352a2](https://github.com/mightea/MotoManager-Api/commit/35352a25d15e0f2d31c471dc41112655eed4c78b))
+* mark part stock entries as used/salvaged parts ([e8d0aae](https://github.com/mightea/MotoManager-Api/commit/e8d0aae030d8f333f3a56d6f271cdd804a83b962))
+* mirror the BMWBike.com catalog and refine VIN assignment depth ([ce8c536](https://github.com/mightea/MotoManager-Api/commit/ce8c53638e4ea35427b67cfcd445a2e9f365f475))
+* parse supplier-invoice PDFs into reviewed part imports ([cfd5d74](https://github.com/mightea/MotoManager-Api/commit/cfd5d7443631dcf805238c10cd023f73c94d462d))
+
 ## [0.7.0](https://github.com/mightea/MotoManager-Api/compare/v0.6.2...v0.7.0) (2026-07-04)
 
 
