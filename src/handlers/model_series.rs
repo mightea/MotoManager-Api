@@ -41,15 +41,19 @@ pub async fn verify_series_accessible(
 
 /// All catalog nodes visible to a user, as (id -> parentId).
 async fn accessible_tree(pool: &SqlitePool, user_id: i64) -> AppResult<HashMap<i64, Option<i64>>> {
-    let rows = sqlx::query(
-        "SELECT id, parentId FROM modelSeries WHERE userId IS NULL OR userId = ?",
-    )
-    .bind(user_id)
-    .fetch_all(pool)
-    .await?;
+    let rows =
+        sqlx::query("SELECT id, parentId FROM modelSeries WHERE userId IS NULL OR userId = ?")
+            .bind(user_id)
+            .fetch_all(pool)
+            .await?;
     Ok(rows
         .iter()
-        .map(|row| (row.get::<i64, _>("id"), row.get::<Option<i64>, _>("parentId")))
+        .map(|row| {
+            (
+                row.get::<i64, _>("id"),
+                row.get::<Option<i64>, _>("parentId"),
+            )
+        })
         .collect())
 }
 
@@ -121,7 +125,9 @@ pub async fn compatible_series_ids(
     for _ in 0..MAX_DEPTH * 2 {
         let next: Vec<i64> = tree
             .iter()
-            .filter(|(id, parent)| parent.map(|p| frontier.contains(&p)) == Some(true) && !matches.contains(id))
+            .filter(|(id, parent)| {
+                parent.map(|p| frontier.contains(&p)) == Some(true) && !matches.contains(id)
+            })
             .map(|(id, _)| *id)
             .collect();
         if next.is_empty() {
@@ -320,14 +326,13 @@ pub async fn update_model_series(
     Json(body): Json<UpdateModelSeriesRequest>,
 ) -> AppResult<Json<Value>> {
     // Only own custom entries are editable; global and foreign rows are masked.
-    let existing = sqlx::query_as::<_, ModelSeries>(
-        "SELECT * FROM modelSeries WHERE id = ? AND userId = ?",
-    )
-    .bind(sid)
-    .bind(user.id)
-    .fetch_optional(&pool)
-    .await?
-    .ok_or_else(|| AppError::NotFound("Model series not found".to_string()))?;
+    let existing =
+        sqlx::query_as::<_, ModelSeries>("SELECT * FROM modelSeries WHERE id = ? AND userId = ?")
+            .bind(sid)
+            .bind(user.id)
+            .fetch_optional(&pool)
+            .await?
+            .ok_or_else(|| AppError::NotFound("Model series not found".to_string()))?;
 
     let name = body.name.unwrap_or(existing.name);
     let manufacturer = body.manufacturer.unwrap_or(existing.manufacturer);
@@ -438,13 +443,36 @@ fn check_digit_valid(chars: &[char]) -> bool {
 /// this catalog targets the classic range, so the 1980-2009 reading is used.
 fn decode_model_year(c: char) -> Option<i64> {
     Some(match c {
-        'A' => 1980, 'B' => 1981, 'C' => 1982, 'D' => 1983, 'E' => 1984,
-        'F' => 1985, 'G' => 1986, 'H' => 1987, 'J' => 1988, 'K' => 1989,
-        'L' => 1990, 'M' => 1991, 'N' => 1992, 'P' => 1993, 'R' => 1994,
-        'S' => 1995, 'T' => 1996, 'V' => 1997, 'W' => 1998, 'X' => 1999,
+        'A' => 1980,
+        'B' => 1981,
+        'C' => 1982,
+        'D' => 1983,
+        'E' => 1984,
+        'F' => 1985,
+        'G' => 1986,
+        'H' => 1987,
+        'J' => 1988,
+        'K' => 1989,
+        'L' => 1990,
+        'M' => 1991,
+        'N' => 1992,
+        'P' => 1993,
+        'R' => 1994,
+        'S' => 1995,
+        'T' => 1996,
+        'V' => 1997,
+        'W' => 1998,
+        'X' => 1999,
         'Y' => 2000,
-        '1' => 2001, '2' => 2002, '3' => 2003, '4' => 2004, '5' => 2005,
-        '6' => 2006, '7' => 2007, '8' => 2008, '9' => 2009,
+        '1' => 2001,
+        '2' => 2002,
+        '3' => 2003,
+        '4' => 2004,
+        '5' => 2005,
+        '6' => 2006,
+        '7' => 2007,
+        '8' => 2008,
+        '9' => 2009,
         _ => return None,
     })
 }
@@ -480,9 +508,9 @@ pub async fn decode_vin(
     let leading_digits: String = vin.chars().take_while(|c| c.is_ascii_digit()).collect();
     let suffix_len = vin.len() - leading_digits.len();
     if vin.len() != 17 && (6..=8).contains(&leading_digits.len()) && suffix_len <= 6 {
-        let frame_number: u64 = leading_digits.parse().map_err(|_| {
-            AppError::BadRequest("Invalid frame number".to_string())
-        })?;
+        let frame_number: u64 = leading_digits
+            .parse()
+            .map_err(|_| AppError::BadRequest("Invalid frame number".to_string()))?;
         let vin = leading_digits;
 
         let candidates = sqlx::query_as::<_, ModelSeries>(

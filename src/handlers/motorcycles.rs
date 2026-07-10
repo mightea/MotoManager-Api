@@ -18,7 +18,11 @@ use crate::{
     },
 };
 
-pub(crate) async fn save_image(config: &Config, data: Vec<u8>, content_type: &str) -> AppResult<String> {
+pub(crate) async fn save_image(
+    config: &Config,
+    data: Vec<u8>,
+    content_type: &str,
+) -> AppResult<String> {
     let ext = if content_type.contains("png") {
         "png"
     } else if content_type.contains("webp") {
@@ -182,7 +186,8 @@ pub async fn create_motorcycle(
     let vin = create_text(&fields, "vin");
     let engine_number = create_text(&fields, "engineNumber");
     // The webapp historically posts the Stammnummer as "vehicleIdNr".
-    let vehicle_nr = create_text(&fields, "vehicleNr").or_else(|| create_text(&fields, "vehicleIdNr"));
+    let vehicle_nr =
+        create_text(&fields, "vehicleNr").or_else(|| create_text(&fields, "vehicleIdNr"));
     let number_plate = create_text(&fields, "numberPlate");
     let first_registration = create_text(&fields, "firstRegistration");
     let purchase_date = create_text(&fields, "purchaseDate");

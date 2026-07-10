@@ -1012,13 +1012,13 @@ async fn test_update_motorcycle_saves_all_fields() {
         ("fabricationDate", "07/1986"),
         ("vin", "0103596"),
         ("vehicleIdNr", "010 359 6"),
-        ("numberPlate", ""),      // clear
-        ("purchasePrice", ""),    // clear
+        ("numberPlate", ""),             // clear
+        ("purchasePrice", ""),           // clear
         ("normalizedPurchasePrice", ""), // clear (webapp action mirrors this)
         ("fuelTankSize", "22.5"),
         ("isArchived", "false"),
         ("isVeteran", "true"),
-        ("seriesId", ""),         // clear
+        ("seriesId", ""), // clear
         ("initialOdo", "1200"),
     ] {
         body.push_str(&multipart_field(boundary, name, value));
@@ -1051,7 +1051,10 @@ async fn test_update_motorcycle_saves_all_fields() {
     assert_eq!(m["model"], "K 75 S");
     assert_eq!(m["fabricationDate"], "07/1986");
     assert_eq!(m["vin"], "0103596");
-    assert_eq!(m["vehicleNr"], "010 359 6", "legacy vehicleIdNr key must save");
+    assert_eq!(
+        m["vehicleNr"], "010 359 6",
+        "legacy vehicleIdNr key must save"
+    );
     assert!(m["numberPlate"].is_null(), "empty field must clear: {m}");
     assert!(m["purchasePrice"].is_null(), "empty field must clear: {m}");
     assert!(m["normalizedPurchasePrice"].is_null(), "{m}");

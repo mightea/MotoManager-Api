@@ -24,11 +24,7 @@ use crate::{
 
 /// Helper: verify a live part belongs to the user. Foreign and tombstoned
 /// parts are masked as NotFound, mirroring `verify_motorcycle_ownership`.
-pub async fn verify_part_ownership(
-    pool: &SqlitePool,
-    part_id: i64,
-    user_id: i64,
-) -> AppResult<()> {
+pub async fn verify_part_ownership(pool: &SqlitePool, part_id: i64, user_id: i64) -> AppResult<()> {
     let count: i64 = sqlx::query(
         "SELECT COUNT(*) as cnt FROM parts WHERE id = ? AND userId = ? AND deletedAt IS NULL",
     )
@@ -61,12 +57,11 @@ where
 }
 
 async fn fetch_series_ids(pool: &SqlitePool, part_id: i64) -> AppResult<Vec<i64>> {
-    let rows = sqlx::query(
-        "SELECT seriesId FROM partSeriesCompat WHERE partId = ? ORDER BY seriesId ASC",
-    )
-    .bind(part_id)
-    .fetch_all(pool)
-    .await?;
+    let rows =
+        sqlx::query("SELECT seriesId FROM partSeriesCompat WHERE partId = ? ORDER BY seriesId ASC")
+            .bind(part_id)
+            .fetch_all(pool)
+            .await?;
     Ok(rows.iter().map(|r| r.get::<i64, _>("seriesId")).collect())
 }
 
@@ -90,11 +85,7 @@ async fn part_with_meta(pool: &SqlitePool, mut part: Part) -> AppResult<PartWith
     })
 }
 
-async fn validate_series_ids(
-    pool: &SqlitePool,
-    series_ids: &[i64],
-    user_id: i64,
-) -> AppResult<()> {
+async fn validate_series_ids(pool: &SqlitePool, series_ids: &[i64], user_id: i64) -> AppResult<()> {
     for sid in series_ids {
         verify_series_accessible(pool, *sid, user_id).await?;
     }
@@ -125,19 +116,20 @@ pub async fn list_parts(
     // fitment -> empty result.
     let mut series_filter: Option<Vec<i64>> = None;
     if let Some(motorcycle_id) = filter.motorcycle_id {
-        let series_id: Option<Option<i64>> = sqlx::query_scalar(
-            "SELECT seriesId FROM motorcycles WHERE id = ? AND userId = ?",
-        )
-        .bind(motorcycle_id)
-        .bind(user.id)
-        .fetch_optional(&pool)
-        .await?;
+        let series_id: Option<Option<i64>> =
+            sqlx::query_scalar("SELECT seriesId FROM motorcycles WHERE id = ? AND userId = ?")
+                .bind(motorcycle_id)
+                .bind(user.id)
+                .fetch_optional(&pool)
+                .await?;
         let series_id =
             series_id.ok_or_else(|| AppError::NotFound("Motorcycle not found".to_string()))?;
         match series_id {
             Some(sid) => {
-                series_filter =
-                    Some(crate::handlers::model_series::compatible_series_ids(&pool, sid, user.id).await?)
+                series_filter = Some(
+                    crate::handlers::model_series::compatible_series_ids(&pool, sid, user.id)
+                        .await?,
+                )
             }
             None => return Ok(Json(json!({ "parts": [] }))),
         }
@@ -563,8 +555,8 @@ const IMAGE_DOWNLOAD_LIMIT: usize = 15 * 1024 * 1024; // matches the upload cap
 /// Validate a user-supplied image source URL: https only, allowlisted host,
 /// no credentials or port games. Returns the parsed URL.
 fn validate_image_source(raw: &str) -> Result<url::Url, AppError> {
-    let parsed = url::Url::parse(raw)
-        .map_err(|_| AppError::BadRequest("Ungültige Bild-URL".to_string()))?;
+    let parsed =
+        url::Url::parse(raw).map_err(|_| AppError::BadRequest("Ungültige Bild-URL".to_string()))?;
     let valid = parsed.scheme() == "https"
         && parsed.username().is_empty()
         && parsed.password().is_none()
@@ -761,8 +753,7 @@ pub async fn list_public_parts(
         query_str.push_str(" AND (p.partNumber LIKE ? OR p.name LIKE ?)");
     }
     if filter.series_id.is_some() {
-        query_str
-            .push_str(" AND p.id IN (SELECT partId FROM partSeriesCompat WHERE seriesId = ?)");
+        query_str.push_str(" AND p.id IN (SELECT partId FROM partSeriesCompat WHERE seriesId = ?)");
     }
     query_str.push_str(" ORDER BY p.name ASC, p.id ASC");
 
@@ -807,17 +798,19 @@ pub async fn list_public_parts(
     let mut stocks_by_part: HashMap<i64, Vec<crate::models::PublicStock>> = HashMap::new();
     if !public_ids.is_empty() {
         // Owner location hierarchies, for readable "Garage › Regal A" paths.
-        let location_rows = sqlx::query(
-            "SELECT id, name, parentId FROM storageLocations WHERE deletedAt IS NULL",
-        )
-        .fetch_all(&pool)
-        .await?;
+        let location_rows =
+            sqlx::query("SELECT id, name, parentId FROM storageLocations WHERE deletedAt IS NULL")
+                .fetch_all(&pool)
+                .await?;
         let locations: HashMap<i64, (String, Option<i64>)> = location_rows
             .into_iter()
             .map(|r| {
                 (
                     r.get::<i64, _>("id"),
-                    (r.get::<String, _>("name"), r.get::<Option<i64>, _>("parentId")),
+                    (
+                        r.get::<String, _>("name"),
+                        r.get::<Option<i64>, _>("parentId"),
+                    ),
                 )
             })
             .collect();

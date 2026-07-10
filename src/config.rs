@@ -40,7 +40,9 @@ impl Config {
                 .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
             data_dir: env::var("DATA_DIR").unwrap_or_else(|_| "./data".to_string()),
             cache_dir: env::var("CACHE_DIR").unwrap_or_else(|_| "./cache".to_string()),
-            llm_base_url: env::var("LLM_BASE_URL").ok().filter(|v| !v.trim().is_empty()),
+            llm_base_url: env::var("LLM_BASE_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
             llm_model: env::var("LLM_MODEL")
                 .unwrap_or_else(|_| "Qwen/Qwen2.5-1.5B-Instruct-AWQ".to_string()),
             llm_api_key: env::var("LLM_API_KEY").unwrap_or_else(|_| "local-vllm".to_string()),

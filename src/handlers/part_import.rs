@@ -115,7 +115,10 @@ pub async fn parse_invoice(
             (fallback.clone(), "fallback")
         }
         Err(e) => {
-            tracing::warn!("LLM invoice parse unavailable ({}); using fallback parser", e);
+            tracing::warn!(
+                "LLM invoice parse unavailable ({}); using fallback parser",
+                e
+            );
             (fallback.clone(), "fallback")
         }
     };
@@ -299,7 +302,10 @@ async fn structure_with_llm(config: &Config, text: &str) -> Result<ParsedInvoice
         .build()
         .map_err(|e| e.to_string())?;
     let response = client
-        .post(format!("{}/chat/completions", base_url.trim_end_matches('/')))
+        .post(format!(
+            "{}/chat/completions",
+            base_url.trim_end_matches('/')
+        ))
         .bearer_auth(&config.llm_api_key)
         .json(&request)
         .send()
@@ -324,8 +330,15 @@ async fn structure_with_llm(config: &Config, text: &str) -> Result<ParsedInvoice
 /// lines and legalese so the prompt fits the small context window.
 fn condense_invoice_text(text: &str) -> String {
     let noise = [
-        "Bankkonto", "IBAN", "SWIFT", "Registergericht", "Postanschrift",
-        "Telefon", "Internet", "bmwbike.com", "Keine Garantie",
+        "Bankkonto",
+        "IBAN",
+        "SWIFT",
+        "Registergericht",
+        "Postanschrift",
+        "Telefon",
+        "Internet",
+        "bmwbike.com",
+        "Keine Garantie",
     ];
     let mut out = String::new();
     for line in text.lines() {
@@ -372,7 +385,10 @@ fn is_plausible(llm: &ParsedInvoice, fallback: &ParsedInvoice) -> bool {
 // MARK: - Deterministic fallback parser (Mark Huggett GmbH layout)
 
 pub fn normalize_part_number(raw: &str) -> String {
-    raw.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_uppercase()
+    raw.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_uppercase()
 }
 
 /// BMW part numbers are 11 digits, printed as "12 11 1 351 564".
@@ -509,7 +525,11 @@ mod tests {
             .await
             .expect("LLM call");
         let fallback = parse_invoice_text(INVOICE_242511);
-        assert!(is_plausible(&parsed, &fallback), "items: {:?}", parsed.items);
+        assert!(
+            is_plausible(&parsed, &fallback),
+            "items: {:?}",
+            parsed.items
+        );
         assert_eq!(parsed.items.len(), 4);
         assert_eq!(
             normalize_part_number(&parsed.items[0].part_number),

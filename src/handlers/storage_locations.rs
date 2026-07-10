@@ -18,11 +18,7 @@ use crate::{
 /// certainly a data error, and the cap keeps the cycle check O(1)-ish.
 const MAX_HIERARCHY_DEPTH: usize = 50;
 
-async fn verify_parent(
-    pool: &SqlitePool,
-    parent_id: i64,
-    user_id: i64,
-) -> AppResult<()> {
+async fn verify_parent(pool: &SqlitePool, parent_id: i64, user_id: i64) -> AppResult<()> {
     let count: i64 = sqlx::query(
         "SELECT COUNT(*) as cnt FROM storageLocations \
          WHERE id = ? AND userId = ? AND deletedAt IS NULL",
@@ -160,12 +156,11 @@ pub async fn create_storage_location(
     .await?
     .last_insert_rowid();
 
-    let location = sqlx::query_as::<_, StorageLocation>(
-        "SELECT * FROM storageLocations WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_one(&pool)
-    .await?;
+    let location =
+        sqlx::query_as::<_, StorageLocation>("SELECT * FROM storageLocations WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await?;
 
     Ok((
         StatusCode::CREATED,
@@ -238,7 +233,11 @@ pub async fn update_storage_location(
         }
     };
     // Nesting a previously-linked root clears its place link.
-    let location_id = if parent_id.is_some() { None } else { location_id };
+    let location_id = if parent_id.is_some() {
+        None
+    } else {
+        location_id
+    };
 
     let now = sync_now();
     sqlx::query(
@@ -253,12 +252,11 @@ pub async fn update_storage_location(
     .execute(&pool)
     .await?;
 
-    let location = sqlx::query_as::<_, StorageLocation>(
-        "SELECT * FROM storageLocations WHERE id = ?",
-    )
-    .bind(id)
-    .fetch_one(&pool)
-    .await?;
+    let location =
+        sqlx::query_as::<_, StorageLocation>("SELECT * FROM storageLocations WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await?;
 
     Ok(Json(json!({ "storageLocation": location })))
 }

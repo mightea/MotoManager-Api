@@ -300,7 +300,14 @@ async fn test_part_clientid_idempotency() {
         "name": "Bremsbeläge vorn",
         "clientId": "idempotent-client-1"
     });
-    let (status1, body1) = request(&app, Method::POST, "/api/parts", &token, Some(payload.clone())).await;
+    let (status1, body1) = request(
+        &app,
+        Method::POST,
+        "/api/parts",
+        &token,
+        Some(payload.clone()),
+    )
+    .await;
     let (status2, body2) = request(&app, Method::POST, "/api/parts", &token, Some(payload)).await;
 
     assert_eq!(status1, StatusCode::CREATED);
@@ -704,15 +711,14 @@ async fn test_storage_location_place_link() {
     let (app, pool, token) = setup_test_app().await;
 
     // A workshop place from the existing locations entity.
-    let place_id = sqlx::query(
-        "INSERT INTO locations (name, userId, type) VALUES (?, ?, 'storage')",
-    )
-    .bind("Garage Zuhause")
-    .bind(1)
-    .execute(&pool)
-    .await
-    .unwrap()
-    .last_insert_rowid();
+    let place_id =
+        sqlx::query("INSERT INTO locations (name, userId, type) VALUES (?, ?, 'storage')")
+            .bind("Garage Zuhause")
+            .bind(1)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
 
     // Root-level storage location can link to the place.
     let (status, body) = request(
@@ -725,7 +731,10 @@ async fn test_storage_location_place_link() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     let root_id = body["storageLocation"]["id"].as_i64().unwrap();
-    assert_eq!(body["storageLocation"]["locationId"].as_i64(), Some(place_id));
+    assert_eq!(
+        body["storageLocation"]["locationId"].as_i64(),
+        Some(place_id)
+    );
 
     // A nested location must not carry its own place link.
     let (status, _) = request(
@@ -747,7 +756,10 @@ async fn test_storage_location_place_link() {
         Some(json!({ "name": "Regal A1" })),
     )
     .await;
-    assert_eq!(body["storageLocation"]["locationId"].as_i64(), Some(place_id));
+    assert_eq!(
+        body["storageLocation"]["locationId"].as_i64(),
+        Some(place_id)
+    );
     let (_, body) = request(
         &app,
         Method::PUT,
@@ -802,7 +814,10 @@ async fn test_model_series_scoping() {
     let custom_id = body["modelSeries"]["id"].as_i64().unwrap();
 
     let (_, body) = request(&app, Method::GET, "/api/model-series", &token_a, None).await;
-    assert_eq!(body["modelSeries"].as_array().unwrap().len(), global_count + 1);
+    assert_eq!(
+        body["modelSeries"].as_array().unwrap().len(),
+        global_count + 1
+    );
     let (_, body) = request(&app, Method::GET, "/api/model-series", &token_b, None).await;
     assert_eq!(body["modelSeries"].as_array().unwrap().len(), global_count);
 
@@ -1071,7 +1086,9 @@ async fn test_model_series_hierarchy() {
             Method::POST,
             "/api/parts",
             &token,
-            Some(json!({ "partNumber": part_number, "name": part_number, "seriesIds": [series_id] })),
+            Some(
+                json!({ "partNumber": part_number, "name": part_number, "seriesIds": [series_id] }),
+            ),
         )
         .await;
     }
@@ -1252,7 +1269,14 @@ async fn test_vin_decode() {
     );
 
     // A serial outside every range yields no match.
-    let (_, body) = request(&app, Method::GET, "/api/vin/decode?vin=999999", &token, None).await;
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=999999",
+        &token,
+        None,
+    )
+    .await;
     assert_eq!(body["kind"], "frameNumber");
     assert!(body["match"].is_null());
 
@@ -1276,7 +1300,14 @@ async fn test_vin_decode() {
     );
 
     // Bare leading-zero serial works too (ECE K100: 0000001-0010000).
-    let (_, body) = request(&app, Method::GET, "/api/vin/decode?vin=0004711", &token, None).await;
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=0004711",
+        &token,
+        None,
+    )
+    .await;
     assert_eq!(
         body["match"]["name"].as_str().unwrap(),
         "K 100 83 (0501,0511) (ECE, 05/1982-12/1988)",
@@ -1300,7 +1331,14 @@ async fn test_vin_decode() {
         "{body}"
     );
     // The Serie-level extension covers the other 1980+ blocks (R100T).
-    let (_, body) = request(&app, Method::GET, "/api/vin/decode?vin=6193500", &token, None).await;
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=6193500",
+        &token,
+        None,
+    )
+    .await;
     assert_eq!(
         body["match"]["name"].as_str().unwrap(),
         "R 100, /7, /T, CS, RS, RT, S (76-84)",
@@ -1342,7 +1380,10 @@ async fn test_since_delta() {
     let created_updated_at = body["part"]["updatedAt"].as_str().unwrap().to_string();
 
     // Cursor at the creation timestamp: nothing newer.
-    let uri = format!("/api/parts?since={}", created_updated_at.replace(':', "%3A"));
+    let uri = format!(
+        "/api/parts?since={}",
+        created_updated_at.replace(':', "%3A")
+    );
     let (_, body) = request(&app, Method::GET, &uri, &token, None).await;
     assert_eq!(body["parts"].as_array().unwrap().len(), 0);
 
