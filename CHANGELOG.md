@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/mightea/MotoManager-Api/compare/v0.8.0...v0.9.0) (2026-07-12)
+
+
+### Features
+
+* flag motorcycles with incomplete ownership history ([a2deae4](https://github.com/mightea/MotoManager-Api/commit/a2deae4fbf78ffd2463b2c24285aa1be1f8d7ace))
+* flag torque specs from uncertain sources as unverified ([a2f126a](https://github.com/mightea/MotoManager-Api/commit/a2f126af18b67d0609e8e8a813153b183949c7dd))
+* per-configuration tire pressures and motorcycle sidecar flag ([8fc208c](https://github.com/mightea/MotoManager-Api/commit/8fc208cfbf857c1798da6074ce34ab2660ba3ffc))
+
+
+### Bug Fixes
+
+* accept session token as query param on document file routes ([2b78fb0](https://github.com/mightea/MotoManager-Api/commit/2b78fb05e59d2d9070fb7a536809e8ee47dc0099))
+
 ## [0.8.0](https://github.com/mightea/MotoManager-Api/compare/v0.7.0...v0.8.0) (2026-07-10)
 
 
