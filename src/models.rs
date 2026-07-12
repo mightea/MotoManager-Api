@@ -74,6 +74,7 @@ pub struct Motorcycle {
     pub image: Option<String>,
     pub is_veteran: bool,
     pub is_archived: bool,
+    pub has_sidecar: bool,
     pub first_registration: Option<String>,
     pub initial_odo: i64,
     pub manual_odo: Option<i64>,
@@ -103,6 +104,7 @@ pub struct MotorcycleWithStats {
     pub image: Option<String>,
     pub is_veteran: bool,
     pub is_archived: bool,
+    pub has_sidecar: bool,
     pub first_registration: Option<String>,
     pub initial_odo: i64,
     pub manual_odo: Option<i64>,
@@ -236,9 +238,19 @@ pub struct TorqueSpec {
 pub struct TirePressure {
     pub id: i64,
     pub motorcycle_id: i64,
-    pub front_bar: f64,
-    pub rear_bar: f64,
+    // One optional front/rear pair per riding configuration — solo, with
+    // passenger, offroad (migrations 027/029); at least one pair is present.
+    // The sidecar wheel is a third tire position with its own optional value
+    // per configuration (migration 028) — sidecarBar is its solo value.
+    pub front_bar: Option<f64>,
+    pub rear_bar: Option<f64>,
+    pub front_passenger_bar: Option<f64>,
+    pub rear_passenger_bar: Option<f64>,
+    pub front_offroad_bar: Option<f64>,
+    pub rear_offroad_bar: Option<f64>,
     pub sidecar_bar: Option<f64>,
+    pub sidecar_passenger_bar: Option<f64>,
+    pub sidecar_offroad_bar: Option<f64>,
     pub preferred_unit: String,
     pub created_at: String,
     pub updated_at: String,

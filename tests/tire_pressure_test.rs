@@ -144,7 +144,15 @@ async fn test_upsert_creates_then_updates() {
     assert!(body["tirePressure"]["sidecarBar"].is_null());
     assert_eq!(body["tirePressure"]["preferredUnit"], "bar");
 
-    // Update same row (UNIQUE constraint → ON CONFLICT UPDATE).
+    // A payload without the variant fields (older client) must not error and
+    // leaves them null.
+    assert!(body["tirePressure"]["frontPassengerBar"].is_null());
+    assert!(body["tirePressure"]["rearPassengerBar"].is_null());
+    assert!(body["tirePressure"]["frontOffroadBar"].is_null());
+    assert!(body["tirePressure"]["rearOffroadBar"].is_null());
+
+    // Update same row (UNIQUE constraint → ON CONFLICT UPDATE), now with the
+    // passenger and offroad variants.
     let response = app
         .clone()
         .oneshot(auth(
@@ -156,7 +164,13 @@ async fn test_upsert_creates_then_updates() {
                     json!({
                         "frontBar": 2.5,
                         "rearBar": 2.9,
+                        "frontPassengerBar": 2.7,
+                        "rearPassengerBar": 3.1,
+                        "frontOffroadBar": 1.6,
+                        "rearOffroadBar": 1.8,
                         "sidecarBar": 2.0,
+                        "sidecarPassengerBar": 2.2,
+                        "sidecarOffroadBar": 1.4,
                         "preferredUnit": "psi"
                     })
                     .to_string(),
@@ -173,8 +187,46 @@ async fn test_upsert_creates_then_updates() {
     let body: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(body["tirePressure"]["frontBar"], 2.5);
     assert_eq!(body["tirePressure"]["rearBar"], 2.9);
+    assert_eq!(body["tirePressure"]["frontPassengerBar"], 2.7);
+    assert_eq!(body["tirePressure"]["rearPassengerBar"], 3.1);
+    assert_eq!(body["tirePressure"]["frontOffroadBar"], 1.6);
+    assert_eq!(body["tirePressure"]["rearOffroadBar"], 1.8);
     assert_eq!(body["tirePressure"]["sidecarBar"], 2.0);
+    assert_eq!(body["tirePressure"]["sidecarPassengerBar"], 2.2);
+    assert_eq!(body["tirePressure"]["sidecarOffroadBar"], 1.4);
     assert_eq!(body["tirePressure"]["preferredUnit"], "psi");
+
+    // Omitting a previously-set variant clears it again (full-row upsert).
+    let response = app
+        .clone()
+        .oneshot(auth(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("/api/motorcycles/{}/tire-pressure", moto_id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "frontBar": 2.5,
+                        "rearBar": 2.9,
+                        "sidecarBar": null,
+                        "preferredUnit": "bar"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert!(body["tirePressure"]["frontPassengerBar"].is_null());
+    assert!(body["tirePressure"]["rearOffroadBar"].is_null());
+    assert!(body["tirePressure"]["sidecarPassengerBar"].is_null());
+    assert!(body["tirePressure"]["sidecarOffroadBar"].is_null());
 
     // Exactly one row exists.
     let count: i64 =
@@ -260,6 +312,108 @@ async fn test_upsert_rejects_unknown_unit() {
                         "rearBar": 2.5,
                         "sidecarBar": null,
                         "preferredUnit": "kPa"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_upsert_without_solo_keeps_other_configs() {
+    let (app, _pool, token, moto_id) = setup_test_app().await;
+
+    // A record can consist of a single non-solo configuration — this is how
+    // the client deletes the solo set while offroad values remain.
+    let response = app
+        .clone()
+        .oneshot(auth(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("/api/motorcycles/{}/tire-pressure", moto_id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "frontOffroadBar": 1.6,
+                        "rearOffroadBar": 1.8,
+                        "preferredUnit": "bar"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert!(body["tirePressure"]["frontBar"].is_null());
+    assert!(body["tirePressure"]["rearBar"].is_null());
+    assert_eq!(body["tirePressure"]["frontOffroadBar"], 1.6);
+    assert_eq!(body["tirePressure"]["rearOffroadBar"], 1.8);
+
+    // An entirely empty payload is rejected — removing the last
+    // configuration must go through DELETE instead.
+    let response = app
+        .clone()
+        .oneshot(auth(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("/api/motorcycles/{}/tire-pressure", moto_id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "preferredUnit": "bar" }).to_string()))
+                .unwrap(),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    // A half-filled pair is rejected.
+    let response = app
+        .oneshot(auth(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("/api/motorcycles/{}/tire-pressure", moto_id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "frontBar": 2.2,
+                        "preferredUnit": "bar"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_upsert_rejects_nonpositive_variant() {
+    let (app, _pool, token, moto_id) = setup_test_app().await;
+
+    let response = app
+        .oneshot(auth(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!("/api/motorcycles/{}/tire-pressure", moto_id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "frontBar": 2.3,
+                        "rearBar": 2.5,
+                        "rearOffroadBar": -1.0,
+                        "preferredUnit": "bar"
                     })
                     .to_string(),
                 ))

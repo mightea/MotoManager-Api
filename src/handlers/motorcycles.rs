@@ -173,6 +173,10 @@ pub async fn create_motorcycle(
         .get("isArchived")
         .map(|v| v == "true")
         .unwrap_or(false);
+    let has_sidecar = fields
+        .get("hasSidecar")
+        .map(|v| v == "true")
+        .unwrap_or(false);
     let initial_odo: i64 = fields
         .get("initialOdo")
         .and_then(|v| v.parse().ok())
@@ -200,9 +204,9 @@ pub async fn create_motorcycle(
     let id = sqlx::query(
         "INSERT INTO motorcycles
            (make, model, modelYear, userId, vin, engineNumber, vehicleNr, numberPlate,
-            image, isVeteran, isArchived, firstRegistration, initialOdo, manualOdo,
+            image, isVeteran, isArchived, hasSidecar, firstRegistration, initialOdo, manualOdo,
             purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize, seriesId)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&make)
     .bind(&model)
@@ -215,6 +219,7 @@ pub async fn create_motorcycle(
     .bind(&image_filename)
     .bind(is_veteran)
     .bind(is_archived)
+    .bind(has_sidecar)
     .bind(&first_registration)
     .bind(initial_odo)
     .bind(manual_odo)
@@ -405,6 +410,10 @@ pub async fn update_motorcycle(
         .get("isArchived")
         .map(|v| v == "true")
         .unwrap_or(existing.is_archived);
+    let has_sidecar: bool = fields
+        .get("hasSidecar")
+        .map(|v| v == "true")
+        .unwrap_or(existing.has_sidecar);
     let initial_odo: i64 = fields
         .get("initialOdo")
         .and_then(|v| v.parse().ok())
@@ -446,7 +455,7 @@ pub async fn update_motorcycle(
         "UPDATE motorcycles SET
            make = ?, model = ?, modelYear = ?, vin = ?, engineNumber = ?,
            vehicleNr = ?, numberPlate = ?, image = ?, isVeteran = ?, isArchived = ?,
-           firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
+           hasSidecar = ?, firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
            purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?,
            seriesId = ?
            WHERE id = ? AND userId = ?",
@@ -461,6 +470,7 @@ pub async fn update_motorcycle(
     .bind(&image_filename)
     .bind(is_veteran)
     .bind(is_archived)
+    .bind(has_sidecar)
     .bind(&first_registration)
     .bind(initial_odo)
     .bind(manual_odo)
