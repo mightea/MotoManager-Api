@@ -75,6 +75,9 @@ pub struct Motorcycle {
     pub is_veteran: bool,
     pub is_archived: bool,
     pub has_sidecar: bool,
+    /// Further, unidentified previous owners exist beyond the recorded ones —
+    /// the ownership history is incomplete (see migration 032).
+    pub has_unknown_owners: bool,
     pub first_registration: Option<String>,
     pub initial_odo: i64,
     pub manual_odo: Option<i64>,
@@ -105,6 +108,8 @@ pub struct MotorcycleWithStats {
     pub is_veteran: bool,
     pub is_archived: bool,
     pub has_sidecar: bool,
+    /// See `Motorcycle::has_unknown_owners` (migration 032).
+    pub has_unknown_owners: bool,
     pub first_registration: Option<String>,
     pub initial_odo: i64,
     pub manual_odo: Option<i64>,
