@@ -64,6 +64,7 @@ pub struct CreateTorqueSpecRequest {
     pub variation: Option<f64>,
     pub tool_size: Option<String>,
     pub description: Option<String>,
+    pub unverified: Option<bool>,
     /// Client-generated idempotency key (UUID).
     pub client_id: Option<String>,
 }
@@ -94,8 +95,8 @@ pub async fn create_torque_spec(
 
     let id = sqlx::query(
         "INSERT INTO torqueSpecs \
-         (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, unverified, createdAt, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
     .bind(&body.category)
@@ -105,6 +106,7 @@ pub async fn create_torque_spec(
     .bind(body.variation)
     .bind(&body.tool_size)
     .bind(&body.description)
+    .bind(body.unverified.unwrap_or(false))
     .bind(&now)
     .bind(&body.client_id)
     .bind(&now)
@@ -152,8 +154,8 @@ pub async fn import_torque_specs(
 
         sqlx::query(
             "INSERT INTO torqueSpecs \
-             (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, createdAt, updatedAt) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, unverified, createdAt, updatedAt) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(motorcycle_id)
         .bind(&spec.category)
@@ -163,6 +165,7 @@ pub async fn import_torque_specs(
         .bind(spec.variation)
         .bind(&spec.tool_size)
         .bind(&spec.description)
+        .bind(spec.unverified)
         .bind(&now)
         .bind(&now)
         .execute(&pool)
@@ -187,6 +190,7 @@ pub struct UpdateTorqueSpecRequest {
     pub variation: Option<f64>,
     pub tool_size: Option<String>,
     pub description: Option<String>,
+    pub unverified: Option<bool>,
 }
 
 pub async fn update_torque_spec(
@@ -213,13 +217,14 @@ pub async fn update_torque_spec(
     let variation = body.variation.or(existing.variation);
     let tool_size = body.tool_size.or(existing.tool_size);
     let description = body.description.or(existing.description);
+    let unverified = body.unverified.unwrap_or(existing.unverified);
 
     let now = sync_now();
 
     sqlx::query(
         "UPDATE torqueSpecs SET \
          category = ?, name = ?, torque = ?, torqueEnd = ?, variation = ?, \
-         toolSize = ?, description = ?, updatedAt = ? \
+         toolSize = ?, description = ?, unverified = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&category)
@@ -229,6 +234,7 @@ pub async fn update_torque_spec(
     .bind(variation)
     .bind(&tool_size)
     .bind(&description)
+    .bind(unverified)
     .bind(&now)
     .bind(tid)
     .execute(&pool)

@@ -225,6 +225,8 @@ pub struct TorqueSpec {
     pub variation: Option<f64>,
     pub tool_size: Option<String>,
     pub description: Option<String>,
+    /// Values from an uncertain source; flagged for review (see migration 031).
+    pub unverified: bool,
     pub created_at: String,
     // Sync metadata (see migration 011).
     pub client_id: Option<String>,
