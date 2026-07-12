@@ -7,7 +7,7 @@ use axum::{
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
-use crate::auth::AuthUser;
+use crate::auth::FileAuthUser;
 use crate::config::Config;
 use crate::handlers::documents::{authorize_doc_file, DocFileKind};
 
@@ -135,7 +135,7 @@ pub async fn serve_image(
 pub async fn serve_document(
     State(config): State<Config>,
     State(pool): State<SqlitePool>,
-    AuthUser(user): AuthUser,
+    FileAuthUser(user): FileAuthUser,
     Path(filename): Path<String>,
 ) -> impl IntoResponse {
     let filename = sanitize_filename(&filename);
@@ -175,7 +175,7 @@ pub async fn serve_document(
 pub async fn serve_preview(
     State(config): State<Config>,
     State(pool): State<SqlitePool>,
-    AuthUser(user): AuthUser,
+    FileAuthUser(user): FileAuthUser,
     Path(filename): Path<String>,
 ) -> impl IntoResponse {
     let filename = sanitize_filename(&filename);
