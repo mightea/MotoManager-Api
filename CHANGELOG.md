@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/mightea/MotoManager-Api/compare/v0.10.0...v0.11.0) (2026-07-13)
+
+
+### Features
+
+* skip scheduled backup when nothing changed ([5a24b39](https://github.com/mightea/MotoManager-Api/commit/5a24b395f73accf0085136c15dd5410aff17b4d8))
+
 ## [0.10.0](https://github.com/mightea/MotoManager-Api/compare/v0.9.0...v0.10.0) (2026-07-13)
 
 
