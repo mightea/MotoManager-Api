@@ -25,6 +25,11 @@ pub struct Config {
     pub backup_enabled: bool,
     pub backup_interval_hours: u64,
     pub backup_keep: usize,
+    /// Frontend version to stamp into backups. The backend can't otherwise know
+    /// it (separate image/deploy); set `FRONTEND_VERSION` alongside the frontend
+    /// tag so scheduled backups record it. Manual backups from the webapp send
+    /// their own version, which takes precedence. None = "unknown".
+    pub frontend_version: Option<String>,
 }
 
 impl Config {
@@ -67,6 +72,10 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .filter(|&n| n > 0)
                 .unwrap_or(14),
+            frontend_version: env::var("FRONTEND_VERSION")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
         })
     }
 

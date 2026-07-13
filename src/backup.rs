@@ -15,6 +15,7 @@ use std::time::Duration;
 use chrono::Utc;
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use serde_json::json;
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{Connection, SqlitePool};
 
@@ -35,17 +36,42 @@ const MIN_POLL: Duration = Duration::from_secs(300);
 /// in the `backups` table (a `running` row up front, updated on completion) so
 /// failures are visible to admins. Returns the new row id.
 ///
-/// The caller must already hold the [`BackupGuard`].
-pub async fn perform_backup(pool: &SqlitePool, config: &Config, trigger: &str) -> AppResult<i64> {
+/// The caller must already hold the [`BackupGuard`]. `frontend_version` is the
+/// version reported by the webapp on a manual backup; when absent it falls back
+/// to the `FRONTEND_VERSION` env (config), else null. The backend version comes
+/// from config. Both are stored on the row and written to the archive manifest.
+pub async fn perform_backup(
+    pool: &SqlitePool,
+    config: &Config,
+    trigger: &str,
+    frontend_version: Option<String>,
+) -> AppResult<i64> {
     let started = Utc::now();
-    let id = sqlx::query("INSERT INTO backups (startedAt, status, trigger) VALUES (?, 'running', ?)")
-        .bind(started.to_rfc3339())
-        .bind(trigger)
-        .execute(pool)
-        .await?
-        .last_insert_rowid();
+    let backend_version = config.app_version.clone();
+    let frontend_version = frontend_version.or_else(|| config.frontend_version.clone());
 
-    match run_inner(pool, config, &started.format("%Y%m%d-%H%M%S").to_string()).await {
+    let id = sqlx::query(
+        "INSERT INTO backups (startedAt, status, trigger, backendVersion, frontendVersion) \
+         VALUES (?, 'running', ?, ?, ?)",
+    )
+    .bind(started.to_rfc3339())
+    .bind(trigger)
+    .bind(&backend_version)
+    .bind(&frontend_version)
+    .execute(pool)
+    .await?
+    .last_insert_rowid();
+
+    // Documented inside the archive so it's self-describing even outside the app.
+    let manifest = json!({
+        "backendVersion": backend_version,
+        "frontendVersion": frontend_version,
+        "createdAt": started.to_rfc3339(),
+    })
+    .to_string()
+    .into_bytes();
+
+    match run_inner(pool, config, &started.format("%Y%m%d-%H%M%S").to_string(), manifest).await {
         Ok((file_name, size)) => {
             sqlx::query(
                 "UPDATE backups SET status='success', finishedAt=?, sizeBytes=?, filePath=? WHERE id=?",
@@ -75,7 +101,12 @@ pub async fn perform_backup(pool: &SqlitePool, config: &Config, trigger: &str) -
     }
 }
 
-async fn run_inner(pool: &SqlitePool, config: &Config, stamp: &str) -> AppResult<(String, u64)> {
+async fn run_inner(
+    pool: &SqlitePool,
+    config: &Config,
+    stamp: &str,
+    manifest: Vec<u8>,
+) -> AppResult<(String, u64)> {
     let dir = config.backup_dir();
     tokio::fs::create_dir_all(&dir).await?;
 
@@ -100,10 +131,12 @@ async fn run_inner(pool: &SqlitePool, config: &Config, stamp: &str) -> AppResult
     let images = config.images_dir();
     let documents = config.documents_dir();
     let (snap, arch) = (snapshot.clone(), archive.clone());
-    let size = tokio::task::spawn_blocking(move || build_archive(&arch, &snap, &images, &documents))
-        .await
-        .map_err(|e| AppError::Internal(format!("backup archive task panicked: {e}")))?
-        .map_err(|e| AppError::Internal(format!("failed to write backup archive: {e}")))?;
+    let size = tokio::task::spawn_blocking(move || {
+        build_archive(&arch, &snap, &images, &documents, &manifest)
+    })
+    .await
+    .map_err(|e| AppError::Internal(format!("backup archive task panicked: {e}")))?
+    .map_err(|e| AppError::Internal(format!("failed to write backup archive: {e}")))?;
 
     // 4. The archive holds a copy of the snapshot; drop the transient file.
     let _ = tokio::fs::remove_file(&snapshot).await;
@@ -139,15 +172,24 @@ async fn verify_snapshot(path: &Path) -> AppResult<()> {
 
 /// Synchronous tar+gzip build. `images`/`documents` are stored under their own
 /// top-level dirs; a missing upload dir (fresh install) is simply skipped.
+/// `manifest` is written as a top-level `manifest.json` describing the versions.
 fn build_archive(
     archive: &Path,
     snapshot: &Path,
     images: &Path,
     documents: &Path,
+    manifest: &[u8],
 ) -> std::io::Result<u64> {
     let file = std::fs::File::create(archive)?;
     let encoder = GzEncoder::new(file, Compression::default());
     let mut tar = tar::Builder::new(encoder);
+
+    // manifest.json — built in memory, so it needs an explicit tar header.
+    let mut header = tar::Header::new_gnu();
+    header.set_size(manifest.len() as u64);
+    header.set_mode(0o644);
+    header.set_mtime(0);
+    tar.append_data(&mut header, "manifest.json", manifest)?;
 
     tar.append_path_with_name(snapshot, "db.sqlite")?;
     if images.is_dir() {
@@ -236,7 +278,9 @@ pub fn spawn_scheduler(pool: SqlitePool, config: Config, lock: BackupGuard) {
             }
 
             if let Ok(_guard) = lock.try_lock() {
-                if let Err(e) = perform_backup(&pool, &config, "scheduled").await {
+                // Scheduled runs pass None; the frontend version (if any) comes
+                // from the FRONTEND_VERSION env via config inside perform_backup.
+                if let Err(e) = perform_backup(&pool, &config, "scheduled", None).await {
                     tracing::error!("Scheduled backup failed: {e}");
                 }
             } else {

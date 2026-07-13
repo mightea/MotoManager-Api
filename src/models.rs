@@ -538,4 +538,8 @@ pub struct BackupRecord {
     pub size_bytes: Option<i64>,
     pub file_path: Option<String>,
     pub error: Option<String>,
+    /// App versions in effect when the backup was taken (also written to the
+    /// archive's manifest.json). Frontend may be null when not supplied.
+    pub backend_version: Option<String>,
+    pub frontend_version: Option<String>,
 }

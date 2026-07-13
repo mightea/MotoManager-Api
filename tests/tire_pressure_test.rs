@@ -36,6 +36,7 @@ async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String, i64) {
         backup_enabled: false,
         backup_interval_hours: 24,
         backup_keep: 14,
+        frontend_version: None,
     };
 
     let rp_origin = url::Url::parse("http://localhost:5173").unwrap();

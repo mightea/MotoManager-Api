@@ -70,20 +70,36 @@ pub async fn list_backups(
     })))
 }
 
+/// Optional body for a manual backup: the webapp reports its own version so the
+/// archive/manifest records the frontend that was live. Absent/invalid body is
+/// fine — the backend then falls back to the FRONTEND_VERSION env, else null.
+#[derive(Debug, Default, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateBackupRequest {
+    pub frontend_version: Option<String>,
+}
+
 /// POST /api/admin/backups — run a backup now. 409 if one is already in flight.
 pub async fn create_backup(
     State(pool): State<SqlitePool>,
     State(config): State<Config>,
     State(lock): State<BackupGuard>,
     AdminUser(admin): AdminUser,
+    body: Option<Json<CreateBackupRequest>>,
 ) -> AppResult<(StatusCode, Json<Value>)> {
     // Hold the guard for the whole run so a scheduled run can't race this one.
     let _guard = lock
         .try_lock()
         .map_err(|_| AppError::Conflict("A backup is already running".to_string()))?;
 
+    // Trim + cap the client-supplied version so it can't bloat the row/manifest.
+    let frontend_version = body
+        .and_then(|Json(b)| b.frontend_version)
+        .map(|v| v.trim().chars().take(64).collect::<String>())
+        .filter(|v| !v.is_empty());
+
     tracing::info!("Admin {} (ID: {}) triggered a manual backup", admin.username, admin.id);
-    let id = perform_backup(&pool, &config, "manual").await?;
+    let id = perform_backup(&pool, &config, "manual", frontend_version).await?;
 
     let record = sqlx::query_as::<_, BackupRecord>("SELECT * FROM backups WHERE id = ?")
         .bind(id)

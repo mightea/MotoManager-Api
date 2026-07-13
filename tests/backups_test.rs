@@ -19,7 +19,7 @@ fn test_config(data_dir: &std::path::Path) -> Config {
         rp_name: "Test".to_string(),
         origin: "http://localhost:5173".to_string(),
         enable_registration: true,
-        app_version: "test".to_string(),
+        app_version: "backend-1.2.3".to_string(),
         data_dir: data_dir.to_string_lossy().to_string(),
         cache_dir: data_dir.join("cache").to_string_lossy().to_string(),
         llm_base_url: None,
@@ -28,6 +28,7 @@ fn test_config(data_dir: &std::path::Path) -> Config {
         backup_enabled: false,
         backup_interval_hours: 24,
         backup_keep: 2,
+        frontend_version: Some("frontend-9.9.9".to_string()),
     }
 }
 
@@ -79,19 +80,29 @@ async fn backup_snapshots_db_and_files() {
     std::fs::write(config.documents_dir().join("invoice.pdf"), b"fake-pdf").unwrap();
 
     // Run the real pipeline.
-    let id = perform_backup(&pool, &config, "manual")
+    let id = perform_backup(&pool, &config, "manual", Some("frontend-from-client".to_string()))
         .await
         .expect("backup should succeed");
 
-    // History row is marked success with size + file path.
-    let (status, size, file_path): (String, Option<i64>, Option<String>) =
-        sqlx::query_as("SELECT status, sizeBytes, filePath FROM backups WHERE id = ?")
-            .bind(id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+    // History row is marked success with size, file path, and versions. The
+    // client-supplied frontend version wins over the FRONTEND_VERSION config.
+    let (status, size, file_path, backend_v, frontend_v): (
+        String,
+        Option<i64>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = sqlx::query_as(
+        "SELECT status, sizeBytes, filePath, backendVersion, frontendVersion FROM backups WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
     assert_eq!(status, "success");
     assert!(size.unwrap() > 0, "archive should be non-empty");
+    assert_eq!(backend_v.as_deref(), Some("backend-1.2.3"));
+    assert_eq!(frontend_v.as_deref(), Some("frontend-from-client"));
     let file_path = file_path.expect("filePath recorded");
 
     // Archive exists on disk, transient snapshot cleaned up.
@@ -104,12 +115,20 @@ async fn backup_snapshots_db_and_files() {
         .count();
     assert_eq!(leftover_snapshots, 0, "transient snapshot should be removed");
 
-    // Archive contains the DB snapshot and both upload dirs.
+    // Archive contains the DB snapshot, the manifest, and both upload dirs.
     let mut entries = archive_entry_names(&archive);
     entries.sort();
     assert!(entries.iter().any(|n| n == "db.sqlite"), "entries: {entries:?}");
+    assert!(entries.iter().any(|n| n == "manifest.json"), "entries: {entries:?}");
     assert!(entries.iter().any(|n| n.contains("images/bike.jpg")), "entries: {entries:?}");
     assert!(entries.iter().any(|n| n.contains("documents/invoice.pdf")), "entries: {entries:?}");
+
+    // manifest.json documents the versions.
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&extract_entry(&archive, "manifest.json")).unwrap();
+    assert_eq!(manifest["backendVersion"], "backend-1.2.3");
+    assert_eq!(manifest["frontendVersion"], "frontend-from-client");
+    assert!(manifest["createdAt"].is_string());
 
     // Extract db.sqlite and confirm the committed marker row is present — proves
     // VACUUM INTO produced a real, consistent snapshot (not an empty file).
@@ -140,7 +159,9 @@ async fn backup_prunes_to_retention_limit() {
     // Three runs; retention should leave only the newest two archives. Timestamps
     // are second-resolution, so space the runs out to get distinct filenames.
     for _ in 0..3 {
-        perform_backup(&pool, &config, "scheduled").await.unwrap();
+        perform_backup(&pool, &config, "scheduled", None)
+            .await
+            .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     }
 
