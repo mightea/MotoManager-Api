@@ -47,3 +47,6 @@ regex = "1"
 # no extra C toolchain — unlike a zstd-sys dependency.
 tar = "0.4"
 flate2 = "1"
+# Content fingerprint (pure-Rust) so a scheduled backup can skip when nothing
+# changed since the last one.
+sha2 = "0.10"

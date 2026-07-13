@@ -542,4 +542,7 @@ pub struct BackupRecord {
     /// archive's manifest.json). Frontend may be null when not supplied.
     pub backend_version: Option<String>,
     pub frontend_version: Option<String>,
+    /// Content fingerprint used to skip unchanged scheduled backups. Null on
+    /// failed rows and rows from before this was introduced.
+    pub content_hash: Option<String>,
 }

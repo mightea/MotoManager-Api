@@ -42,10 +42,21 @@ pub async fn list_backups(
     .await?
     .flatten();
 
-    // Next run = last success + interval (only meaningful while the scheduler
-    // is enabled and at least one backup has succeeded).
+    // The scheduler paces off the last *completed* run (success or no-change
+    // skip), so the next-run estimate must too.
+    let last_completed_at: Option<String> = sqlx::query_scalar(
+        "SELECT finishedAt FROM backups \
+         WHERE status IN ('success', 'skipped') AND finishedAt IS NOT NULL \
+         ORDER BY finishedAt DESC LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await?
+    .flatten();
+
+    // Next run = last completed + interval (only meaningful while the scheduler
+    // is enabled and at least one backup has completed).
     let next_scheduled_at = if config.backup_enabled {
-        last_success_at.as_deref().and_then(|s| {
+        last_completed_at.as_deref().and_then(|s| {
             chrono::DateTime::parse_from_rfc3339(s).ok().map(|ts| {
                 (ts + chrono::Duration::hours(config.backup_interval_hours as i64)).to_rfc3339()
             })
@@ -102,7 +113,9 @@ pub async fn create_backup(
         admin.username,
         admin.id
     );
-    let id = perform_backup(&pool, &config, "manual", frontend_version).await?;
+    // Manual backups always run (an explicit request shouldn't be silently
+    // skipped) — only scheduled runs skip when nothing changed.
+    let id = perform_backup(&pool, &config, "manual", frontend_version, false).await?;
 
     let record = sqlx::query_as::<_, BackupRecord>("SELECT * FROM backups WHERE id = ?")
         .bind(id)

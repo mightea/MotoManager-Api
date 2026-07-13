@@ -32,19 +32,35 @@ pub type BackupGuard = Arc<tokio::sync::Mutex<()>>;
 /// lock was busy.
 const MIN_POLL: Duration = Duration::from_secs(300);
 
-/// Run a full backup: snapshot → verify → archive → prune. Records the attempt
-/// in the `backups` table (a `running` row up front, updated on completion) so
-/// failures are visible to admins. Returns the new row id.
+/// Outcome of the archiving stage: a real backup or a no-change skip.
+enum Outcome {
+    Completed {
+        file_name: String,
+        size: u64,
+        content_hash: String,
+    },
+    Skipped {
+        content_hash: String,
+    },
+}
+
+/// Run a full backup: snapshot → verify → fingerprint → archive → prune. Records
+/// the attempt in the `backups` table (a `running` row up front, updated on
+/// completion) so failures are visible to admins. Returns the new row id.
 ///
-/// The caller must already hold the [`BackupGuard`]. `frontend_version` is the
-/// version reported by the webapp on a manual backup; when absent it falls back
-/// to the `FRONTEND_VERSION` env (config), else null. The backend version comes
-/// from config. Both are stored on the row and written to the archive manifest.
+/// The caller must already hold the [`BackupGuard`]. When `skip_if_unchanged` is
+/// set (scheduled runs), a content fingerprint matching the last successful
+/// backup records a lightweight `skipped` row instead of writing an identical
+/// archive. `frontend_version` is the version reported by the webapp on a manual
+/// backup; when absent it falls back to the `FRONTEND_VERSION` env (config), else
+/// null. Backend version comes from config. Both are stored and written to the
+/// archive manifest.
 pub async fn perform_backup(
     pool: &SqlitePool,
     config: &Config,
     trigger: &str,
     frontend_version: Option<String>,
+    skip_if_unchanged: bool,
 ) -> AppResult<i64> {
     let started = Utc::now();
     let backend_version = config.app_version.clone();
@@ -76,20 +92,39 @@ pub async fn perform_backup(
         config,
         &started.format("%Y%m%d-%H%M%S").to_string(),
         manifest,
+        skip_if_unchanged,
     )
     .await
     {
-        Ok((file_name, size)) => {
+        Ok(Outcome::Completed {
+            file_name,
+            size,
+            content_hash,
+        }) => {
             sqlx::query(
-                "UPDATE backups SET status='success', finishedAt=?, sizeBytes=?, filePath=? WHERE id=?",
+                "UPDATE backups SET status='success', finishedAt=?, sizeBytes=?, filePath=?, \
+                 contentHash=? WHERE id=?",
             )
             .bind(Utc::now().to_rfc3339())
             .bind(size as i64)
             .bind(&file_name)
+            .bind(&content_hash)
             .bind(id)
             .execute(pool)
             .await?;
             tracing::info!("Backup #{id} succeeded: {file_name} ({size} bytes)");
+            Ok(id)
+        }
+        Ok(Outcome::Skipped { content_hash }) => {
+            sqlx::query(
+                "UPDATE backups SET status='skipped', finishedAt=?, contentHash=? WHERE id=?",
+            )
+            .bind(Utc::now().to_rfc3339())
+            .bind(&content_hash)
+            .bind(id)
+            .execute(pool)
+            .await?;
+            tracing::info!("Backup #{id} skipped — no changes since the last backup");
             Ok(id)
         }
         Err(e) => {
@@ -114,7 +149,8 @@ async fn run_inner(
     config: &Config,
     stamp: &str,
     manifest: Vec<u8>,
-) -> AppResult<(String, u64)> {
+    skip_if_unchanged: bool,
+) -> AppResult<Outcome> {
     let dir = config.backup_dir();
     tokio::fs::create_dir_all(&dir).await?;
 
@@ -135,9 +171,19 @@ async fn run_inner(
     // 2. Verify before trusting it — a backup that won't open is worse than none.
     verify_snapshot(&snapshot).await?;
 
-    // 3. Bundle snapshot + upload dirs. Compression/IO is blocking → off-thread.
+    // 3. Fingerprint the content so a scheduled run can bail out before
+    //    compressing when nothing changed since the last successful backup.
     let images = config.images_dir();
     let documents = config.documents_dir();
+    let fp_db = dir.join(format!(".fp-{stamp}.sqlite"));
+    let content_hash = fingerprint(&snapshot, &fp_db, &images, &documents).await?;
+
+    if skip_if_unchanged && last_success_hash(pool).await? == Some(content_hash.clone()) {
+        let _ = tokio::fs::remove_file(&snapshot).await;
+        return Ok(Outcome::Skipped { content_hash });
+    }
+
+    // 4. Bundle snapshot + upload dirs. Compression/IO is blocking → off-thread.
     let (snap, arch) = (snapshot.clone(), archive.clone());
     let size = tokio::task::spawn_blocking(move || {
         build_archive(&arch, &snap, &images, &documents, &manifest)
@@ -146,13 +192,139 @@ async fn run_inner(
     .map_err(|e| AppError::Internal(format!("backup archive task panicked: {e}")))?
     .map_err(|e| AppError::Internal(format!("failed to write backup archive: {e}")))?;
 
-    // 4. The archive holds a copy of the snapshot; drop the transient file.
+    // 5. The archive holds a copy of the snapshot; drop the transient file.
     let _ = tokio::fs::remove_file(&snapshot).await;
 
-    // 5. Retention.
+    // 6. Retention.
     prune_old_archives(&dir, config.backup_keep);
 
-    Ok((file_name, size))
+    Ok(Outcome::Completed {
+        file_name,
+        size,
+        content_hash,
+    })
+}
+
+/// Content hash of the last **successful** backup (the last one that produced an
+/// archive), used to decide whether a new run would be identical.
+async fn last_success_hash(pool: &SqlitePool) -> AppResult<Option<String>> {
+    Ok(sqlx::query_scalar(
+        "SELECT contentHash FROM backups \
+         WHERE status='success' AND contentHash IS NOT NULL \
+         ORDER BY finishedAt DESC LIMIT 1",
+    )
+    .fetch_optional(pool)
+    .await?
+    .flatten())
+}
+
+/// Content fingerprint used to detect "nothing changed since the last backup".
+///
+/// The `backups` history table lives in the same DB and grows on every run, so
+/// it must be excluded or the fingerprint would never match. We copy the
+/// snapshot, drop that table, and `VACUUM` the copy into a canonical form —
+/// which is byte-identical whenever the *rest* of the data is unchanged — then
+/// SHA-256 that plus a stat-listing of the upload dirs.
+async fn fingerprint(
+    snapshot: &Path,
+    fp_db: &Path,
+    images: &Path,
+    documents: &Path,
+) -> AppResult<String> {
+    // Canonicalize a throwaway copy: drop the history table, rebuild.
+    tokio::fs::copy(snapshot, fp_db).await?;
+    {
+        let opts = SqliteConnectOptions::new().filename(fp_db);
+        let mut conn = sqlx::sqlite::SqliteConnection::connect_with(&opts)
+            .await
+            .map_err(|e| AppError::Internal(format!("cannot open fingerprint copy: {e}")))?;
+        let res = async {
+            sqlx::query("DROP TABLE IF EXISTS backups")
+                .execute(&mut conn)
+                .await?;
+            sqlx::query("VACUUM").execute(&mut conn).await?;
+            Ok::<_, sqlx::Error>(())
+        }
+        .await;
+        let _ = conn.close().await;
+        res.map_err(|e| AppError::Internal(format!("failed to canonicalize fingerprint: {e}")))?;
+    }
+
+    let (fp, img, doc) = (
+        fp_db.to_path_buf(),
+        images.to_path_buf(),
+        documents.to_path_buf(),
+    );
+    let hash = tokio::task::spawn_blocking(move || hash_content(&fp, &img, &doc))
+        .await
+        .map_err(|e| AppError::Internal(format!("backup fingerprint task panicked: {e}")))?
+        .map_err(|e| AppError::Internal(format!("failed to fingerprint backup: {e}")))?;
+
+    let _ = tokio::fs::remove_file(fp_db).await;
+    Ok(hash)
+}
+
+/// SHA-256 over the canonicalized DB bytes and a deterministic stat-listing
+/// (relative path, size, mtime) of the upload dirs. mtime is a quick,
+/// rsync-style signal — a touched-but-unchanged file conservatively counts as a
+/// change (errs toward taking a backup).
+fn hash_content(db: &Path, images: &Path, documents: &Path) -> std::io::Result<String> {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+
+    // Stream the DB so a large file doesn't have to be fully buffered.
+    let mut file = std::fs::File::open(db)?;
+    std::io::copy(&mut file, &mut HashWriter(&mut hasher))?;
+
+    let mut lines = Vec::new();
+    for (label, dir) in [("images", images), ("documents", documents)] {
+        if dir.is_dir() {
+            collect_file_stats(dir, label, &mut lines)?;
+        }
+    }
+    lines.sort();
+    for line in lines {
+        hasher.update(line.as_bytes());
+        hasher.update(b"\n");
+    }
+
+    Ok(hex::encode(hasher.finalize()))
+}
+
+/// Adapts a `Sha256` to `io::Write` so `io::copy` can stream into it.
+struct HashWriter<'a>(&'a mut sha2::Sha256);
+impl std::io::Write for HashWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        sha2::Digest::update(self.0, buf);
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Recursively record `prefix/relpath\0size\0mtime_nanos` for every file under
+/// `dir`, so added/removed/modified files change the fingerprint.
+fn collect_file_stats(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let meta = entry.metadata()?;
+        let name = entry.file_name().to_string_lossy().to_string();
+        let rel = format!("{prefix}/{name}");
+        if meta.is_dir() {
+            collect_file_stats(&entry.path(), &rel, out)?;
+        } else {
+            let mtime = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            out.push(format!("{rel}\0{}\0{mtime}", meta.len()));
+        }
+    }
+    Ok(())
 }
 
 /// Open the snapshot read-only on its own connection and run `PRAGMA
@@ -238,13 +410,15 @@ fn prune_old_archives(dir: &Path, keep: usize) {
     }
 }
 
-/// Seconds until the next scheduled backup is due, based on the last *successful*
-/// run. `0` means overdue (or none yet). Basing this on success — not attempts —
-/// means a failed run stays due and is retried on the next poll.
+/// Seconds until the next scheduled backup is due, based on the last *completed*
+/// run — success or a no-change skip. `0` means overdue (or none yet). A skip
+/// counts (it's a completed check, so we wait a full interval before re-checking
+/// instead of re-snapshotting every poll); a failure does not (it stays due and
+/// is retried on the next poll).
 async fn seconds_until_due(pool: &SqlitePool, interval: Duration) -> u64 {
     let last: Option<String> = sqlx::query_scalar(
         "SELECT finishedAt FROM backups \
-         WHERE status='success' AND finishedAt IS NOT NULL \
+         WHERE status IN ('success', 'skipped') AND finishedAt IS NOT NULL \
          ORDER BY finishedAt DESC LIMIT 1",
     )
     .fetch_optional(pool)
@@ -286,9 +460,10 @@ pub fn spawn_scheduler(pool: SqlitePool, config: Config, lock: BackupGuard) {
             }
 
             if let Ok(_guard) = lock.try_lock() {
-                // Scheduled runs pass None; the frontend version (if any) comes
-                // from the FRONTEND_VERSION env via config inside perform_backup.
-                if let Err(e) = perform_backup(&pool, &config, "scheduled", None).await {
+                // Scheduled runs pass None (frontend version comes from the
+                // FRONTEND_VERSION env via config) and skip when nothing changed
+                // since the last successful backup.
+                if let Err(e) = perform_backup(&pool, &config, "scheduled", None, true).await {
                     tracing::error!("Scheduled backup failed: {e}");
                 }
             } else {

@@ -85,6 +85,7 @@ async fn backup_snapshots_db_and_files() {
         &config,
         "manual",
         Some("frontend-from-client".to_string()),
+        false,
     )
     .await
     .expect("backup should succeed");
@@ -178,8 +179,15 @@ async fn backup_prunes_to_retention_limit() {
 
     // Three runs; retention should leave only the newest two archives. Timestamps
     // are second-resolution, so space the runs out to get distinct filenames.
-    for _ in 0..3 {
-        perform_backup(&pool, &config, "scheduled", None)
+    // Pass skip_if_unchanged=false so all three actually write an archive.
+    for i in 0..3 {
+        // Change data each round so even skip-enabled runs wouldn't collapse.
+        sqlx::query("INSERT INTO currencies (code, symbol, conversionFactor, createdAt) VALUES (?, 'X', 1.0, '2026-01-01')")
+            .bind(format!("C{i}"))
+            .execute(&pool)
+            .await
+            .unwrap();
+        perform_backup(&pool, &config, "scheduled", None, false)
             .await
             .unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
@@ -199,6 +207,77 @@ async fn backup_prunes_to_retention_limit() {
     );
 
     std::fs::remove_dir_all(&data_dir).ok();
+}
+
+#[tokio::test]
+async fn scheduled_backup_skips_when_unchanged() {
+    let data_dir = temp_data_dir("skip");
+    let config = test_config(&data_dir);
+    let pool = make_pool(&data_dir).await;
+    std::fs::create_dir_all(config.images_dir()).unwrap();
+
+    let count_archives = || {
+        std::fs::read_dir(config.backup_dir())
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("motomanager-"))
+                    .count()
+            })
+            .unwrap_or(0)
+    };
+
+    // 1st scheduled run → a real backup.
+    let id1 = perform_backup(&pool, &config, "scheduled", None, true)
+        .await
+        .unwrap();
+    assert_eq!(row_status(&pool, id1).await, "success");
+    assert_eq!(count_archives(), 1);
+
+    // 2nd run with nothing changed → skipped, no new archive.
+    let id2 = perform_backup(&pool, &config, "scheduled", None, true)
+        .await
+        .unwrap();
+    assert_eq!(row_status(&pool, id2).await, "skipped");
+    assert_eq!(count_archives(), 1, "no archive should be written on skip");
+
+    // Change the DB → next run backs up again (status success, not skipped).
+    // Absolute archive counts past here are governed by retention (keep = 2),
+    // which backup_prunes_to_retention_limit covers; here we assert the status.
+    sqlx::query("INSERT INTO currencies (code, symbol, conversionFactor, createdAt) VALUES ('QQQ', 'Q', 1.0, '2026-01-01')")
+        .execute(&pool)
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await; // distinct filename
+    let id3 = perform_backup(&pool, &config, "scheduled", None, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        row_status(&pool, id3).await,
+        "success",
+        "a DB change should trigger a real backup"
+    );
+
+    // A changed uploaded file alone also triggers a backup.
+    std::fs::write(config.images_dir().join("new.jpg"), b"hello").unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    let id4 = perform_backup(&pool, &config, "scheduled", None, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        row_status(&pool, id4).await,
+        "success",
+        "a file change should trigger a real backup"
+    );
+
+    std::fs::remove_dir_all(&data_dir).ok();
+}
+
+async fn row_status(pool: &SqlitePool, id: i64) -> String {
+    sqlx::query_scalar::<_, String>("SELECT status FROM backups WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
 }
 
 fn archive_entry_names(archive: &std::path::Path) -> Vec<String> {
