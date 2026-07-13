@@ -18,6 +18,13 @@ pub struct Config {
     pub llm_base_url: Option<String>,
     pub llm_model: String,
     pub llm_api_key: String,
+    /// Automatic database backups. `backup_enabled` gates the background
+    /// scheduler only — the admin "Back up now" endpoint always works.
+    /// `backup_interval_hours` is how often the scheduler runs; `backup_keep` is
+    /// how many archives to retain (older ones are pruned after each run).
+    pub backup_enabled: bool,
+    pub backup_interval_hours: u64,
+    pub backup_keep: usize,
 }
 
 impl Config {
@@ -46,7 +53,27 @@ impl Config {
             llm_model: env::var("LLM_MODEL")
                 .unwrap_or_else(|_| "Qwen/Qwen2.5-1.5B-Instruct-AWQ".to_string()),
             llm_api_key: env::var("LLM_API_KEY").unwrap_or_else(|_| "local-vllm".to_string()),
+            backup_enabled: env::var("BACKUP_ENABLED")
+                .unwrap_or_else(|_| "true".to_string())
+                .to_lowercase()
+                != "false",
+            backup_interval_hours: env::var("BACKUP_INTERVAL_HOURS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .filter(|&h| h > 0)
+                .unwrap_or(24),
+            backup_keep: env::var("BACKUP_KEEP")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .filter(|&n| n > 0)
+                .unwrap_or(14),
         })
+    }
+
+    /// Where backup archives (and the transient DB snapshot) are written. Kept
+    /// under `data_dir` so it rides the same persistent volume as the DB.
+    pub fn backup_dir(&self) -> std::path::PathBuf {
+        std::path::Path::new(&self.data_dir).join("backups")
     }
 
     pub fn images_dir(&self) -> std::path::PathBuf {

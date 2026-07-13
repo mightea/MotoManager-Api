@@ -71,6 +71,11 @@ ENV DATA_DIR=/app/data
 ENV CACHE_DIR=/app/cache
 ENV RUST_LOG=info
 ENV ENABLE_REGISTRATION=false
+# Automatic backups: DB snapshot (VACUUM INTO) + tar.gz of images/ & documents/,
+# written to DATA_DIR/backups and monitorable/triggerable by admins in the webapp.
+ENV BACKUP_ENABLED=true
+ENV BACKUP_INTERVAL_HOURS=24
+ENV BACKUP_KEEP=14
 # Invoice-import LLM (optional): set LLM_BASE_URL (e.g. http://10.0.0.2:8542/v1),
 # LLM_MODEL and LLM_API_KEY at deploy time. Unset = deterministic parser only.
 

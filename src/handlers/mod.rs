@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod auth;
+pub mod backups;
 pub mod documents;
 pub mod expenses;
 pub mod files;

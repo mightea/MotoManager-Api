@@ -33,6 +33,9 @@ async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {
         llm_base_url: None,
         llm_model: "test".to_string(),
         llm_api_key: "test".to_string(),
+        backup_enabled: false,
+        backup_interval_hours: 24,
+        backup_keep: 14,
     };
 
     let rp_origin = url::Url::parse("http://localhost:5173").unwrap();
@@ -43,6 +46,7 @@ async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {
         pool: pool.clone(),
         config,
         webauthn,
+        backup_lock: std::sync::Arc::new(tokio::sync::Mutex::new(())),
     };
 
     let password_hash = hash_password("password123").unwrap();
