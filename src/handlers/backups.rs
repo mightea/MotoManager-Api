@@ -27,12 +27,11 @@ pub async fn list_backups(
     State(config): State<Config>,
     AdminUser(_admin): AdminUser,
 ) -> AppResult<Json<Value>> {
-    let backups = sqlx::query_as::<_, BackupRecord>(
-        "SELECT * FROM backups ORDER BY startedAt DESC LIMIT ?",
-    )
-    .bind(HISTORY_LIMIT)
-    .fetch_all(&pool)
-    .await?;
+    let backups =
+        sqlx::query_as::<_, BackupRecord>("SELECT * FROM backups ORDER BY startedAt DESC LIMIT ?")
+            .bind(HISTORY_LIMIT)
+            .fetch_all(&pool)
+            .await?;
 
     let last_success_at: Option<String> = sqlx::query_scalar(
         "SELECT finishedAt FROM backups \
@@ -98,7 +97,11 @@ pub async fn create_backup(
         .map(|v| v.trim().chars().take(64).collect::<String>())
         .filter(|v| !v.is_empty());
 
-    tracing::info!("Admin {} (ID: {}) triggered a manual backup", admin.username, admin.id);
+    tracing::info!(
+        "Admin {} (ID: {}) triggered a manual backup",
+        admin.username,
+        admin.id
+    );
     let id = perform_backup(&pool, &config, "manual", frontend_version).await?;
 
     let record = sqlx::query_as::<_, BackupRecord>("SELECT * FROM backups WHERE id = ?")
@@ -176,7 +179,11 @@ pub async fn delete_backup(
         .execute(&pool)
         .await?;
 
-    tracing::info!("Admin {} (ID: {}) deleted backup #{id}", admin.username, admin.id);
+    tracing::info!(
+        "Admin {} (ID: {}) deleted backup #{id}",
+        admin.username,
+        admin.id
+    );
     Ok(Json(json!({ "message": "Backup deleted" })))
 }
 

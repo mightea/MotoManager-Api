@@ -80,9 +80,14 @@ async fn backup_snapshots_db_and_files() {
     std::fs::write(config.documents_dir().join("invoice.pdf"), b"fake-pdf").unwrap();
 
     // Run the real pipeline.
-    let id = perform_backup(&pool, &config, "manual", Some("frontend-from-client".to_string()))
-        .await
-        .expect("backup should succeed");
+    let id = perform_backup(
+        &pool,
+        &config,
+        "manual",
+        Some("frontend-from-client".to_string()),
+    )
+    .await
+    .expect("backup should succeed");
 
     // History row is marked success with size, file path, and versions. The
     // client-supplied frontend version wins over the FRONTEND_VERSION config.
@@ -113,15 +118,30 @@ async fn backup_snapshots_db_and_files() {
         .filter_map(|e| e.ok())
         .filter(|e| e.file_name().to_string_lossy().starts_with(".snapshot-"))
         .count();
-    assert_eq!(leftover_snapshots, 0, "transient snapshot should be removed");
+    assert_eq!(
+        leftover_snapshots, 0,
+        "transient snapshot should be removed"
+    );
 
     // Archive contains the DB snapshot, the manifest, and both upload dirs.
     let mut entries = archive_entry_names(&archive);
     entries.sort();
-    assert!(entries.iter().any(|n| n == "db.sqlite"), "entries: {entries:?}");
-    assert!(entries.iter().any(|n| n == "manifest.json"), "entries: {entries:?}");
-    assert!(entries.iter().any(|n| n.contains("images/bike.jpg")), "entries: {entries:?}");
-    assert!(entries.iter().any(|n| n.contains("documents/invoice.pdf")), "entries: {entries:?}");
+    assert!(
+        entries.iter().any(|n| n == "db.sqlite"),
+        "entries: {entries:?}"
+    );
+    assert!(
+        entries.iter().any(|n| n == "manifest.json"),
+        "entries: {entries:?}"
+    );
+    assert!(
+        entries.iter().any(|n| n.contains("images/bike.jpg")),
+        "entries: {entries:?}"
+    );
+    assert!(
+        entries.iter().any(|n| n.contains("documents/invoice.pdf")),
+        "entries: {entries:?}"
+    );
 
     // manifest.json documents the versions.
     let manifest: serde_json::Value =
@@ -173,7 +193,10 @@ async fn backup_prunes_to_retention_limit() {
             n.starts_with("motomanager-") && n.ends_with(".tar.gz")
         })
         .count();
-    assert_eq!(archives, 2, "retention should keep only backup_keep archives");
+    assert_eq!(
+        archives, 2,
+        "retention should keep only backup_keep archives"
+    );
 
     std::fs::remove_dir_all(&data_dir).ok();
 }

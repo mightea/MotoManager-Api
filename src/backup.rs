@@ -71,7 +71,14 @@ pub async fn perform_backup(
     .to_string()
     .into_bytes();
 
-    match run_inner(pool, config, &started.format("%Y%m%d-%H%M%S").to_string(), manifest).await {
+    match run_inner(
+        pool,
+        config,
+        &started.format("%Y%m%d-%H%M%S").to_string(),
+        manifest,
+    )
+    .await
+    {
         Ok((file_name, size)) => {
             sqlx::query(
                 "UPDATE backups SET status='success', finishedAt=?, sizeBytes=?, filePath=? WHERE id=?",
@@ -89,12 +96,13 @@ pub async fn perform_backup(
             let msg = e.to_string();
             // Best-effort: if even this UPDATE fails the startup sweep will later
             // reset the stranded `running` row.
-            let _ = sqlx::query("UPDATE backups SET status='failed', finishedAt=?, error=? WHERE id=?")
-                .bind(Utc::now().to_rfc3339())
-                .bind(&msg)
-                .bind(id)
-                .execute(pool)
-                .await;
+            let _ =
+                sqlx::query("UPDATE backups SET status='failed', finishedAt=?, error=? WHERE id=?")
+                    .bind(Utc::now().to_rfc3339())
+                    .bind(&msg)
+                    .bind(id)
+                    .execute(pool)
+                    .await;
             tracing::error!("Backup #{id} failed: {msg}");
             Err(e)
         }
