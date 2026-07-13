@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod backup;
 pub mod config;
 pub mod error;
 pub mod handlers;
@@ -27,6 +28,8 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub config: Config,
     pub webauthn: Arc<Webauthn>,
+    /// Guards backup runs so scheduled and manual backups never overlap.
+    pub backup_lock: backup::BackupGuard,
 }
 
 impl axum::extract::FromRef<AppState> for SqlitePool {
@@ -44,6 +47,12 @@ impl axum::extract::FromRef<AppState> for Config {
 impl axum::extract::FromRef<AppState> for Arc<Webauthn> {
     fn from_ref(state: &AppState) -> Self {
         state.webauthn.clone()
+    }
+}
+
+impl axum::extract::FromRef<AppState> for backup::BackupGuard {
+    fn from_ref(state: &AppState) -> Self {
+        state.backup_lock.clone()
     }
 }
 
@@ -258,6 +267,18 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/api/admin/regenerate-previews",
             post(handlers::admin::regenerate_previews),
+        )
+        .route(
+            "/api/admin/backups",
+            get(handlers::backups::list_backups).post(handlers::backups::create_backup),
+        )
+        .route(
+            "/api/admin/backups/{id}",
+            delete(handlers::backups::delete_backup),
+        )
+        .route(
+            "/api/admin/backups/{id}/download",
+            get(handlers::backups::download_backup),
         )
         .route(
             "/api/currencies",

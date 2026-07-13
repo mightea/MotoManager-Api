@@ -42,3 +42,8 @@ pdfium-render = "0.9.1"
 # Outbound HTTP, used only to fetch part images from allowlisted hosts (BMWBike import).
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 regex = "1"
+# Backup archiving. Both are pure-Rust (flate2 defaults to the miniz_oxide
+# backend) so they cross-compile cleanly in the arm64/amd64 Docker build with
+# no extra C toolchain — unlike a zstd-sys dependency.
+tar = "0.4"
+flate2 = "1"

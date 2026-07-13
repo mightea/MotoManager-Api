@@ -523,3 +523,19 @@ pub struct Expense {
     pub created_at: String,
     pub updated_at: String,
 }
+
+/// One backup attempt. Written when a run starts (status `running`) and updated
+/// on completion. Serialized to admins in the webapp backup monitor.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct BackupRecord {
+    pub id: i64,
+    pub started_at: String,
+    pub finished_at: Option<String>,
+    pub status: String,
+    pub trigger: String,
+    pub size_bytes: Option<i64>,
+    pub file_path: Option<String>,
+    pub error: Option<String>,
+}

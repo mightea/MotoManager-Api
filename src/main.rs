@@ -75,16 +75,35 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!("Migrations up to date (version {})", latest_applied);
 
+    // A backup row left `running` means a previous process died mid-backup;
+    // clear it so the admin monitor doesn't show a phantom in-progress run.
+    moto_manager_api::backup::reset_stale_running(&pool).await?;
+
     // Initialize WebAuthn
     let rp_id = &config.rp_id;
     let rp_origin = Url::parse(&config.origin)?;
     let builder = WebauthnBuilder::new(rp_id, &rp_origin)?;
     let webauthn = Arc::new(builder.build()?);
 
+    let backup_lock: moto_manager_api::backup::BackupGuard = Arc::new(tokio::sync::Mutex::new(()));
+
+    // Start the automatic backup scheduler (gated by BACKUP_ENABLED). Manual
+    // "Back up now" from the admin UI works regardless.
+    if config.backup_enabled {
+        moto_manager_api::backup::spawn_scheduler(
+            pool.clone(),
+            config.clone(),
+            backup_lock.clone(),
+        );
+    } else {
+        tracing::info!("Automatic backups disabled (BACKUP_ENABLED=false)");
+    }
+
     let state = AppState {
         pool: pool.clone(),
         config: config.clone(),
         webauthn,
+        backup_lock,
     };
 
     // Build CORS layer
