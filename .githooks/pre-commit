@@ -1,0 +1,33 @@
+#!/bin/sh
+#
+# Run rustfmt in check mode before every commit so formatting drift is caught
+# locally instead of failing the `cargo fmt --all -- --check` step in CI.
+# (Dependency-free equivalent of the husky `pnpm lint` pre-commit in the webapp.)
+#
+# Install for a fresh clone:  git config core.hooksPath .githooks
+
+# Nothing to check on commits that don't touch Rust sources (docs, config, …).
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '\.rs$'; then
+  exit 0
+fi
+
+# Can't validate without the toolchain — warn but don't block (CI still guards).
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "⚠ pre-commit: cargo not found, skipping rustfmt check" >&2
+  exit 0
+fi
+
+if cargo fmt --all -- --check >/dev/null 2>&1; then
+  exit 0
+fi
+
+cat >&2 <<'EOF'
+✖ Rustfmt check failed — some files are not formatted.
+
+  Fix it with:   cargo fmt --all
+  then re-stage:  git add -u  &&  git commit
+
+  This mirrors CI's `cargo fmt --all -- --check` step, which would otherwise
+  fail the build. To bypass in an emergency:  git commit --no-verify
+EOF
+exit 1

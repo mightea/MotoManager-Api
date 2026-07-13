@@ -35,10 +35,14 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
    ```sh
    git config core.hooksPath .githooks
    ```
-   This installs a `commit-msg` hook that enforces
-   [Conventional Commits](https://www.conventionalcommits.org/) — required for
-   `release-please` to pick up changes and cut releases. Commits like
-   `feat: …`, `fix: …`, `chore: …` pass; a plain subject is rejected.
+   This installs two hooks:
+   - `commit-msg` — enforces
+     [Conventional Commits](https://www.conventionalcommits.org/) (required for
+     `release-please` to pick up changes and cut releases). Commits like
+     `feat: …`, `fix: …`, `chore: …` pass; a plain subject is rejected.
+   - `pre-commit` — runs `cargo fmt --all -- --check` when a commit touches Rust
+     sources, so formatting drift is caught locally instead of failing CI. Fix
+     with `cargo fmt --all`; bypass in an emergency with `git commit --no-verify`.
 
 ## Testing
 
