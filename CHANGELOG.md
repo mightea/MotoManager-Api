@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/mightea/MotoManager-Api/compare/v0.9.0...v0.10.0) (2026-07-13)
+
+
+### Features
+
+* add in-process database and file backups with admin monitoring ([80488db](https://github.com/mightea/MotoManager-Api/commit/80488dbbe1d9fabf23b9ddf7bdfb08d986c5c849))
+* record frontend/backend versions in backups ([3a8bf83](https://github.com/mightea/MotoManager-Api/commit/3a8bf837c7f1bb3c0fd6759842d299a8ad5d8e46))
+
 ## [0.9.0](https://github.com/mightea/MotoManager-Api/compare/v0.8.0...v0.9.0) (2026-07-12)
 
 
