@@ -158,6 +158,10 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::locations::list_locations).post(handlers::locations::create_location),
         )
         .route(
+            "/api/locations/merge",
+            post(handlers::locations::merge_locations),
+        )
+        .route(
             "/api/locations/{lid}",
             put(handlers::locations::update_location).delete(handlers::locations::delete_location),
         )

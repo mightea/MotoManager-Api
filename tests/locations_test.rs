@@ -500,3 +500,189 @@ async fn test_location_proximity_search() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::BAD_REQUEST);
 }
+
+/// Helper: create a location via the API and return its id.
+async fn create_location_via_api(
+    app: &axum::Router,
+    token: &str,
+    name: &str,
+    location_type: &str,
+) -> i64 {
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/locations")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({"name": name, "type": location_type})).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    read_json(r).await["location"]["id"].as_i64().unwrap()
+}
+
+#[tokio::test]
+async fn test_location_merge_reassigns_references_and_deletes_duplicates() {
+    let (app, pool, token) = setup_test_app().await;
+
+    let (user_id,): (i64,) = sqlx::query_as("SELECT id FROM users WHERE username = 'alice'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // A motorcycle to hang the maintenance/location records off of.
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("BMW")
+    .bind("R80")
+    .bind(user_id)
+    .bind(0)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let canonical_id = create_location_via_api(&app, &token, "Shell Zürich", "fuelStation").await;
+    let dup_id = create_location_via_api(&app, &token, "Shell Zürich", "fuelStation").await;
+
+    // A fuel record and a "bike is here" marker, both pointing at the duplicate.
+    let rec_id = sqlx::query(
+        "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type, locationId) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("2026-07-14")
+    .bind(1000)
+    .bind(moto_id)
+    .bind("fuel")
+    .bind(dup_id)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    sqlx::query("INSERT INTO locationRecords (motorcycleId, locationId, date) VALUES (?, ?, ?)")
+        .bind(moto_id)
+        .bind(dup_id)
+        .bind("2026-07-14")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    // Merge the duplicate into the canonical location.
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/locations/merge")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({
+                        "canonicalId": canonical_id,
+                        "duplicateIds": [dup_id],
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(read_json(r).await["merged"], 1);
+
+    // Duplicate is gone, canonical survives.
+    let (dup_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM locations WHERE id = ?")
+        .bind(dup_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(dup_count, 0);
+    let (canon_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM locations WHERE id = ?")
+        .bind(canonical_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(canon_count, 1);
+
+    // The fuel record kept its link — now to the canonical station (not NULL).
+    let (rec_loc,): (Option<i64>,) =
+        sqlx::query_as("SELECT locationId FROM maintenanceRecords WHERE id = ?")
+            .bind(rec_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(rec_loc, Some(canonical_id));
+
+    // The location marker was reassigned, not deleted.
+    let (marker_count,): (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM locationRecords WHERE locationId = ?")
+            .bind(canonical_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(marker_count, 1);
+}
+
+#[tokio::test]
+async fn test_location_merge_rejects_foreign_and_empty() {
+    let (app, pool, token) = setup_test_app().await;
+    let other_token = create_other_user(&pool).await;
+
+    let canonical_id = create_location_via_api(&app, &token, "Alice Canonical", "storage").await;
+    let dup_id = create_location_via_api(&app, &token, "Alice Dup", "storage").await;
+    let bob_id = create_location_via_api(&app, &other_token, "Bob Place", "storage").await;
+
+    let merge = |tok: String, payload: Value| {
+        let app = app.clone();
+        async move {
+            app.oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/locations/merge")
+                    .header(header::AUTHORIZATION, format!("Bearer {}", tok))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+        }
+    };
+
+    // A duplicate owned by another user → 404, and nothing is deleted.
+    let r = merge(
+        token.clone(),
+        json!({ "canonicalId": canonical_id, "duplicateIds": [bob_id] }),
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::NOT_FOUND);
+    let (bob_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM locations WHERE id = ?")
+        .bind(bob_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(bob_count, 1);
+
+    // Only the canonical id in the duplicate set → nothing to merge → 400.
+    let r = merge(
+        token.clone(),
+        json!({ "canonicalId": canonical_id, "duplicateIds": [canonical_id] }),
+    )
+    .await;
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+
+    // The valid duplicate is untouched by the failed attempts above.
+    let (dup_count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM locations WHERE id = ?")
+        .bind(dup_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(dup_count, 1);
+}

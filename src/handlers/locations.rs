@@ -248,6 +248,101 @@ pub async fn update_location(
     Ok(Json(json!({ "location": location })))
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeLocationsRequest {
+    /// The location that survives the merge; all references are pointed here.
+    pub canonical_id: i64,
+    /// Locations folded into the canonical one and then deleted.
+    pub duplicate_ids: Vec<i64>,
+}
+
+/// Fold one or more duplicate locations into a canonical one: re-point every
+/// referencing row (maintenance entries, location markers, storage places) at
+/// the canonical location, then delete the duplicates. Unlike `delete_location`
+/// this preserves the links instead of detaching them, which is what makes it a
+/// merge rather than a delete. Runs in a single transaction so a failure leaves
+/// nothing half-merged.
+pub async fn merge_locations(
+    State(pool): State<SqlitePool>,
+    AuthUser(user): AuthUser,
+    Json(body): Json<MergeLocationsRequest>,
+) -> AppResult<Json<Value>> {
+    // Drop the canonical id and any repeats from the duplicate set so we never
+    // reassign-then-delete the survivor.
+    let mut dups: Vec<i64> = body
+        .duplicate_ids
+        .into_iter()
+        .filter(|id| *id != body.canonical_id)
+        .collect();
+    dups.sort_unstable();
+    dups.dedup();
+    if dups.is_empty() {
+        return Err(AppError::BadRequest(
+            "no duplicate locations to merge".to_string(),
+        ));
+    }
+
+    let mut tx = pool.begin().await?;
+
+    // The canonical location must belong to the caller.
+    let canonical: Option<(i64,)> =
+        sqlx::query_as("SELECT id FROM locations WHERE id = ? AND userId = ?")
+            .bind(body.canonical_id)
+            .bind(user.id)
+            .fetch_optional(&mut *tx)
+            .await?;
+    if canonical.is_none() {
+        return Err(AppError::NotFound("Location not found".to_string()));
+    }
+
+    for id in &dups {
+        // Every duplicate must also belong to the caller — otherwise a crafted
+        // request could reassign another user's rows before we notice.
+        let owned: Option<(i64,)> =
+            sqlx::query_as("SELECT id FROM locations WHERE id = ? AND userId = ?")
+                .bind(id)
+                .bind(user.id)
+                .fetch_optional(&mut *tx)
+                .await?;
+        if owned.is_none() {
+            return Err(AppError::NotFound("Location not found".to_string()));
+        }
+
+        // Re-point the three tables that reference locations(id). locationRecords
+        // has no uniqueness on locationId, so plain reassignment is safe.
+        sqlx::query("UPDATE maintenanceRecords SET locationId = ? WHERE locationId = ?")
+            .bind(body.canonical_id)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE locationRecords SET locationId = ? WHERE locationId = ?")
+            .bind(body.canonical_id)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE storageLocations SET locationId = ? WHERE locationId = ?")
+            .bind(body.canonical_id)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+
+        sqlx::query("DELETE FROM locations WHERE id = ? AND userId = ?")
+            .bind(id)
+            .bind(user.id)
+            .execute(&mut *tx)
+            .await?;
+    }
+
+    tx.commit().await?;
+
+    Ok(Json(json!({
+        "message": "Locations merged",
+        "canonicalId": body.canonical_id,
+        "merged": dups.len(),
+    })))
+}
+
 pub async fn delete_location(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
