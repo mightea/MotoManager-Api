@@ -289,6 +289,8 @@ pub struct UserSettings {
     pub brake_fluid_km_interval: Option<i64>,
     pub coolant_km_interval: Option<i64>,
     pub chain_km_interval: Option<i64>,
+    /// Minimum km a bike should be ridden per year; the overview card warns below it.
+    pub min_km_per_year: i64,
     pub updated_at: Option<String>,
 }
 

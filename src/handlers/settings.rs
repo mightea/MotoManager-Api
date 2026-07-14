@@ -72,6 +72,7 @@ pub struct UpdateSettingsRequest {
     pub brake_fluid_km_interval: Option<i64>,
     pub coolant_km_interval: Option<i64>,
     pub chain_km_interval: Option<i64>,
+    pub min_km_per_year: Option<i64>,
 }
 
 pub async fn update_settings(
@@ -138,6 +139,7 @@ pub async fn update_settings(
         .or(existing.brake_fluid_km_interval);
     let coolant_km_interval = body.coolant_km_interval.or(existing.coolant_km_interval);
     let chain_km_interval = body.chain_km_interval.or(existing.chain_km_interval);
+    let min_km_per_year = body.min_km_per_year.unwrap_or(existing.min_km_per_year);
 
     sqlx::query!(
         "UPDATE userSettings SET \
@@ -148,7 +150,7 @@ pub async fn update_settings(
          tireKmInterval = ?, engineOilKmInterval = ?, gearboxOilKmInterval = ?, \
          finalDriveOilKmInterval = ?, finalDriveGearboxOilKmInterval = ?, \
          forkOilKmInterval = ?, brakeFluidKmInterval = ?, \
-         coolantKmInterval = ?, chainKmInterval = ?, updatedAt = ? \
+         coolantKmInterval = ?, chainKmInterval = ?, minKmPerYear = ?, updatedAt = ? \
          WHERE userId = ?",
         tire_interval,
         battery_lithium_interval,
@@ -170,6 +172,7 @@ pub async fn update_settings(
         brake_fluid_km_interval,
         coolant_km_interval,
         chain_km_interval,
+        min_km_per_year,
         now,
         user.id
     )

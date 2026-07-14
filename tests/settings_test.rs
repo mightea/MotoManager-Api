@@ -95,6 +95,8 @@ async fn test_settings_final_drive_gearbox_oil_interval_roundtrip() {
     let body = read_json(r).await;
     assert_eq!(body["settings"]["finalDriveGearboxOilInterval"], 2);
     assert!(body["settings"]["finalDriveGearboxOilKmInterval"].is_null());
+    // Minimum km/year seeds to 150.
+    assert_eq!(body["settings"]["minKmPerYear"], 150);
 
     // Update the new field (plus a neighbour to prove bind order is intact).
     let r = app
@@ -110,6 +112,7 @@ async fn test_settings_final_drive_gearbox_oil_interval_roundtrip() {
                         "finalDriveGearboxOilInterval": 5,
                         "finalDriveGearboxOilKmInterval": 40000,
                         "engineOilInterval": 3,
+                        "minKmPerYear": 500,
                     }))
                     .unwrap(),
                 ))
@@ -122,6 +125,7 @@ async fn test_settings_final_drive_gearbox_oil_interval_roundtrip() {
     assert_eq!(body["settings"]["finalDriveGearboxOilInterval"], 5);
     assert_eq!(body["settings"]["finalDriveGearboxOilKmInterval"], 40000);
     assert_eq!(body["settings"]["engineOilInterval"], 3);
+    assert_eq!(body["settings"]["minKmPerYear"], 500);
     // Neighbouring columns kept their defaults — no bind-order bleed.
     assert_eq!(body["settings"]["finalDriveOilInterval"], 2);
     assert_eq!(body["settings"]["forkOilInterval"], 4);
