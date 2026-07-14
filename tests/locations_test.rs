@@ -686,3 +686,50 @@ async fn test_location_merge_rejects_foreign_and_empty() {
         .unwrap();
     assert_eq!(dup_count, 1);
 }
+
+#[tokio::test]
+async fn test_delete_location_detaches_storage_location() {
+    let (app, pool, token) = setup_test_app().await;
+
+    let (user_id,): (i64,) = sqlx::query_as("SELECT id FROM users WHERE username = 'alice'")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let place_id = create_location_via_api(&app, &token, "Home Garage", "storage").await;
+
+    // A part storage container anchored to that place.
+    let storage_id =
+        sqlx::query("INSERT INTO storageLocations (userId, name, locationId) VALUES (?, ?, ?)")
+            .bind(user_id)
+            .bind("Shelf A")
+            .bind(place_id)
+            .execute(&pool)
+            .await
+            .unwrap()
+            .last_insert_rowid();
+
+    // Deleting the place must not trip the FK check.
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/locations/{}", place_id))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+
+    // The container survives with its place link detached.
+    let (loc,): (Option<i64>,) =
+        sqlx::query_as("SELECT locationId FROM storageLocations WHERE id = ?")
+            .bind(storage_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(loc, None);
+}

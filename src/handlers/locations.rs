@@ -348,9 +348,10 @@ pub async fn delete_location(
     AuthUser(user): AuthUser,
     Path(lid): Path<i64>,
 ) -> AppResult<Json<Value>> {
-    // Locations are referenced by two tables with `ON DELETE NO ACTION`:
+    // Locations are referenced by three tables with `ON DELETE NO ACTION`:
     //   - maintenanceRecords.locationId (nullable) — historical entries we want to keep
     //   - locationRecords.locationId    (NOT NULL) — explicit "the bike is here" markers
+    //   - storageLocations.locationId   (nullable) — part storage anchored to a place
     // A plain DELETE on the location row trips SQLite's FK check whenever the
     // location is in use. Detach references inside a transaction so the user
     // can drop a location without manually scrubbing every dependent row.
@@ -375,6 +376,13 @@ pub async fn delete_location(
 
     // locationRecords are meaningless without the location they point to.
     sqlx::query("DELETE FROM locationRecords WHERE locationId = ?")
+        .bind(lid)
+        .execute(&mut *tx)
+        .await?;
+
+    // Storage containers lose their anchored place but otherwise survive — the
+    // shelf/box and the parts on it are still valid without a linked location.
+    sqlx::query("UPDATE storageLocations SET locationId = NULL WHERE locationId = ?")
         .bind(lid)
         .execute(&mut *tx)
         .await?;
