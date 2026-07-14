@@ -681,7 +681,7 @@ pub async fn delete_model_series(
 
     // Leaves first: the self-referencing parentId FK forbids removing a parent
     // while children still point at it.
-    subtree.sort_by(|a, b| b.1.cmp(&a.1));
+    subtree.sort_by_key(|entry| std::cmp::Reverse(entry.1));
     let mut tx = pool.begin().await?;
     for (id, _) in &subtree {
         sqlx::query("DELETE FROM modelSeries WHERE id = ?")
