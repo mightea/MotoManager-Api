@@ -61,11 +61,27 @@ pub async fn verify_location_ownership(
     Ok(())
 }
 
+/// Great-circle distance between two WGS84 points, in metres.
+fn haversine_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    const EARTH_RADIUS_M: f64 = 6_371_000.0;
+    let (p1, p2) = (lat1.to_radians(), lat2.to_radians());
+    let dlat = (lat2 - lat1).to_radians();
+    let dlon = (lon2 - lon1).to_radians();
+    let a = (dlat / 2.0).sin().powi(2) + p1.cos() * p2.cos() * (dlon / 2.0).sin().powi(2);
+    2.0 * EARTH_RADIUS_M * a.sqrt().clamp(-1.0, 1.0).asin()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocationFilter {
     /// Comma-separated list of LocationType values in camelCase, e.g. `storage,maintenanceShop`.
     pub types: Option<String>,
+    /// Proximity search: when `lat`+`lon` are supplied, only locations that have
+    /// coordinates and lie within `radius` metres are returned, nearest first.
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+    /// Search radius in metres (default 250 when a proximity search is requested).
+    pub radius: Option<f64>,
 }
 
 pub async fn list_locations(
@@ -95,6 +111,38 @@ pub async fn list_locations(
         query = query.bind(t);
     }
     let locations = query.fetch_all(&pool).await?;
+
+    // Optional proximity search: keep only coordinate-bearing locations within
+    // `radius` metres of (lat, lon), ordered nearest-first. User counts are small,
+    // so the haversine filter runs in Rust rather than in SQL.
+    if filter.lat.is_some() || filter.lon.is_some() {
+        let (lat, lon) = match validate_coords(filter.lat, filter.lon)? {
+            (Some(lat), Some(lon)) => (lat, lon),
+            _ => {
+                return Err(AppError::BadRequest(
+                    "latitude and longitude must be provided together".to_string(),
+                ))
+            }
+        };
+        let radius = filter.radius.unwrap_or(250.0);
+        if radius <= 0.0 {
+            return Err(AppError::BadRequest("radius must be positive".to_string()));
+        }
+
+        let mut with_distance: Vec<(f64, Location)> = locations
+            .into_iter()
+            .filter_map(|loc| match (loc.latitude, loc.longitude) {
+                (Some(la), Some(lo)) => {
+                    let d = haversine_meters(lat, lon, la, lo);
+                    (d <= radius).then_some((d, loc))
+                }
+                _ => None,
+            })
+            .collect();
+        with_distance.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let nearby: Vec<Location> = with_distance.into_iter().map(|(_, loc)| loc).collect();
+        return Ok(Json(json!({ "locations": nearby })));
+    }
 
     Ok(Json(json!({ "locations": locations })))
 }

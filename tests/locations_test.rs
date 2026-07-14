@@ -412,3 +412,91 @@ async fn test_maintenance_rejects_foreign_location_id() {
         .unwrap();
     assert_eq!(r.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn test_location_proximity_search() {
+    let (app, _pool, token) = setup_test_app().await;
+
+    async fn create_station(
+        app: &axum::Router,
+        token: &str,
+        name: &str,
+        coords: Option<(f64, f64)>,
+    ) {
+        let mut body = json!({ "name": name, "type": "fuelStation" });
+        if let Some((lat, lon)) = coords {
+            body["latitude"] = json!(lat);
+            body["longitude"] = json!(lon);
+        }
+        let r = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/locations")
+                    .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(serde_json::to_vec(&body).unwrap()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::CREATED);
+    }
+
+    // Zürich HB; ~1.5 km away; and one without coordinates.
+    create_station(&app, &token, "Near", Some((47.3769, 8.5417))).await;
+    create_station(&app, &token, "Far", Some((47.3880, 8.5300))).await;
+    create_station(&app, &token, "NoCoords", None).await;
+
+    let names = |body: &Value| -> Vec<String> {
+        body["locations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|l| l["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    // 300 m radius around "Near" → only "Near" (Far too far, NoCoords excluded).
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/locations?types=fuelStation&lat=47.3769&lon=8.5417&radius=300")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    assert_eq!(names(&read_json(r).await), vec!["Near"]);
+
+    // Wider radius → both, nearest first.
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/locations?lat=47.3769&lon=8.5417&radius=5000")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(names(&read_json(r).await), vec!["Near", "Far"]);
+
+    // Half-pair coordinates → 400.
+    let r = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/locations?lat=47.3769")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+}
