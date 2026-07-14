@@ -14,7 +14,6 @@ use axum::{
     extract::{Multipart, State},
     Json,
 };
-use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{Row, SqlitePool};
