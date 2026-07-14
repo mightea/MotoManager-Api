@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.12.0](https://github.com/mightea/MotoManager-Api/compare/v0.11.0...v0.12.0) (2026-07-14)
+
+
+### Features
+
+* add configurable final-drive gearbox oil interval ([5c6686c](https://github.com/mightea/MotoManager-Api/commit/5c6686cd03dd470641dec409ba7b1a69081187c8))
+* add locations merge endpoint for de-duplication ([58fd3fa](https://github.com/mightea/MotoManager-Api/commit/58fd3fa552c5afb34020578f1f6461415b224fd7))
+* add minimum yearly kilometres setting ([1638366](https://github.com/mightea/MotoManager-Api/commit/16383662cfac47c454495d677d2791d53a64b127))
+* add proximity search to the locations API ([acf1191](https://github.com/mightea/MotoManager-Api/commit/acf119120ecc003fde7519c9aaac61e10c4ea091))
+
+
+### Bug Fixes
+
+* detach storage locations when deleting a location ([2d60cce](https://github.com/mightea/MotoManager-Api/commit/2d60cce0846d26e14f65be6cd3e810e88895b99a))
+
 ## [0.11.0](https://github.com/mightea/MotoManager-Api/compare/v0.10.0...v0.11.0) (2026-07-13)
 
 
