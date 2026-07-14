@@ -58,6 +58,7 @@ pub struct UpdateSettingsRequest {
     pub engine_oil_interval: Option<i64>,
     pub gearbox_oil_interval: Option<i64>,
     pub final_drive_oil_interval: Option<i64>,
+    pub final_drive_gearbox_oil_interval: Option<i64>,
     pub fork_oil_interval: Option<i64>,
     pub brake_fluid_interval: Option<i64>,
     pub coolant_interval: Option<i64>,
@@ -66,6 +67,7 @@ pub struct UpdateSettingsRequest {
     pub engine_oil_km_interval: Option<i64>,
     pub gearbox_oil_km_interval: Option<i64>,
     pub final_drive_oil_km_interval: Option<i64>,
+    pub final_drive_gearbox_oil_km_interval: Option<i64>,
     pub fork_oil_km_interval: Option<i64>,
     pub brake_fluid_km_interval: Option<i64>,
     pub coolant_km_interval: Option<i64>,
@@ -108,6 +110,9 @@ pub async fn update_settings(
     let final_drive_oil_interval = body
         .final_drive_oil_interval
         .unwrap_or(existing.final_drive_oil_interval);
+    let final_drive_gearbox_oil_interval = body
+        .final_drive_gearbox_oil_interval
+        .unwrap_or(existing.final_drive_gearbox_oil_interval);
     let fork_oil_interval = body.fork_oil_interval.unwrap_or(existing.fork_oil_interval);
     let brake_fluid_interval = body
         .brake_fluid_interval
@@ -124,6 +129,9 @@ pub async fn update_settings(
     let final_drive_oil_km_interval = body
         .final_drive_oil_km_interval
         .or(existing.final_drive_oil_km_interval);
+    let final_drive_gearbox_oil_km_interval = body
+        .final_drive_gearbox_oil_km_interval
+        .or(existing.final_drive_gearbox_oil_km_interval);
     let fork_oil_km_interval = body.fork_oil_km_interval.or(existing.fork_oil_km_interval);
     let brake_fluid_km_interval = body
         .brake_fluid_km_interval
@@ -135,9 +143,11 @@ pub async fn update_settings(
         "UPDATE userSettings SET \
          tireInterval = ?, batteryLithiumInterval = ?, batteryDefaultInterval = ?, \
          engineOilInterval = ?, gearboxOilInterval = ?, finalDriveOilInterval = ?, \
+         finalDriveGearboxOilInterval = ?, \
          forkOilInterval = ?, brakeFluidInterval = ?, coolantInterval = ?, chainInterval = ?, \
          tireKmInterval = ?, engineOilKmInterval = ?, gearboxOilKmInterval = ?, \
-         finalDriveOilKmInterval = ?, forkOilKmInterval = ?, brakeFluidKmInterval = ?, \
+         finalDriveOilKmInterval = ?, finalDriveGearboxOilKmInterval = ?, \
+         forkOilKmInterval = ?, brakeFluidKmInterval = ?, \
          coolantKmInterval = ?, chainKmInterval = ?, updatedAt = ? \
          WHERE userId = ?",
         tire_interval,
@@ -146,6 +156,7 @@ pub async fn update_settings(
         engine_oil_interval,
         gearbox_oil_interval,
         final_drive_oil_interval,
+        final_drive_gearbox_oil_interval,
         fork_oil_interval,
         brake_fluid_interval,
         coolant_interval,
@@ -154,6 +165,7 @@ pub async fn update_settings(
         engine_oil_km_interval,
         gearbox_oil_km_interval,
         final_drive_oil_km_interval,
+        final_drive_gearbox_oil_km_interval,
         fork_oil_km_interval,
         brake_fluid_km_interval,
         coolant_km_interval,

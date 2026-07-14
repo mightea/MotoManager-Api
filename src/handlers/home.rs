@@ -361,6 +361,12 @@ pub async fn get_home_data(
                     s.final_drive_oil_km_interval,
                 ),
                 (
+                    "finaldrivegearboxoil",
+                    "Hinterachsgetriebeöl",
+                    s.final_drive_gearbox_oil_interval,
+                    s.final_drive_gearbox_oil_km_interval,
+                ),
+                (
                     "forkoil",
                     "Gabelöl",
                     s.fork_oil_interval,
