@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/mightea/MotoManager-Api/compare/v0.12.0...v0.13.0) (2026-07-15)
+
+
+### Features
+
+* add motorcycle drive type (chain/shaft) ([f3f87de](https://github.com/mightea/MotoManager-Api/commit/f3f87de1a2110017e7a269c868d32b9e2cfb2a5a))
+* add per-wheel brake type to motorcycles ([2de5995](https://github.com/mightea/MotoManager-Api/commit/2de5995627b50f3cf630bc986f32c5808820eede))
+
 ## [0.12.0](https://github.com/mightea/MotoManager-Api/compare/v0.11.0...v0.12.0) (2026-07-14)
 
 
