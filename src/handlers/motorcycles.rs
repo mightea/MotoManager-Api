@@ -204,13 +204,17 @@ pub async fn create_motorcycle(
     if let Some(sid) = series_id {
         crate::handlers::model_series::verify_series_accessible(&pool, sid, user.id).await?;
     }
+    let front_brake_type = create_text(&fields, "frontBrakeType");
+    let rear_brake_type = create_text(&fields, "rearBrakeType");
+    let sidecar_brake_type = create_text(&fields, "sidecarBrakeType");
 
     let id = sqlx::query(
         "INSERT INTO motorcycles
            (make, model, modelYear, userId, vin, engineNumber, vehicleNr, numberPlate,
             image, isVeteran, isArchived, hasSidecar, hasUnknownOwners, firstRegistration, initialOdo, manualOdo,
-            purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize, seriesId)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize, seriesId,
+            frontBrakeType, rearBrakeType, sidecarBrakeType)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&make)
     .bind(&model)
@@ -234,6 +238,9 @@ pub async fn create_motorcycle(
     .bind(&currency_code)
     .bind(fuel_tank_size)
     .bind(series_id)
+    .bind(&front_brake_type)
+    .bind(&rear_brake_type)
+    .bind(&sidecar_brake_type)
     .execute(&pool)
     .await?
     .last_insert_rowid();
@@ -459,6 +466,9 @@ pub async fn update_motorcycle(
         },
         None => existing.series_id,
     };
+    let front_brake_type = merge_text(&fields, "frontBrakeType", existing.front_brake_type);
+    let rear_brake_type = merge_text(&fields, "rearBrakeType", existing.rear_brake_type);
+    let sidecar_brake_type = merge_text(&fields, "sidecarBrakeType", existing.sidecar_brake_type);
 
     sqlx::query(
         "UPDATE motorcycles SET
@@ -466,7 +476,7 @@ pub async fn update_motorcycle(
            vehicleNr = ?, numberPlate = ?, image = ?, isVeteran = ?, isArchived = ?,
            hasSidecar = ?, hasUnknownOwners = ?, firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
            purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?,
-           seriesId = ?
+           seriesId = ?, frontBrakeType = ?, rearBrakeType = ?, sidecarBrakeType = ?
            WHERE id = ? AND userId = ?",
     )
     .bind(&make)
@@ -490,6 +500,9 @@ pub async fn update_motorcycle(
     .bind(&currency_code)
     .bind(fuel_tank_size)
     .bind(series_id)
+    .bind(&front_brake_type)
+    .bind(&rear_brake_type)
+    .bind(&sidecar_brake_type)
     .bind(id)
     .bind(user.id)
     .execute(&pool)

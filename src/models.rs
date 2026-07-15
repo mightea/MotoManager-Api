@@ -87,6 +87,11 @@ pub struct Motorcycle {
     pub currency_code: Option<String>,
     pub fuel_tank_size: Option<f64>,
     pub series_id: Option<i64>,
+    /// Per-wheel brake type ("disc"/"drum"); None = unconfigured. Drives the
+    /// brake options shown in the maintenance UI (see migration 038).
+    pub front_brake_type: Option<String>,
+    pub rear_brake_type: Option<String>,
+    pub sidecar_brake_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -119,6 +124,9 @@ pub struct MotorcycleWithStats {
     pub currency_code: Option<String>,
     pub fuel_tank_size: Option<f64>,
     pub series_id: Option<i64>,
+    pub front_brake_type: Option<String>,
+    pub rear_brake_type: Option<String>,
+    pub sidecar_brake_type: Option<String>,
     pub open_issues: i64,
     pub maintenance_count: i64,
     pub latest_odo: Option<i64>,

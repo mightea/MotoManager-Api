@@ -1103,3 +1103,80 @@ async fn test_update_motorcycle_saves_all_fields() {
     assert_eq!(m["fuelTankSize"], 22.5);
     assert_eq!(m["isVeteran"], true);
 }
+
+/// Per-wheel brake types save via multipart, clear on empty, and keep their
+/// value when the field is absent (mirrors hasSidecar/seriesId semantics).
+#[tokio::test]
+async fn test_update_motorcycle_brake_types() {
+    let (app, pool, token) = setup_test_app().await;
+
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES ('BMW', 'R80', 1, 1000)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let boundary = "brake-boundary";
+    let put = |fields: Vec<(&'static str, &'static str)>| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let mut body = String::new();
+            for (name, value) in fields {
+                body.push_str(&multipart_field(boundary, name, value));
+            }
+            body.push_str(&format!("--{boundary}--\r\n"));
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri(format!("/api/motorcycles/{moto_id}"))
+                        .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                        .header(
+                            header::CONTENT_TYPE,
+                            format!("multipart/form-data; boundary={boundary}"),
+                        )
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice::<Value>(&bytes).unwrap()
+        }
+    };
+
+    // Set all three.
+    let json = put(vec![
+        ("make", "BMW"),
+        ("model", "R80"),
+        ("frontBrakeType", "disc"),
+        ("rearBrakeType", "drum"),
+        ("sidecarBrakeType", "disc"),
+    ])
+    .await;
+    let m = &json["motorcycle"];
+    assert_eq!(m["frontBrakeType"], "disc");
+    assert_eq!(m["rearBrakeType"], "drum");
+    assert_eq!(m["sidecarBrakeType"], "disc");
+
+    // Clear rear (empty), leave front/sidecar absent → they keep their values.
+    let json = put(vec![
+        ("make", "BMW"),
+        ("model", "R80"),
+        ("rearBrakeType", ""),
+    ])
+    .await;
+    let m = &json["motorcycle"];
+    assert_eq!(m["frontBrakeType"], "disc", "absent field keeps value: {m}");
+    assert!(m["rearBrakeType"].is_null(), "empty field clears: {m}");
+    assert_eq!(
+        m["sidecarBrakeType"], "disc",
+        "absent field keeps value: {m}"
+    );
+}
