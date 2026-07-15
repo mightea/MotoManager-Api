@@ -1151,21 +1151,23 @@ async fn test_update_motorcycle_brake_types() {
         }
     };
 
-    // Set all three.
+    // Set all three brakes plus the drivetrain.
     let json = put(vec![
         ("make", "BMW"),
         ("model", "R80"),
         ("frontBrakeType", "disc"),
         ("rearBrakeType", "drum"),
         ("sidecarBrakeType", "disc"),
+        ("driveType", "shaft"),
     ])
     .await;
     let m = &json["motorcycle"];
     assert_eq!(m["frontBrakeType"], "disc");
     assert_eq!(m["rearBrakeType"], "drum");
     assert_eq!(m["sidecarBrakeType"], "disc");
+    assert_eq!(m["driveType"], "shaft");
 
-    // Clear rear (empty), leave front/sidecar absent → they keep their values.
+    // Clear rear (empty), leave front/sidecar/driveType absent → keep values.
     let json = put(vec![
         ("make", "BMW"),
         ("model", "R80"),
@@ -1179,4 +1181,5 @@ async fn test_update_motorcycle_brake_types() {
         m["sidecarBrakeType"], "disc",
         "absent field keeps value: {m}"
     );
+    assert_eq!(m["driveType"], "shaft", "absent field keeps value: {m}");
 }

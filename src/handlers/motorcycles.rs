@@ -207,14 +207,15 @@ pub async fn create_motorcycle(
     let front_brake_type = create_text(&fields, "frontBrakeType");
     let rear_brake_type = create_text(&fields, "rearBrakeType");
     let sidecar_brake_type = create_text(&fields, "sidecarBrakeType");
+    let drive_type = create_text(&fields, "driveType");
 
     let id = sqlx::query(
         "INSERT INTO motorcycles
            (make, model, modelYear, userId, vin, engineNumber, vehicleNr, numberPlate,
             image, isVeteran, isArchived, hasSidecar, hasUnknownOwners, firstRegistration, initialOdo, manualOdo,
             purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize, seriesId,
-            frontBrakeType, rearBrakeType, sidecarBrakeType)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            frontBrakeType, rearBrakeType, sidecarBrakeType, driveType)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&make)
     .bind(&model)
@@ -241,6 +242,7 @@ pub async fn create_motorcycle(
     .bind(&front_brake_type)
     .bind(&rear_brake_type)
     .bind(&sidecar_brake_type)
+    .bind(&drive_type)
     .execute(&pool)
     .await?
     .last_insert_rowid();
@@ -469,6 +471,7 @@ pub async fn update_motorcycle(
     let front_brake_type = merge_text(&fields, "frontBrakeType", existing.front_brake_type);
     let rear_brake_type = merge_text(&fields, "rearBrakeType", existing.rear_brake_type);
     let sidecar_brake_type = merge_text(&fields, "sidecarBrakeType", existing.sidecar_brake_type);
+    let drive_type = merge_text(&fields, "driveType", existing.drive_type);
 
     sqlx::query(
         "UPDATE motorcycles SET
@@ -476,7 +479,7 @@ pub async fn update_motorcycle(
            vehicleNr = ?, numberPlate = ?, image = ?, isVeteran = ?, isArchived = ?,
            hasSidecar = ?, hasUnknownOwners = ?, firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
            purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?,
-           seriesId = ?, frontBrakeType = ?, rearBrakeType = ?, sidecarBrakeType = ?
+           seriesId = ?, frontBrakeType = ?, rearBrakeType = ?, sidecarBrakeType = ?, driveType = ?
            WHERE id = ? AND userId = ?",
     )
     .bind(&make)
@@ -503,6 +506,7 @@ pub async fn update_motorcycle(
     .bind(&front_brake_type)
     .bind(&rear_brake_type)
     .bind(&sidecar_brake_type)
+    .bind(&drive_type)
     .bind(id)
     .bind(user.id)
     .execute(&pool)

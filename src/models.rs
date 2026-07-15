@@ -92,6 +92,9 @@ pub struct Motorcycle {
     pub front_brake_type: Option<String>,
     pub rear_brake_type: Option<String>,
     pub sidecar_brake_type: Option<String>,
+    /// Drivetrain ("chain"/"shaft"); None = unconfigured. Filters chain- vs
+    /// shaft-drive maintenance options (see migration 039).
+    pub drive_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -127,6 +130,7 @@ pub struct MotorcycleWithStats {
     pub front_brake_type: Option<String>,
     pub rear_brake_type: Option<String>,
     pub sidecar_brake_type: Option<String>,
+    pub drive_type: Option<String>,
     pub open_issues: i64,
     pub maintenance_count: i64,
     pub latest_odo: Option<i64>,
