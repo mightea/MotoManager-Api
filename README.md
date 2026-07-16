@@ -1,5 +1,8 @@
 # MotoManager API
 
+[![CI](https://github.com/mightea/MotoManager-Api/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mightea/MotoManager-Api/actions/workflows/ci.yml)
+[![Coverage](https://raw.githubusercontent.com/mightea/MotoManager-Api/badges/coverage.svg)](https://github.com/mightea/MotoManager-Api/actions/workflows/ci.yml)
+
 Rust backend for MotoManager — a motorcycle maintenance and management application. Built with [Axum](https://github.com/tokio-rs/axum) and [SQLx](https://github.com/launchbadge/sqlx) against a SQLite database.
 
 ## Stack
