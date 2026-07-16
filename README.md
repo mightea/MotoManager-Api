@@ -23,7 +23,7 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
    ```
    DATABASE_URL=sqlite:./db.sqlite   # path to your SQLite database
    PORT=3001
-   ORIGIN=http://localhost:5173      # frontend origin for CORS
+   ORIGIN=http://localhost:5174      # frontend origin for CORS
    DATA_DIR=./data                   # where uploaded files are stored
    ENABLE_REGISTRATION=false         # false = only the first user can register
    RUST_LOG=info
