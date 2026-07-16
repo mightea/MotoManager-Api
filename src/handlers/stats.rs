@@ -37,7 +37,7 @@ pub async fn get_stats(
         r#"SELECT
             (SELECT COUNT(*) FROM users)                                  AS "users_count!: i64",
             (SELECT COUNT(*) FROM motorcycles)                            AS "motorcycles_count_global!: i64",
-            (SELECT COUNT(*) FROM motorcycles WHERE isArchived = 1)       AS "archived_count_global!: i64",
+            (SELECT COUNT(*) FROM motorcycles WHERE status = 'sold')      AS "archived_count_global!: i64",
             (SELECT COUNT(*) FROM documents)                              AS "docs_count_global!: i64",
             (SELECT COUNT(*) FROM documentMotorcycles)                    AS "doc_assignments_count_global!: i64",
             (SELECT COUNT(*) FROM maintenanceRecords)                     AS "maintenance_count_total_global!: i64",
@@ -197,7 +197,7 @@ pub async fn get_stats(
             "userId": moto.user_id,
             "image": moto.image.as_ref().map(|i| format!("/images/{}", i.replace("/data/images/", "").replace("data/images/", ""))),
             "isVeteran": moto.is_veteran,
-            "isArchived": moto.is_archived,
+            "status": moto.status,
             "initialOdo": initial_odo,
             "odometer": bike_max_odo,
             "odometerThisYear": odo_by_year.get(&current_year).map(|&v| v - odo_by_year.get(&(current_year - 1)).cloned().unwrap_or(initial_odo)).unwrap_or(0),

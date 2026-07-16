@@ -998,8 +998,8 @@ async fn test_update_motorcycle_saves_all_fields() {
     let moto_id = sqlx::query(
         "INSERT INTO motorcycles \
          (make, model, userId, initialOdo, vehicleNr, purchasePrice, normalizedPurchasePrice, \
-          currencyCode, isArchived, isVeteran, seriesId, numberPlate, fuelTankSize) \
-         VALUES ('BMW', 'K75S', 1, 1000, 'OLD-NR', 5000, 5000, 'CHF', 1, 1, ?, 'ZH 1', 21)",
+          currencyCode, status, isVeteran, seriesId, numberPlate, fuelTankSize) \
+         VALUES ('BMW', 'K75S', 1, 1000, 'OLD-NR', 5000, 5000, 'CHF', 'sold', 1, ?, 'ZH 1', 21)",
     )
     .bind(series_id)
     .execute(&pool)
@@ -1007,8 +1007,8 @@ async fn test_update_motorcycle_saves_all_fields() {
     .unwrap()
     .last_insert_rowid();
 
-    // Full edit: change values, clear others, uncheck isArchived, and use the
-    // legacy vehicleIdNr field name the webapp posted historically.
+    // Full edit: change values, clear others, set status back to active, and use
+    // the legacy vehicleIdNr field name the webapp posted historically.
     let boundary = "moto-update-boundary";
     let mut body = String::new();
     for (name, value) in [
@@ -1021,7 +1021,7 @@ async fn test_update_motorcycle_saves_all_fields() {
         ("purchasePrice", ""),           // clear
         ("normalizedPurchasePrice", ""), // clear (webapp action mirrors this)
         ("fuelTankSize", "22.5"),
-        ("isArchived", "false"),
+        ("status", "active"),
         ("isVeteran", "true"),
         ("seriesId", ""), // clear
         ("initialOdo", "1200"),
@@ -1064,7 +1064,8 @@ async fn test_update_motorcycle_saves_all_fields() {
     assert!(m["purchasePrice"].is_null(), "empty field must clear: {m}");
     assert!(m["normalizedPurchasePrice"].is_null(), "{m}");
     assert_eq!(m["fuelTankSize"], 22.5);
-    assert_eq!(m["isArchived"], false, "unchecking must save");
+    assert_eq!(m["status"], "active", "status change must save");
+    assert!(m["isArchived"].is_null(), "isArchived removed from the API");
     assert_eq!(m["isVeteran"], true);
     assert!(m["seriesId"].is_null(), "empty seriesId must clear: {m}");
     assert_eq!(m["initialOdo"], 1200);
@@ -1184,8 +1185,7 @@ async fn test_update_motorcycle_brake_types() {
     assert_eq!(m["driveType"], "shaft", "absent field keeps value: {m}");
 }
 
-/// Status + sale details round-trip via multipart, and isArchived stays derived
-/// from status (archived/sold => 1) for backward-compatible clients.
+/// Status + sale details round-trip via multipart.
 #[tokio::test]
 async fn test_update_motorcycle_status_and_sale() {
     let (app, pool, token) = setup_test_app().await;
@@ -1242,13 +1242,16 @@ async fn test_update_motorcycle_status_and_sale() {
     .await;
     let m = &json["motorcycle"];
     assert_eq!(m["status"], "sold");
-    assert_eq!(m["isArchived"], true, "isArchived derived from status: {m}");
+    assert!(
+        m["isArchived"].is_null(),
+        "isArchived removed from the API: {m}"
+    );
     assert_eq!(m["soldDate"], "2026-06-01");
     assert_eq!(m["salePrice"], 4200.0);
     assert_eq!(m["saleCurrencyCode"], "CHF");
     assert_eq!(m["buyerName"], "Hans Muster");
 
-    // Back to active clears the derived archived flag.
+    // Back to active.
     let json = put(vec![
         ("make", "BMW"),
         ("model", "R80"),
@@ -1257,7 +1260,6 @@ async fn test_update_motorcycle_status_and_sale() {
     .await;
     let m = &json["motorcycle"];
     assert_eq!(m["status"], "active");
-    assert_eq!(m["isArchived"], false);
 }
 
 /// A sold bike is still returned by /home (for the "show sold" toggle) but no
@@ -1304,7 +1306,7 @@ async fn test_home_excludes_sold_bike_from_active_counts() {
     assert_eq!(body["stats"]["totalMotorcycles"], 1);
 
     // Sell it.
-    sqlx::query("UPDATE motorcycles SET status = 'sold', isArchived = 1 WHERE id = ?")
+    sqlx::query("UPDATE motorcycles SET status = 'sold' WHERE id = ?")
         .bind(moto_id)
         .execute(&pool)
         .await

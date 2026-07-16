@@ -67,10 +67,10 @@ fn merge_number<T: std::str::FromStr>(
 }
 
 /// Validate a lifecycle status; returns None for absent/invalid input so the
-/// caller can fall back to the existing value or the legacy isArchived flag.
+/// caller can fall back to the existing value (or "active").
 fn normalize_status(raw: Option<&str>) -> Option<String> {
     match raw {
-        Some(s @ ("active" | "archived" | "sold")) => Some(s.to_string()),
+        Some(s @ ("active" | "sold")) => Some(s.to_string()),
         _ => None,
     }
 }
@@ -178,17 +178,9 @@ pub async fn create_motorcycle(
         .get("isVeteran")
         .map(|v| v == "true")
         .unwrap_or(false);
-    // Lifecycle status is the source of truth; `isArchived` is kept derived for
-    // backward-compatible clients. Fall back to the legacy isArchived flag if a
-    // client only sends that.
+    // Lifecycle status ("active"/"sold"); invalid or absent defaults to active.
     let status = normalize_status(fields.get("status").map(String::as_str))
-        .or_else(|| {
-            fields
-                .get("isArchived")
-                .map(|v| if v == "true" { "archived" } else { "active" }.to_string())
-        })
         .unwrap_or_else(|| "active".to_string());
-    let is_archived = status != "active";
     let has_sidecar = fields
         .get("hasSidecar")
         .map(|v| v == "true")
@@ -235,11 +227,11 @@ pub async fn create_motorcycle(
     let id = sqlx::query(
         "INSERT INTO motorcycles
            (make, model, modelYear, userId, vin, engineNumber, vehicleNr, numberPlate,
-            image, isVeteran, isArchived, hasSidecar, hasUnknownOwners, firstRegistration, initialOdo, manualOdo,
+            image, isVeteran, hasSidecar, hasUnknownOwners, firstRegistration, initialOdo, manualOdo,
             purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize, seriesId,
             frontBrakeType, rearBrakeType, sidecarBrakeType, driveType,
             status, soldDate, salePrice, normalizedSalePrice, saleCurrencyCode, buyerName)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&make)
     .bind(&model)
@@ -251,7 +243,6 @@ pub async fn create_motorcycle(
     .bind(&number_plate)
     .bind(&image_filename)
     .bind(is_veteran)
-    .bind(is_archived)
     .bind(has_sidecar)
     .bind(has_unknown_owners)
     .bind(&first_registration)
@@ -450,16 +441,9 @@ pub async fn update_motorcycle(
         .get("isVeteran")
         .map(|v| v == "true")
         .unwrap_or(existing.is_veteran);
-    // Status is the source of truth; keep `isArchived` derived from it. Absent
-    // status keeps the existing one; a legacy isArchived-only client still works.
-    let status = normalize_status(fields.get("status").map(String::as_str))
-        .or_else(|| {
-            fields
-                .get("isArchived")
-                .map(|v| if v == "true" { "archived" } else { "active" }.to_string())
-        })
-        .unwrap_or(existing.status);
-    let is_archived = status != "active";
+    // Lifecycle status ("active"/"sold"); absent keeps the existing one.
+    let status =
+        normalize_status(fields.get("status").map(String::as_str)).unwrap_or(existing.status);
     let has_sidecar: bool = fields
         .get("hasSidecar")
         .map(|v| v == "true")
@@ -521,7 +505,7 @@ pub async fn update_motorcycle(
     sqlx::query(
         "UPDATE motorcycles SET
            make = ?, model = ?, modelYear = ?, vin = ?, engineNumber = ?,
-           vehicleNr = ?, numberPlate = ?, image = ?, isVeteran = ?, isArchived = ?,
+           vehicleNr = ?, numberPlate = ?, image = ?, isVeteran = ?,
            hasSidecar = ?, hasUnknownOwners = ?, firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
            purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?,
            seriesId = ?, frontBrakeType = ?, rearBrakeType = ?, sidecarBrakeType = ?, driveType = ?,
@@ -537,7 +521,6 @@ pub async fn update_motorcycle(
     .bind(&number_plate)
     .bind(&image_filename)
     .bind(is_veteran)
-    .bind(is_archived)
     .bind(has_sidecar)
     .bind(has_unknown_owners)
     .bind(&first_registration)

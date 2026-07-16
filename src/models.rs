@@ -73,7 +73,6 @@ pub struct Motorcycle {
     pub number_plate: Option<String>,
     pub image: Option<String>,
     pub is_veteran: bool,
-    pub is_archived: bool,
     pub has_sidecar: bool,
     /// Further, unidentified previous owners exist beyond the recorded ones —
     /// the ownership history is incomplete (see migration 032).
@@ -95,8 +94,7 @@ pub struct Motorcycle {
     /// Drivetrain ("chain"/"shaft"); None = unconfigured. Filters chain- vs
     /// shaft-drive maintenance options (see migration 039).
     pub drive_type: Option<String>,
-    /// Lifecycle status: "active" | "archived" | "sold". Source of truth; the
-    /// legacy `is_archived` above is kept derived from it (see migration 040).
+    /// Lifecycle status: "active" | "sold" (see migrations 040-042).
     pub status: String,
     /// Sale details, populated when status == "sold".
     pub sold_date: Option<String>,
@@ -123,7 +121,6 @@ pub struct MotorcycleWithStats {
     pub number_plate: Option<String>,
     pub image: Option<String>,
     pub is_veteran: bool,
-    pub is_archived: bool,
     pub has_sidecar: bool,
     /// See `Motorcycle::has_unknown_owners` (migration 032).
     pub has_unknown_owners: bool,

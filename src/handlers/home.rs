@@ -420,7 +420,6 @@ pub async fn get_home_data(
             "userId": moto.user_id,
             "image": format_image_url(moto.image.clone()),
             "isVeteran": moto.is_veteran,
-            "isArchived": moto.is_archived,
             "status": moto.status,
             "soldDate": moto.sold_date,
             "salePrice": moto.sale_price,

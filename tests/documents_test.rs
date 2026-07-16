@@ -186,11 +186,11 @@ async fn test_list_all_motorcycles_independent_of_user() {
 
     // Create motorcycle for first user
     sqlx::query!(
-        "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
+        "INSERT INTO motorcycles (make, model, userId, status) VALUES (?, ?, ?, ?)",
         "Yamaha",
         "MT-07",
         1,
-        0
+        "active"
     )
     .execute(&pool)
     .await
@@ -198,23 +198,23 @@ async fn test_list_all_motorcycles_independent_of_user() {
 
     // Create motorcycle for other user
     sqlx::query!(
-        "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
+        "INSERT INTO motorcycles (make, model, userId, status) VALUES (?, ?, ?, ?)",
         "Honda",
         "CB650R",
         other_user_id,
-        0
+        "active"
     )
     .execute(&pool)
     .await
     .unwrap();
 
-    // Create archived motorcycle
+    // Create sold motorcycle (excluded from the document picker)
     sqlx::query!(
-        "INSERT INTO motorcycles (make, model, userId, isArchived) VALUES (?, ?, ?, ?)",
+        "INSERT INTO motorcycles (make, model, userId, status) VALUES (?, ?, ?, ?)",
         "Suzuki",
         "SV650",
         1,
-        1
+        "sold"
     )
     .execute(&pool)
     .await

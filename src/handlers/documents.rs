@@ -263,7 +263,7 @@ pub async fn list_documents(
         SELECT m.id, m.userId, m.make, m.model, u.name as "ownerName!"
         FROM motorcycles m
         JOIN users u ON m.userId = u.id
-        WHERE m.isArchived = 0
+        WHERE m.status = 'active'
         "#
     )
     .fetch_all(&pool)
