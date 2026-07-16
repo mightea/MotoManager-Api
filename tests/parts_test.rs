@@ -1198,6 +1198,26 @@ async fn test_vin_decode() {
     );
     assert_eq!(body["modelYear"], 1987);
 
+    // Modern alphanumeric type code: 0A51 resolves to R 1200 GS 17. The type
+    // code sits at VIN positions 4-7, so the whole 17-char VIN is required — the
+    // bare frame tail ("Z621349") carries no type code and cannot match.
+    let (status, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=WB10A5104HZ621349",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["isBmw"], true);
+    assert_eq!(body["typeCode"], "0A51");
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "R 1200 GS 17 (0A51, 0A61) (ECE, 11/2015-06/2018)",
+        "{body}"
+    );
+
     // Unknown type code: BMW VIN but no catalog match.
     let (_, body) = request(
         &app,
