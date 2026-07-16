@@ -1183,3 +1183,146 @@ async fn test_update_motorcycle_brake_types() {
     );
     assert_eq!(m["driveType"], "shaft", "absent field keeps value: {m}");
 }
+
+/// Status + sale details round-trip via multipart, and isArchived stays derived
+/// from status (archived/sold => 1) for backward-compatible clients.
+#[tokio::test]
+async fn test_update_motorcycle_status_and_sale() {
+    let (app, pool, token) = setup_test_app().await;
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES ('BMW', 'R80', 1, 1000)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let boundary = "sale-boundary";
+    let put = |fields: Vec<(&'static str, &'static str)>| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let mut body = String::new();
+            for (name, value) in fields {
+                body.push_str(&multipart_field(boundary, name, value));
+            }
+            body.push_str(&format!("--{boundary}--\r\n"));
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("PUT")
+                        .uri(format!("/api/motorcycles/{moto_id}"))
+                        .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                        .header(
+                            header::CONTENT_TYPE,
+                            format!("multipart/form-data; boundary={boundary}"),
+                        )
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            serde_json::from_slice::<Value>(&bytes).unwrap()
+        }
+    };
+
+    let json = put(vec![
+        ("make", "BMW"),
+        ("model", "R80"),
+        ("status", "sold"),
+        ("soldDate", "2026-06-01"),
+        ("salePrice", "4200"),
+        ("saleCurrencyCode", "CHF"),
+        ("buyerName", "Hans Muster"),
+    ])
+    .await;
+    let m = &json["motorcycle"];
+    assert_eq!(m["status"], "sold");
+    assert_eq!(m["isArchived"], true, "isArchived derived from status: {m}");
+    assert_eq!(m["soldDate"], "2026-06-01");
+    assert_eq!(m["salePrice"], 4200.0);
+    assert_eq!(m["saleCurrencyCode"], "CHF");
+    assert_eq!(m["buyerName"], "Hans Muster");
+
+    // Back to active clears the derived archived flag.
+    let json = put(vec![
+        ("make", "BMW"),
+        ("model", "R80"),
+        ("status", "active"),
+    ])
+    .await;
+    let m = &json["motorcycle"];
+    assert_eq!(m["status"], "active");
+    assert_eq!(m["isArchived"], false);
+}
+
+/// A sold bike is still returned by /home (for the "show sold" toggle) but no
+/// longer counts toward active issues, and surfaces no attention items.
+#[tokio::test]
+async fn test_home_excludes_sold_bike_from_active_counts() {
+    let (app, pool, token) = setup_test_app().await;
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES ('BMW', 'R80', 1, 1000)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query("INSERT INTO issues (motorcycleId, odo, title, status) VALUES (?, ?, ?, 'open')")
+        .bind(moto_id)
+        .bind(1200)
+        .bind("Oil leak")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let home = |app: axum::Router, token: String| async move {
+        let r = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/home")
+                    .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK);
+        let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice::<Value>(&bytes).unwrap()
+    };
+
+    // Active: the issue counts and the bike is on the dashboard.
+    let body = home(app.clone(), token.clone()).await;
+    assert_eq!(body["stats"]["totalActiveIssues"], 1);
+    assert_eq!(body["stats"]["totalMotorcycles"], 1);
+
+    // Sell it.
+    sqlx::query("UPDATE motorcycles SET status = 'sold', isArchived = 1 WHERE id = ?")
+        .bind(moto_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let body = home(app.clone(), token.clone()).await;
+    assert_eq!(
+        body["stats"]["totalActiveIssues"], 0,
+        "sold issue not active"
+    );
+    assert_eq!(
+        body["stats"]["totalMotorcycles"], 0,
+        "sold not in active fleet"
+    );
+    // Still returned so the web client can show it behind a toggle, but with no attention.
+    let cards = body["motorcycles"].as_array().unwrap();
+    assert_eq!(cards.len(), 1);
+    assert_eq!(cards[0]["status"], "sold");
+    assert_eq!(cards[0]["numberOfIssues"], 0);
+    assert_eq!(cards[0]["hasOverdueMaintenance"], false);
+}

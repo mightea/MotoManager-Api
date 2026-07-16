@@ -66,6 +66,15 @@ fn merge_number<T: std::str::FromStr>(
     }
 }
 
+/// Validate a lifecycle status; returns None for absent/invalid input so the
+/// caller can fall back to the existing value or the legacy isArchived flag.
+fn normalize_status(raw: Option<&str>) -> Option<String> {
+    match raw {
+        Some(s @ ("active" | "archived" | "sold")) => Some(s.to_string()),
+        _ => None,
+    }
+}
+
 /// A new (non-empty) text value, present or not — for optional create fields.
 fn create_text(fields: &FieldMap, key: &str) -> Option<String> {
     fields
@@ -169,10 +178,17 @@ pub async fn create_motorcycle(
         .get("isVeteran")
         .map(|v| v == "true")
         .unwrap_or(false);
-    let is_archived = fields
-        .get("isArchived")
-        .map(|v| v == "true")
-        .unwrap_or(false);
+    // Lifecycle status is the source of truth; `isArchived` is kept derived for
+    // backward-compatible clients. Fall back to the legacy isArchived flag if a
+    // client only sends that.
+    let status = normalize_status(fields.get("status").map(String::as_str))
+        .or_else(|| {
+            fields
+                .get("isArchived")
+                .map(|v| if v == "true" { "archived" } else { "active" }.to_string())
+        })
+        .unwrap_or_else(|| "active".to_string());
+    let is_archived = status != "active";
     let has_sidecar = fields
         .get("hasSidecar")
         .map(|v| v == "true")
@@ -208,14 +224,22 @@ pub async fn create_motorcycle(
     let rear_brake_type = create_text(&fields, "rearBrakeType");
     let sidecar_brake_type = create_text(&fields, "sidecarBrakeType");
     let drive_type = create_text(&fields, "driveType");
+    let sold_date = create_text(&fields, "soldDate");
+    let sale_price: Option<f64> = fields.get("salePrice").and_then(|v| v.parse().ok());
+    let normalized_sale_price: Option<f64> = fields
+        .get("normalizedSalePrice")
+        .and_then(|v| v.parse().ok());
+    let sale_currency_code = create_text(&fields, "saleCurrencyCode");
+    let buyer_name = create_text(&fields, "buyerName");
 
     let id = sqlx::query(
         "INSERT INTO motorcycles
            (make, model, modelYear, userId, vin, engineNumber, vehicleNr, numberPlate,
             image, isVeteran, isArchived, hasSidecar, hasUnknownOwners, firstRegistration, initialOdo, manualOdo,
             purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize, seriesId,
-            frontBrakeType, rearBrakeType, sidecarBrakeType, driveType)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            frontBrakeType, rearBrakeType, sidecarBrakeType, driveType,
+            status, soldDate, salePrice, normalizedSalePrice, saleCurrencyCode, buyerName)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&make)
     .bind(&model)
@@ -243,6 +267,12 @@ pub async fn create_motorcycle(
     .bind(&rear_brake_type)
     .bind(&sidecar_brake_type)
     .bind(&drive_type)
+    .bind(&status)
+    .bind(&sold_date)
+    .bind(sale_price)
+    .bind(normalized_sale_price)
+    .bind(&sale_currency_code)
+    .bind(&buyer_name)
     .execute(&pool)
     .await?
     .last_insert_rowid();
@@ -420,10 +450,16 @@ pub async fn update_motorcycle(
         .get("isVeteran")
         .map(|v| v == "true")
         .unwrap_or(existing.is_veteran);
-    let is_archived: bool = fields
-        .get("isArchived")
-        .map(|v| v == "true")
-        .unwrap_or(existing.is_archived);
+    // Status is the source of truth; keep `isArchived` derived from it. Absent
+    // status keeps the existing one; a legacy isArchived-only client still works.
+    let status = normalize_status(fields.get("status").map(String::as_str))
+        .or_else(|| {
+            fields
+                .get("isArchived")
+                .map(|v| if v == "true" { "archived" } else { "active" }.to_string())
+        })
+        .unwrap_or(existing.status);
+    let is_archived = status != "active";
     let has_sidecar: bool = fields
         .get("hasSidecar")
         .map(|v| v == "true")
@@ -472,6 +508,15 @@ pub async fn update_motorcycle(
     let rear_brake_type = merge_text(&fields, "rearBrakeType", existing.rear_brake_type);
     let sidecar_brake_type = merge_text(&fields, "sidecarBrakeType", existing.sidecar_brake_type);
     let drive_type = merge_text(&fields, "driveType", existing.drive_type);
+    let sold_date = merge_text(&fields, "soldDate", existing.sold_date);
+    let sale_price = merge_number(&fields, "salePrice", existing.sale_price);
+    let normalized_sale_price = merge_number(
+        &fields,
+        "normalizedSalePrice",
+        existing.normalized_sale_price,
+    );
+    let sale_currency_code = merge_text(&fields, "saleCurrencyCode", existing.sale_currency_code);
+    let buyer_name = merge_text(&fields, "buyerName", existing.buyer_name);
 
     sqlx::query(
         "UPDATE motorcycles SET
@@ -479,7 +524,8 @@ pub async fn update_motorcycle(
            vehicleNr = ?, numberPlate = ?, image = ?, isVeteran = ?, isArchived = ?,
            hasSidecar = ?, hasUnknownOwners = ?, firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
            purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?,
-           seriesId = ?, frontBrakeType = ?, rearBrakeType = ?, sidecarBrakeType = ?, driveType = ?
+           seriesId = ?, frontBrakeType = ?, rearBrakeType = ?, sidecarBrakeType = ?, driveType = ?,
+           status = ?, soldDate = ?, salePrice = ?, normalizedSalePrice = ?, saleCurrencyCode = ?, buyerName = ?
            WHERE id = ? AND userId = ?",
     )
     .bind(&make)
@@ -507,6 +553,12 @@ pub async fn update_motorcycle(
     .bind(&rear_brake_type)
     .bind(&sidecar_brake_type)
     .bind(&drive_type)
+    .bind(&status)
+    .bind(&sold_date)
+    .bind(sale_price)
+    .bind(normalized_sale_price)
+    .bind(&sale_currency_code)
+    .bind(&buyer_name)
     .bind(id)
     .bind(user.id)
     .execute(&pool)

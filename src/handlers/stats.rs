@@ -222,8 +222,15 @@ pub async fn get_stats(
         }
     }
 
+    // Only issues on active bikes count as active — archived/sold bikes are no
+    // longer in the user's possession.
+    let active_moto_ids: std::collections::HashSet<i64> = motorcycles
+        .iter()
+        .filter(|m| m.status == "active")
+        .map(|m| m.id)
+        .collect();
     for i in &issues {
-        if i.status != "done" {
+        if i.status != "done" && active_moto_ids.contains(&i.motorcycle_id) {
             total_active_issues += 1;
         }
     }

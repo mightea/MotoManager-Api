@@ -97,7 +97,11 @@ pub async fn get_home_data(
     for moto in &motorcycles {
         let moto_id = moto.id;
         let initial_odo = moto.initial_odo;
-        if moto.is_veteran {
+        // Only active bikes contribute to the fleet dashboard. Archived/sold
+        // bikes are still returned (the web client shows them behind a toggle)
+        // but never count toward stats or surface attention items.
+        let is_active = moto.status == "active";
+        if moto.is_veteran && is_active {
             veteran_count += 1;
         }
 
@@ -142,11 +146,17 @@ pub async fn get_home_data(
             .unwrap_or(initial_odo);
         let odo_this_year = current_odo - last_year_odo;
 
-        total_km_this_year += odo_this_year;
-        total_km_overall += current_odo - initial_odo;
+        if is_active {
+            total_km_this_year += odo_this_year;
+            total_km_overall += current_odo - initial_odo;
+        }
 
-        // Issues
-        let open_issues_count = moto_issues.iter().filter(|i| i.status != "done").count() as i64;
+        // Issues — inactive bikes have no "active" issues (no longer in possession).
+        let open_issues_count = if is_active {
+            moto_issues.iter().filter(|i| i.status != "done").count() as i64
+        } else {
+            0
+        };
         total_active_issues += open_issues_count;
 
         // Last Activity
@@ -196,7 +206,9 @@ pub async fn get_home_data(
             })
             .map(|m| m.normalized_cost.or(m.cost).unwrap_or(0.0))
             .sum();
-        total_cost_this_year += cost_this_year;
+        if is_active {
+            total_cost_this_year += cost_this_year;
+        }
 
         // Next Inspection (Swiss Law: 4-3-2-2, Veterans: 6-6-6)
         let last_inspection_record = moto_maintenance
@@ -273,8 +285,9 @@ pub async fn get_home_data(
         };
 
         // Overdue Maintenance Calculation
+        // Skip overdue/service recommendations entirely for inactive bikes.
         let mut overdue_items = Vec::new();
-        if let Some(s) = &_settings {
+        if let Some(s) = _settings.as_ref().filter(|_| is_active) {
             let moto_maintenance_records: Vec<&MaintenanceRecord> = moto_maintenance.to_vec();
 
             // Helper to check if a specific type is overdue
@@ -408,12 +421,18 @@ pub async fn get_home_data(
             "image": format_image_url(moto.image.clone()),
             "isVeteran": moto.is_veteran,
             "isArchived": moto.is_archived,
+            "status": moto.status,
+            "soldDate": moto.sold_date,
+            "salePrice": moto.sale_price,
+            "normalizedSalePrice": moto.normalized_sale_price,
+            "saleCurrencyCode": moto.sale_currency_code,
+            "buyerName": moto.buyer_name,
             "initialOdo": initial_odo,
             "odometer": current_odo,
             "odometerThisYear": odo_this_year,
             "numberOfIssues": open_issues_count,
             "lastActivity": last_activity,
-            "nextInspection": next_inspection,
+            "nextInspection": if is_active { next_inspection } else { None },
             "currentLocationId": current_location_id,
             "currentLocationName": current_location.map(|l| l.name.clone()),
             "hasOverdueMaintenance": !overdue_items.is_empty(),
@@ -425,6 +444,9 @@ pub async fn get_home_data(
     let mut max_km = -1i64;
 
     for moto_val in &motorcycles_json {
+        if moto_val["status"] != "active" {
+            continue; // busiest bike is an active-fleet stat
+        }
         let km = moto_val["odometerThisYear"].as_i64().unwrap_or(0);
         if km > max_km {
             max_km = km;
@@ -436,9 +458,11 @@ pub async fn get_home_data(
         }
     }
 
+    let active_count = motorcycles.iter().filter(|m| m.status == "active").count();
+
     let stats_data = json!({
         "year": current_year,
-        "totalMotorcycles": motorcycles.len(),
+        "totalMotorcycles": active_count,
         "totalKmThisYear": total_km_this_year,
         "totalKmOverall": total_km_overall,
         "totalActiveIssues": total_active_issues,
