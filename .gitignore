@@ -31,3 +31,4 @@
 .direnv/
 libpdfium.dylib
 *.sqlite.bak
+*.sqlite.bak-*
