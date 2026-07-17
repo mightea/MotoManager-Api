@@ -265,6 +265,22 @@ pub struct TorqueSpec {
     pub deleted_at: Option<String>,
 }
 
+/// Free-form Title/Value detail per motorcycle (e.g. spark plug brand/model).
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct MotorcycleDetail {
+    pub id: i64,
+    pub motorcycle_id: i64,
+    pub title: String,
+    pub value: String,
+    pub created_at: String,
+    // Sync metadata (see migration 044).
+    pub client_id: Option<String>,
+    pub updated_at: Option<String>,
+    pub deleted_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 #[sqlx(rename_all = "camelCase")]

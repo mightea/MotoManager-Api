@@ -9,6 +9,7 @@ pub mod issues;
 pub mod locations;
 pub mod maintenance;
 pub mod model_series;
+pub mod motorcycle_details;
 pub mod motorcycles;
 pub mod part_import;
 pub mod parts;
