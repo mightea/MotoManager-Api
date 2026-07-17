@@ -156,6 +156,8 @@ pub struct MaintenanceRequest {
     pub price_per_unit: Option<f64>,
     pub fuel_consumption: Option<f64>,
     pub trip_distance: Option<f64>,
+    pub fuel_additive_added: Option<bool>,
+    pub lead_substitute_added: Option<bool>,
     pub parent_id: Option<i64>,
     pub bundled_items: Option<Vec<String>>,
     /// Client-generated idempotency key (UUID). Retried creates with the same
@@ -215,8 +217,9 @@ pub async fn create_maintenance(
          (date, odo, motorcycleId, cost, normalizedCost, currency, description, type, \
           brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
           oilType, locationId, fuelType, fuelAmount, pricePerUnit, \
-          fuelConsumption, tripDistance, parentId, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          fuelConsumption, tripDistance, fuelAdditiveAdded, leadSubstituteAdded, \
+          parentId, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&date)
     .bind(odo)
@@ -241,6 +244,8 @@ pub async fn create_maintenance(
     .bind(body.price_per_unit)
     .bind(body.fuel_consumption)
     .bind(body.trip_distance)
+    .bind(body.fuel_additive_added.unwrap_or(false))
+    .bind(body.lead_substitute_added.unwrap_or(false))
     .bind(body.parent_id)
     .bind(&body.client_id)
     .bind(&now)
@@ -359,6 +364,12 @@ pub async fn update_maintenance(
     let price_per_unit: Option<f64> = body.price_per_unit.or(existing.price_per_unit);
     let fuel_consumption: Option<f64> = body.fuel_consumption.or(existing.fuel_consumption);
     let trip_distance: Option<f64> = body.trip_distance.or(existing.trip_distance);
+    let fuel_additive_added = body
+        .fuel_additive_added
+        .unwrap_or(existing.fuel_additive_added);
+    let lead_substitute_added = body
+        .lead_substitute_added
+        .unwrap_or(existing.lead_substitute_added);
     let parent_id: Option<i64> = body.parent_id.or(existing.parent_id);
 
     let now = sync_now();
@@ -370,7 +381,8 @@ pub async fn update_maintenance(
          type = ?, brand = ?, model = ?, tirePosition = ?, tireSize = ?, dotCode = ?, \
          batteryType = ?, fluidType = ?, viscosity = ?, oilType = ?, \
          locationId = ?, fuelType = ?, fuelAmount = ?, pricePerUnit = ?, \
-         fuelConsumption = ?, tripDistance = ?, parentId = ?, updatedAt = ? \
+         fuelConsumption = ?, tripDistance = ?, fuelAdditiveAdded = ?, \
+         leadSubstituteAdded = ?, parentId = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&date)
@@ -395,6 +407,8 @@ pub async fn update_maintenance(
     .bind(price_per_unit)
     .bind(fuel_consumption)
     .bind(trip_distance)
+    .bind(fuel_additive_added)
+    .bind(lead_substitute_added)
     .bind(parent_id)
     .bind(&now)
     .bind(mid)

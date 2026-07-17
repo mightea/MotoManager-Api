@@ -178,6 +178,8 @@ pub struct MaintenanceRecord {
     pub price_per_unit: Option<f64>,
     pub fuel_consumption: Option<f64>,
     pub trip_distance: Option<f64>,
+    pub fuel_additive_added: bool,
+    pub lead_substitute_added: bool,
     pub parent_id: Option<i64>,
     // Sync metadata (see migration 011).
     pub client_id: Option<String>,
