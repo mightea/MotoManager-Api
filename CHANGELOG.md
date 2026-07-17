@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/mightea/MotoManager-Api/compare/v0.13.0...v0.14.0) (2026-07-17)
+
+
+### Features
+
+* fuel additive and lead substitute flags on fuel records ([1db118c](https://github.com/mightea/MotoManager-Api/commit/1db118c4252dab78703ea6542510ad719b19e7cd))
+* motorcycle status (active/archived/sold) and sale details ([67e19a1](https://github.com/mightea/MotoManager-Api/commit/67e19a149ca216281c305ab4782a45e08afcd908))
+
 ## [0.13.0](https://github.com/mightea/MotoManager-Api/compare/v0.12.0...v0.13.0) (2026-07-15)
 
 
