@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/mightea/MotoManager-Api/compare/v0.14.0...v0.15.0) (2026-07-17)
+
+
+### Features
+
+* motorcycle details (Title/Value pairs) with offline sync ([dd86744](https://github.com/mightea/MotoManager-Api/commit/dd867441085b14ad3e83f349f0a337f89e820597))
+
 ## [0.14.0](https://github.com/mightea/MotoManager-Api/compare/v0.13.0...v0.14.0) (2026-07-17)
 
 
