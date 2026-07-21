@@ -61,6 +61,14 @@ impl axum::extract::FromRef<AppState> for backup::BackupGuard {
 /// else keeps the small default so JSON endpoints can't be used to buffer megabytes.
 const UPLOAD_BODY_LIMIT: usize = 30 * 1024 * 1024;
 
+/// Machine-readable compatibility boundary for the independently deployed
+/// web, iOS, and API projects. Keeping this embedded makes an invalid document
+/// a test/startup failure rather than a broken production link.
+pub fn openapi_document() -> serde_json::Value {
+    serde_json::from_str(include_str!("../openapi.json"))
+        .expect("embedded OpenAPI document must be valid JSON")
+}
+
 pub fn build_app(state: AppState) -> Router {
     let app_version = state.config.app_version.clone();
 
@@ -68,6 +76,10 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/api/health",
             get(move || async move { Json(json!({ "status": "ok", "version": app_version })) }),
+        )
+        .route(
+            "/api/openapi.json",
+            get(|| async { Json(openapi_document()) }),
         )
         .route("/api/auth/status", get(handlers::auth::status))
         .route("/api/auth/logout", post(handlers::auth::logout))
@@ -357,4 +369,26 @@ pub fn build_cors(origin: &str) -> CorsLayer {
             axum::http::header::CONTENT_TYPE,
             axum::http::header::AUTHORIZATION,
         ])
+}
+
+#[cfg(test)]
+mod contract_tests {
+    use super::openapi_document;
+
+    #[test]
+    fn openapi_contract_is_valid_and_tracks_the_crate_version() {
+        let document = openapi_document();
+
+        assert_eq!(document["openapi"], "3.1.0");
+        assert_eq!(document["info"]["version"], env!("CARGO_PKG_VERSION"));
+        for path in [
+            "/api/health",
+            "/api/auth/status",
+            "/api/auth/login",
+            "/api/auth/register",
+            "/api/auth/me",
+        ] {
+            assert!(document["paths"].get(path).is_some(), "missing {path}");
+        }
+    }
 }

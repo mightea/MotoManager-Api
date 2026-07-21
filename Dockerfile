@@ -1,10 +1,15 @@
+# Lint: droast --skip DF005 --skip DF007 Dockerfile
+#   DF005: pinning apt package versions is impractical on Debian (point releases
+#          vanish from the mirrors and break the build)
+#   DF007: .dockerignore exists; droast flags COPY . regardless
+
 # --- Build Stage ---
 FROM rust:1.94-slim-bookworm AS builder
 
 WORKDIR /app
 
 # Install build dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     libssl-dev \
     sqlite3 \
@@ -40,7 +45,7 @@ WORKDIR /app
 #  - libstdc++6: required by libpdfium.so (present in the base image today,
 #    but named explicitly so a slimmer base can't silently break PDF parsing)
 #  - curl: pdfium download below + container healthchecks
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
     libstdc++6 \
@@ -52,7 +57,11 @@ RUN apt-get update && apt-get install -y \
 # Arch-aware: TARGETARCH is set automatically by BuildKit (amd64/arm64);
 # default to x64 for legacy builders.
 ARG TARGETARCH
-RUN PDFIUM_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo arm64 || echo x64) && \
+# bash with pipefail so a failed download can't be masked by tar's exit code
+# (set -o pipefail needs bash — the default /bin/sh is dash and lacks it).
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN set -o pipefail && \
+    PDFIUM_ARCH=$([ "$TARGETARCH" = "arm64" ] && echo arm64 || echo x64) && \
     curl -fsSL "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/pdfium-linux-${PDFIUM_ARCH}.tgz" \
     | tar -xz -C /usr/local/lib/ --strip-components=1 lib/libpdfium.so
 
@@ -79,11 +88,22 @@ ENV BACKUP_KEEP=14
 # Invoice-import LLM (optional): set LLM_BASE_URL (e.g. http://10.0.0.2:8542/v1),
 # LLM_MODEL and LLM_API_KEY at deploy time. Unset = deterministic parser only.
 
+# Non-root user. Ownership is set BEFORE the VOLUME declaration so freshly
+# created named volumes inherit it. Existing deployments have root-owned
+# volumes and need a one-time chown (see deploy/docker-compose.yml).
+RUN groupadd -g 10001 app && useradd -l -u 10001 -g app -M app && \
+    mkdir -p /app/data /app/cache && \
+    chown -R app:app /app
+USER app
+
 # Expose the API port
 EXPOSE 3001
 
 # Create volumes for persistent data
 VOLUME ["/app/data", "/app/cache"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
+    CMD curl -fsS http://localhost:${PORT:-3001}/api/health || exit 1
 
 # Run the application
 CMD ["/app/moto-manager-api"]

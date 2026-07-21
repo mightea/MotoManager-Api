@@ -1,0 +1,183 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MotoManager API",
+    "version": "0.15.0",
+    "description": "Compatibility contract shared by the web and iOS clients. Existing paths and fields are additive-only."
+  },
+  "servers": [{ "url": "https://moto-api.herrmann.ltd" }],
+  "paths": {
+    "/api/health": {
+      "get": {
+        "operationId": "health",
+        "responses": {
+          "200": {
+            "description": "Service health",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HealthResponse" } } }
+          }
+        }
+      }
+    },
+    "/api/auth/status": {
+      "get": {
+        "operationId": "authStatus",
+        "responses": {
+          "200": {
+            "description": "Bootstrap status",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AuthStatusResponse" } } }
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "operationId": "login",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginRequest" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated session",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginResponse" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "operationId": "registerFirstUser",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RegisterRequest" } } }
+        },
+        "responses": {
+          "201": {
+            "description": "Initial administrator and authenticated session",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/LoginResponse" } } }
+          },
+          "400": { "$ref": "#/components/responses/BadRequest" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/auth/me": {
+      "get": {
+        "operationId": "currentUser",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Current user",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/UserResponse" } } }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": ["status", "version"],
+        "properties": {
+          "status": { "type": "string", "const": "ok" },
+          "version": { "type": "string" }
+        },
+        "additionalProperties": true
+      },
+      "AuthStatusResponse": {
+        "type": "object",
+        "required": ["userCount"],
+        "properties": { "userCount": { "type": "integer", "minimum": 0 } },
+        "additionalProperties": true
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["identifier", "password"],
+        "properties": {
+          "identifier": { "type": "string", "minLength": 1 },
+          "password": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["name", "email", "username", "password", "confirmPassword"],
+        "properties": {
+          "name": { "type": "string", "minLength": 2 },
+          "email": { "type": "string", "format": "email" },
+          "username": { "type": "string", "minLength": 3, "maxLength": 32 },
+          "password": { "type": "string", "minLength": 8 },
+          "confirmPassword": { "type": "string", "minLength": 8 }
+        },
+        "additionalProperties": false
+      },
+      "PublicUser": {
+        "type": "object",
+        "required": ["id", "email", "username", "name", "role", "createdAt", "updatedAt"],
+        "properties": {
+          "id": { "type": "integer" },
+          "email": { "type": "string" },
+          "username": { "type": "string" },
+          "name": { "type": "string" },
+          "role": { "type": "string", "enum": ["admin", "user"] },
+          "createdAt": { "type": "string" },
+          "updatedAt": { "type": "string" },
+          "lastLoginAt": { "type": ["string", "null"] }
+        },
+        "additionalProperties": true
+      },
+      "UserResponse": {
+        "type": "object",
+        "required": ["user"],
+        "properties": { "user": { "$ref": "#/components/schemas/PublicUser" } },
+        "additionalProperties": true
+      },
+      "LoginResponse": {
+        "allOf": [
+          { "$ref": "#/components/schemas/UserResponse" },
+          {
+            "type": "object",
+            "required": ["token"],
+            "properties": { "token": { "type": "string", "minLength": 1 } }
+          }
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error"],
+        "properties": { "error": { "type": "string" } },
+        "additionalProperties": false
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Invalid request",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      },
+      "Unauthorized": {
+        "description": "Authentication required or invalid",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      },
+      "Forbidden": {
+        "description": "Operation not allowed",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      },
+      "Conflict": {
+        "description": "Resource conflict",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      },
+      "RateLimited": {
+        "description": "Too many attempts",
+        "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorResponse" } } }
+      }
+    }
+  }
+}
