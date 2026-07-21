@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/mightea/MotoManager-Api/compare/v0.15.0...v0.16.0) (2026-07-21)
+
+
+### Features
+
+* persist previous owner ordering ([75480d4](https://github.com/mightea/MotoManager-Api/commit/75480d49e9a78e3ff7e0ce68940f9f9830a17c76))
+* publish API contract and harden deployment ([9db6046](https://github.com/mightea/MotoManager-Api/commit/9db60466c04b0737440f09b5a4eefc100a595197))
+
+
+### Bug Fixes
+
+* restore root backend runtime ([ffa51e3](https://github.com/mightea/MotoManager-Api/commit/ffa51e32d4bdf27cbf1a90a6fbf61a0fbbcb9781))
+
 ## [0.15.0](https://github.com/mightea/MotoManager-Api/compare/v0.14.0...v0.15.0) (2026-07-17)
 
 
