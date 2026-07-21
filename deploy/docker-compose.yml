@@ -1,11 +1,6 @@
 # The API backs itself up in-process (VACUUM INTO snapshot + tar.gz of the upload
 # dirs), on a schedule and on-demand from the webapp admin area — no sidecar
 # needed. Archives are written to DATA_DIR/backups inside the `data` volume.
-#
-# The image runs as non-root (UID/GID 10001). Volumes created by older images
-# are root-owned; when upgrading an EXISTING deployment, fix ownership once:
-#   docker compose run --rm -u root api chown -R 10001:10001 /app/data /app/cache
-# Fresh deployments need nothing — new named volumes inherit the image ownership.
 services:
   api:
     image: ghcr.io/tobias/moto-manager-api:latest   # adjust to your image ref

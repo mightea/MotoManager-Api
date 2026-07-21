@@ -88,14 +88,6 @@ ENV BACKUP_KEEP=14
 # Invoice-import LLM (optional): set LLM_BASE_URL (e.g. http://10.0.0.2:8542/v1),
 # LLM_MODEL and LLM_API_KEY at deploy time. Unset = deterministic parser only.
 
-# Non-root user. Ownership is set BEFORE the VOLUME declaration so freshly
-# created named volumes inherit it. Existing deployments have root-owned
-# volumes and need a one-time chown (see deploy/docker-compose.yml).
-RUN groupadd -g 10001 app && useradd -l -u 10001 -g app -M app && \
-    mkdir -p /app/data /app/cache && \
-    chown -R app:app /app
-USER app
-
 # Expose the API port
 EXPOSE 3001
 
