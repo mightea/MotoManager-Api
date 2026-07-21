@@ -129,6 +129,10 @@ pub fn build_app(state: AppState) -> Router {
                 .post(handlers::previous_owners::create_previous_owner),
         )
         .route(
+            "/api/motorcycles/{id}/previous-owners/order",
+            put(handlers::previous_owners::reorder_previous_owners),
+        )
+        .route(
             "/api/motorcycles/{id}/previous-owners/{oid}",
             put(handlers::previous_owners::update_previous_owner)
                 .delete(handlers::previous_owners::delete_previous_owner),
@@ -387,8 +391,20 @@ mod contract_tests {
             "/api/auth/login",
             "/api/auth/register",
             "/api/auth/me",
+            "/api/motorcycles/{id}/previous-owners",
+            "/api/motorcycles/{id}/previous-owners/order",
         ] {
             assert!(document["paths"].get(path).is_some(), "missing {path}");
         }
+
+        let previous_owner = &document["components"]["schemas"]["PreviousOwner"];
+        assert_eq!(previous_owner["properties"]["sortOrder"]["type"], "integer");
+        assert_eq!(
+            previous_owner["properties"]["purchaseDate"]["type"],
+            serde_json::json!(["string", "null"])
+        );
+
+        let update_request = &document["components"]["schemas"]["UpdatePreviousOwnerRequest"];
+        assert!(update_request.get("required").is_none());
     }
 }

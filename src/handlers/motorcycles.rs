@@ -313,7 +313,7 @@ pub async fn get_motorcycle(
     .await?;
 
     let previous_owners = sqlx::query_as::<_, PreviousOwner>(
-        "SELECT * FROM previousOwners WHERE motorcycleId = ? ORDER BY purchaseDate DESC",
+        "SELECT * FROM previousOwners WHERE motorcycleId = ? ORDER BY sortOrder ASC, id ASC",
     )
     .bind(id)
     .fetch_all(&pool)
