@@ -678,6 +678,14 @@ async fn test_storage_location_hierarchy() {
     let stock_id = body["partStock"]["id"].as_i64().unwrap();
     let stock_updated_at = body["partStock"]["updatedAt"].as_str().unwrap().to_string();
 
+    // `sync_now()` has millisecond resolution, and in-memory SQLite is fast
+    // enough that the create and the detach below routinely land in the same
+    // millisecond — which made the strict `>` assertion at the end of this test
+    // fail perhaps half the time. Waiting a tick makes the two timestamps
+    // distinguishable so the test checks what it means to check (that the bump
+    // happens at all) instead of racing the clock.
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+
     // Delete the middle node: child reparents to Garage, stock detaches.
     let (status, _) = request(
         &app,
