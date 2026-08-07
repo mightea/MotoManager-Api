@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/mightea/MotoManager-Api/compare/v0.16.0...v0.16.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* derive the OpenAPI info.version from the crate version ([b652a9b](https://github.com/mightea/MotoManager-Api/commit/b652a9bfd75f3f464ee5f8591bb68a58fdf820d9))
+
 ## [0.16.0](https://github.com/mightea/MotoManager-Api/compare/v0.15.0...v0.16.0) (2026-07-21)
 
 
