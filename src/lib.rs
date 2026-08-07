@@ -347,9 +347,7 @@ pub fn build_app(state: AppState) -> Router {
             "/api/auth/passkey/login-verify",
             post(handlers::passkey::login_verify),
         )
-        .layer(GovernorLayer {
-            config: governor_conf,
-        });
+        .layer(GovernorLayer::new(governor_conf));
 
     router.merge(auth_routes).with_state(state)
 }
