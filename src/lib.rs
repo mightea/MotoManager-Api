@@ -65,8 +65,14 @@ const UPLOAD_BODY_LIMIT: usize = 30 * 1024 * 1024;
 /// web, iOS, and API projects. Keeping this embedded makes an invalid document
 /// a test/startup failure rather than a broken production link.
 pub fn openapi_document() -> serde_json::Value {
-    serde_json::from_str(include_str!("../openapi.json"))
-        .expect("embedded OpenAPI document must be valid JSON")
+    let mut document: serde_json::Value = serde_json::from_str(include_str!("../openapi.json"))
+        .expect("embedded OpenAPI document must be valid JSON");
+    // `info.version` is derived from the crate version rather than maintained by
+    // hand: release-please bumps Cargo.toml only, so a literal here silently
+    // drifts one release behind — and trips the contract test below — on every
+    // release. The value in openapi.json is therefore only a placeholder.
+    document["info"]["version"] = serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string());
+    document
 }
 
 pub fn build_app(state: AppState) -> Router {
