@@ -19,7 +19,9 @@ use crate::{
         model_series::verify_series_accessible,
         motorcycles::{format_image_url, save_image},
     },
-    models::{Part, PartConsumption, PartStock, PartWithMeta, PublicPart},
+    models::{
+        Part, PartConsumption, PartConsumptionWithContext, PartStock, PartWithMeta, PublicPart,
+    },
 };
 
 /// Helper: verify a live part belongs to the user. Foreign and tombstoned
@@ -54,6 +56,99 @@ where
         .fetch_one(executor)
         .await?;
     Ok(value)
+}
+
+/// Weighted-average normalized (CHF) unit price of a part across all its live
+/// stock entries: total value / total quantity.
+///
+/// `partStocks.price` is the total paid for that batch ("Preis gesamt"), so the
+/// per-piece figure only exists as this quotient. Entries without a price
+/// contribute quantity but no value, which deliberately drags the average down
+/// — a part half of which was salvaged for free really did cost less per piece.
+/// Returns `None` when there is no live stock at all (nothing to average).
+///
+/// `normalizedPrice` is client-supplied and the webapp never sends it, so it is
+/// only a fast path: the `price * conversionFactor` join is what actually
+/// carries almost every real row. An unknown currency code falls back to a
+/// factor of 1.0 rather than dropping the value, matching how the clients
+/// display these figures.
+async fn average_unit_price(pool: &SqlitePool, part_id: i64) -> AppResult<Option<f64>> {
+    let row = sqlx::query(
+        // The 0.0 literals matter: an integer 0 makes SQLite hand back an
+        // INTEGER for `value` when no row carries a price, which then fails to
+        // decode as f64.
+        "SELECT CAST(COALESCE(SUM( \
+                    COALESCE(s.normalizedPrice, s.price * COALESCE(c.conversionFactor, 1.0), 0.0) \
+                ), 0.0) AS REAL) AS value, \
+                COALESCE(SUM(s.quantity), 0) AS quantity \
+         FROM partStocks s \
+         LEFT JOIN currencies c ON c.code = s.currency \
+         WHERE s.partId = ? AND s.deletedAt IS NULL",
+    )
+    .bind(part_id)
+    .fetch_one(pool)
+    .await?;
+
+    let quantity: i64 = row.get("quantity");
+    if quantity <= 0 {
+        return Ok(None);
+    }
+    let value: f64 = row.get("value");
+    Ok(Some(value / quantity as f64))
+}
+
+/// Recompute `maintenanceRecords.partsCost` from the record's live
+/// consumptions. Call after any change to a consumption that points at a
+/// maintenance record; see migration 046 for why this is stored rather than
+/// derived on read.
+///
+/// A record whose consumptions are all gone goes back to NULL rather than 0.0,
+/// so "no parts" and "parts worth nothing" stay distinguishable.
+pub(crate) async fn recalculate_parts_cost(
+    pool: &SqlitePool,
+    maintenance_record_id: i64,
+) -> AppResult<()> {
+    let rows = sqlx::query(
+        "SELECT partId, SUM(quantity) AS quantity FROM partConsumptions \
+         WHERE maintenanceRecordId = ? AND deletedAt IS NULL GROUP BY partId",
+    )
+    .bind(maintenance_record_id)
+    .fetch_all(pool)
+    .await?;
+
+    let parts_cost: Option<f64> = if rows.is_empty() {
+        None
+    } else {
+        let mut total = 0.0f64;
+        for row in &rows {
+            let part_id: i64 = row.get("partId");
+            let quantity: i64 = row.get("quantity");
+            if let Some(unit) = average_unit_price(pool, part_id).await? {
+                total += unit * quantity as f64;
+            }
+        }
+        Some(total)
+    };
+
+    // `updatedAt` has to move as well: it is the `?since=` sync cursor, so a
+    // partsCost written without it would never reach an offline client. Only
+    // touched when the value actually changed, to avoid pointless sync churn
+    // every time an unrelated consumption is saved.
+    let now = sync_now();
+    // `IS NOT` is SQLite's null-safe inequality, so this covers NULL <-> value
+    // transitions in both directions without extra clauses.
+    sqlx::query(
+        "UPDATE maintenanceRecords SET partsCost = ?, updatedAt = ? \
+         WHERE id = ? AND partsCost IS NOT ?",
+    )
+    .bind(parts_cost)
+    .bind(&now)
+    .bind(maintenance_record_id)
+    .bind(parts_cost)
+    .execute(pool)
+    .await?;
+
+    Ok(())
 }
 
 async fn fetch_series_ids(pool: &SqlitePool, part_id: i64) -> AppResult<Vec<i64>> {
@@ -436,6 +531,16 @@ pub async fn delete_part(
 ) -> AppResult<Json<Value>> {
     verify_part_ownership(&pool, id, user.id).await?;
 
+    // Captured before the cascade: these records lose consumptions below, so
+    // their partsCost has to be recomputed once the tombstones are committed.
+    let affected_records: Vec<i64> = sqlx::query_scalar(
+        "SELECT DISTINCT maintenanceRecordId FROM partConsumptions \
+         WHERE partId = ? AND deletedAt IS NULL AND maintenanceRecordId IS NOT NULL",
+    )
+    .bind(id)
+    .fetch_all(&pool)
+    .await?;
+
     // Soft cascade: tombstone the part and its live stock/consumption rows in
     // one transaction so offline clients remove all three via tombstone pull.
     let now = sync_now();
@@ -467,6 +572,10 @@ pub async fn delete_part(
     .await?;
 
     tx.commit().await?;
+
+    for record_id in affected_records {
+        recalculate_parts_cost(&pool, record_id).await?;
+    }
 
     Ok(Json(json!({ "message": "Part deleted" })))
 }
@@ -1139,8 +1248,23 @@ pub async fn list_part_consumptions(
     AuthUser(user): AuthUser,
     Query(filter): Query<PartConsumptionFilter>,
 ) -> AppResult<Json<Value>> {
-    let mut query_str = "SELECT c.* FROM partConsumptions c \
-         JOIN parts p ON p.id = c.partId WHERE p.userId = ?"
+    // The joined maintenance/motorcycle columns let a client link a consumption
+    // back to the repair it belongs to (and name the bike) without an N+1 walk
+    // over `/motorcycles/{id}/maintenance`. All additive: they are extra keys
+    // on an existing response, and are NULL for a manual consumption that is
+    // not tied to a record.
+    let mut query_str = "SELECT c.*, \
+            mr.motorcycleId AS motorcycleId, \
+            mr.date AS maintenanceDate, \
+            mr.type AS maintenanceType, \
+            m.make AS motorcycleMake, \
+            m.model AS motorcycleModel \
+         FROM partConsumptions c \
+         JOIN parts p ON p.id = c.partId \
+         LEFT JOIN maintenanceRecords mr \
+                ON mr.id = c.maintenanceRecordId AND mr.deletedAt IS NULL \
+         LEFT JOIN motorcycles m ON m.id = mr.motorcycleId \
+         WHERE p.userId = ?"
         .to_string();
     if filter.since.is_some() {
         query_str.push_str(" AND c.updatedAt > ?");
@@ -1155,8 +1279,8 @@ pub async fn list_part_consumptions(
     }
     query_str.push_str(" ORDER BY c.date DESC, c.id DESC");
 
-    let mut query =
-        sqlx::query_as::<_, PartConsumption>(sqlx::AssertSqlSafe(query_str)).bind(user.id);
+    let mut query = sqlx::query_as::<_, PartConsumptionWithContext>(sqlx::AssertSqlSafe(query_str))
+        .bind(user.id);
     if let Some(since) = filter.since {
         query = query.bind(since);
     }
@@ -1270,6 +1394,10 @@ pub async fn create_part_consumption(
 
     tx.commit().await?;
 
+    if let Some(mid) = body.maintenance_record_id {
+        recalculate_parts_cost(&pool, mid).await?;
+    }
+
     let consumption =
         sqlx::query_as::<_, PartConsumption>("SELECT * FROM partConsumptions WHERE id = ?")
             .bind(id)
@@ -1342,6 +1470,10 @@ pub async fn update_part_consumption(
 
     tx.commit().await?;
 
+    if let Some(mid) = existing.maintenance_record_id {
+        recalculate_parts_cost(&pool, mid).await?;
+    }
+
     let consumption =
         sqlx::query_as::<_, PartConsumption>("SELECT * FROM partConsumptions WHERE id = ?")
             .bind(id)
@@ -1356,6 +1488,19 @@ pub async fn delete_part_consumption(
     AuthUser(user): AuthUser,
     Path(id): Path<i64>,
 ) -> AppResult<Json<Value>> {
+    // Captured before the tombstone so the record it was booked against can be
+    // recosted afterwards.
+    let maintenance_record_id: Option<i64> = sqlx::query_scalar(
+        "SELECT c.maintenanceRecordId FROM partConsumptions c \
+         JOIN parts p ON p.id = c.partId \
+         WHERE c.id = ? AND p.userId = ? AND c.deletedAt IS NULL",
+    )
+    .bind(id)
+    .bind(user.id)
+    .fetch_optional(&pool)
+    .await?
+    .flatten();
+
     // Tombstone; the consumed quantity flows back into on-hand by derivation.
     let now = sync_now();
     let result = sqlx::query(
@@ -1372,6 +1517,10 @@ pub async fn delete_part_consumption(
 
     if result.rows_affected() == 0 {
         return Err(AppError::NotFound("Part consumption not found".to_string()));
+    }
+
+    if let Some(mid) = maintenance_record_id {
+        recalculate_parts_cost(&pool, mid).await?;
     }
 
     Ok(Json(json!({ "message": "Part consumption deleted" })))

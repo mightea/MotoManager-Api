@@ -1491,3 +1491,265 @@ async fn test_part_image_from_url_guards() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+/// Booking parts against a repair must cost them onto the record, at the
+/// weighted-average unit price across live stock (migration 046).
+#[tokio::test]
+async fn test_parts_cost_tracks_consumptions() {
+    let (app, pool, token) = setup_test_app().await;
+    let moto_id = seed_motorcycle(&pool, 1).await;
+
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        &format!("/api/motorcycles/{moto_id}/maintenance"),
+        &token,
+        Some(json!({ "date": "2026-06-20", "odo": 42000, "type": "general", "cost": 100.0 })),
+    )
+    .await;
+    let record_id = body["maintenanceRecord"]["id"].as_i64().unwrap();
+    // No parts booked yet, so the column stays NULL rather than 0.0.
+    assert!(body["maintenanceRecord"]["partsCost"].is_null(), "{body}");
+
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        "/api/parts",
+        &token,
+        Some(json!({ "partNumber": "PN-COST", "name": "Bremsbelag" })),
+    )
+    .await;
+    let part_id = body["part"]["id"].as_i64().unwrap();
+
+    // Two batches at different prices: 2 @ 100 total (50/pc) and 3 @ 30 total
+    // (10/pc) => weighted average 130 / 5 = 26 per piece. `price` is the batch
+    // total, and no normalizedPrice is sent — exactly what the webapp does.
+    for (quantity, price) in [(2, 100.0), (3, 30.0)] {
+        request(
+            &app,
+            Method::POST,
+            "/api/part-stocks",
+            &token,
+            Some(json!({
+                "partId": part_id, "quantity": quantity,
+                "price": price, "currency": "CHF"
+            })),
+        )
+        .await;
+    }
+
+    let (status, body) = request(
+        &app,
+        Method::POST,
+        "/api/part-consumptions",
+        &token,
+        Some(json!({ "partId": part_id, "quantity": 2, "maintenanceRecordId": record_id })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let consumption_id = body["partConsumption"]["id"].as_i64().unwrap();
+
+    let parts_cost = |body: &Value| -> Option<f64> {
+        body["maintenanceRecords"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"].as_i64() == Some(record_id))
+            .and_then(|r| r["partsCost"].as_f64())
+    };
+
+    let list_url = format!("/api/motorcycles/{moto_id}/maintenance");
+    let (_, body) = request(&app, Method::GET, &list_url, &token, None).await;
+    assert_eq!(parts_cost(&body), Some(52.0), "2 x 26.0 => 52.0: {body}");
+
+    // Raising the quantity recosts the record.
+    let (status, _) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/part-consumptions/{consumption_id}"),
+        &token,
+        Some(json!({ "quantity": 3 })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = request(&app, Method::GET, &list_url, &token, None).await;
+    assert_eq!(parts_cost(&body), Some(78.0), "3 x 26.0 => 78.0: {body}");
+
+    // Removing the last consumption returns the record to "no parts" (NULL),
+    // which is what distinguishes it from "parts worth nothing".
+    let (status, _) = request(
+        &app,
+        Method::DELETE,
+        &format!("/api/part-consumptions/{consumption_id}"),
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, body) = request(&app, Method::GET, &list_url, &token, None).await;
+    let record = body["maintenanceRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"].as_i64() == Some(record_id))
+        .unwrap();
+    assert!(record["partsCost"].is_null(), "{record}");
+    // The user's own `cost` is never touched by any of this.
+    assert_eq!(record["cost"].as_f64(), Some(100.0));
+}
+
+/// Stock without a price must not silently vanish from the average: it counts
+/// toward quantity, dragging the per-piece cost down.
+#[tokio::test]
+async fn test_parts_cost_with_unpriced_stock() {
+    let (app, pool, token) = setup_test_app().await;
+    let moto_id = seed_motorcycle(&pool, 1).await;
+
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        &format!("/api/motorcycles/{moto_id}/maintenance"),
+        &token,
+        Some(json!({ "date": "2026-06-20", "odo": 100, "type": "general" })),
+    )
+    .await;
+    let record_id = body["maintenanceRecord"]["id"].as_i64().unwrap();
+
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        "/api/parts",
+        &token,
+        Some(json!({ "partNumber": "PN-FREE", "name": "Schraube" })),
+    )
+    .await;
+    let part_id = body["part"]["id"].as_i64().unwrap();
+
+    // 1 @ 40 total + 3 salvaged for free => 40 / 4 = 10 per piece.
+    request(
+        &app,
+        Method::POST,
+        "/api/part-stocks",
+        &token,
+        Some(json!({ "partId": part_id, "quantity": 1, "price": 40.0, "currency": "CHF" })),
+    )
+    .await;
+    request(
+        &app,
+        Method::POST,
+        "/api/part-stocks",
+        &token,
+        Some(json!({ "partId": part_id, "quantity": 3 })),
+    )
+    .await;
+
+    request(
+        &app,
+        Method::POST,
+        "/api/part-consumptions",
+        &token,
+        Some(json!({ "partId": part_id, "quantity": 2, "maintenanceRecordId": record_id })),
+    )
+    .await;
+
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        &format!("/api/motorcycles/{moto_id}/maintenance"),
+        &token,
+        None,
+    )
+    .await;
+    let record = body["maintenanceRecords"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"].as_i64() == Some(record_id))
+        .unwrap();
+    assert_eq!(record["partsCost"].as_f64(), Some(20.0), "{record}");
+}
+
+/// The consumption list carries enough context to link back to the repair and
+/// name the bike, without a walk over every motorcycle's maintenance list.
+#[tokio::test]
+async fn test_consumption_list_embeds_repair_context() {
+    let (app, pool, token) = setup_test_app().await;
+    let moto_id = seed_motorcycle(&pool, 1).await;
+
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        &format!("/api/motorcycles/{moto_id}/maintenance"),
+        &token,
+        Some(json!({ "date": "2026-06-20", "odo": 42000, "type": "service" })),
+    )
+    .await;
+    let record_id = body["maintenanceRecord"]["id"].as_i64().unwrap();
+
+    let (_, body) = request(
+        &app,
+        Method::POST,
+        "/api/parts",
+        &token,
+        Some(json!({ "partNumber": "PN-CTX", "name": "Ölfilter" })),
+    )
+    .await;
+    let part_id = body["part"]["id"].as_i64().unwrap();
+    request(
+        &app,
+        Method::POST,
+        "/api/part-stocks",
+        &token,
+        Some(json!({ "partId": part_id, "quantity": 5 })),
+    )
+    .await;
+
+    request(
+        &app,
+        Method::POST,
+        "/api/part-consumptions",
+        &token,
+        Some(json!({ "partId": part_id, "quantity": 1, "maintenanceRecordId": record_id })),
+    )
+    .await;
+    // A manual consumption with no repair behind it.
+    request(
+        &app,
+        Method::POST,
+        "/api/part-consumptions",
+        &token,
+        Some(json!({ "partId": part_id, "quantity": 1, "date": "2026-07-01" })),
+    )
+    .await;
+
+    let (_, body) = request(
+        &app,
+        Method::GET,
+        &format!("/api/part-consumptions?partId={part_id}"),
+        &token,
+        None,
+    )
+    .await;
+    let rows = body["partConsumptions"].as_array().unwrap();
+    assert_eq!(rows.len(), 2, "{body}");
+
+    let linked = rows
+        .iter()
+        .find(|r| r["maintenanceRecordId"].as_i64() == Some(record_id))
+        .expect("linked consumption present");
+    assert_eq!(linked["motorcycleId"].as_i64(), Some(moto_id));
+    assert_eq!(linked["motorcycleMake"], "BMW");
+    assert_eq!(linked["motorcycleModel"], "R 1150 GS");
+    assert_eq!(linked["maintenanceDate"], "2026-06-20");
+    assert_eq!(linked["maintenanceType"], "service");
+
+    // The manual one keeps the original shape: context keys present but null,
+    // never missing, so a strict decoder (Swift Codable) stays happy.
+    let manual = rows
+        .iter()
+        .find(|r| r["maintenanceRecordId"].is_null())
+        .expect("manual consumption present");
+    assert!(manual["motorcycleId"].is_null());
+    assert!(manual["motorcycleMake"].is_null());
+    assert!(manual["maintenanceDate"].is_null());
+}

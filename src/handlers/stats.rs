@@ -27,6 +27,17 @@ fn parse_year(date_str: &str) -> Option<i32> {
     }
 }
 
+/// What a maintenance record actually cost: the entered amount (normalized when
+/// available) plus the parts booked against it.
+///
+/// `partsCost` is already normalized to the same currency as `normalizedCost`
+/// (see migration 046) and is NULL when no parts were consumed, so it simply
+/// adds on. Parts are counted here — and not as an inventory expense — so that
+/// buying stock and fitting it to a bike cannot be counted twice.
+fn record_total_cost(record: &MaintenanceRecord) -> f64 {
+    record.normalized_cost.or(record.cost).unwrap_or(0.0) + record.parts_cost.unwrap_or(0.0)
+}
+
 pub async fn get_stats(
     State(pool): State<SqlitePool>,
     State(config): State<Config>,
@@ -156,7 +167,7 @@ pub async fn get_stats(
                     .iter()
                     .filter(|m| m.motorcycle_id == moto.id)
                     .filter(|m| parse_year(&m.date) == Some(y))
-                    .map(|m| m.normalized_cost.or(m.cost).unwrap_or(0.0))
+                    .map(record_total_cost)
                     .sum::<f64>();
 
                 if let Some(y_stats) = yearly_map.get_mut(&y) {
@@ -207,7 +218,7 @@ pub async fn get_stats(
     // Process costs and yearly fleet stats (attach records)
     for m in &maintenance {
         if let Some(y) = parse_year(&m.date) {
-            let cost = m.normalized_cost.or(m.cost).unwrap_or(0.0);
+            let cost = record_total_cost(m);
             total_cost_overall += cost;
             if y == current_year {
                 total_cost_this_year += cost;

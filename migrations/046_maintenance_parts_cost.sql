@@ -1,0 +1,14 @@
+-- Cost of the parts consumed by a maintenance record, kept alongside `cost`
+-- rather than folded into it so labour and parts stay distinguishable and a
+-- later quantity edit cannot corrupt the figure the user typed.
+--
+-- Denominated in the same normalized currency as `normalizedCost` (CHF), since
+-- it is derived from partStocks.normalizedPrice. NULL means "no parts booked
+-- against this record"; 0.0 means parts were booked but none carried a price.
+--
+-- Recomputed by the API whenever a partConsumption for the record is created,
+-- updated or deleted. It is a snapshot of the weighted-average unit price at
+-- that moment: editing a stock entry's price later does not rewrite the cost
+-- of repairs already booked, which is the behaviour you want for historic
+-- records.
+ALTER TABLE maintenanceRecords ADD COLUMN partsCost REAL;

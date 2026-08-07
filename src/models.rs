@@ -181,6 +181,10 @@ pub struct MaintenanceRecord {
     pub fuel_additive_added: bool,
     pub lead_substitute_added: bool,
     pub parent_id: Option<i64>,
+    /// Normalized (CHF) value of the parts booked against this record, derived
+    /// from its live `partConsumptions`. Server-maintained — clients read it
+    /// but never send it. See migration 046.
+    pub parts_cost: Option<f64>,
     // Sync metadata (see migration 011).
     pub client_id: Option<String>,
     pub updated_at: Option<String>,
@@ -518,6 +522,27 @@ pub struct PartConsumption {
     pub client_id: Option<String>,
     pub updated_at: Option<String>,
     pub deleted_at: Option<String>,
+}
+
+/// A consumption plus the repair it was booked against, so a client can link
+/// straight to that maintenance record and name the motorcycle without walking
+/// `/motorcycles/{id}/maintenance` for every entry.
+///
+/// Every added field is optional and NULL for a manual consumption that is not
+/// tied to a record (or whose record has since been deleted), so the payload
+/// stays a strict superset of [`PartConsumption`].
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct PartConsumptionWithContext {
+    #[serde(flatten)]
+    #[sqlx(flatten)]
+    pub consumption: PartConsumption,
+    pub motorcycle_id: Option<i64>,
+    pub maintenance_date: Option<String>,
+    pub maintenance_type: Option<String>,
+    pub motorcycle_make: Option<String>,
+    pub motorcycle_model: Option<String>,
 }
 
 /// Community-browse projection of another user's part. Catalog data is
