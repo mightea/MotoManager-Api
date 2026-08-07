@@ -28,7 +28,7 @@ argon2 = "0.5"
 # Held at 0.5 — argon2 0.5.3 is still the latest *stable* release and requires
 # password-hash ^0.5 (argon2 0.6 is pre-release only, 0.6.0-rc.8 as of 2026-08).
 # Bump both together once argon2 0.6.0 ships.
-password-hash = { version = "0.5", features = ["getrandom"] }
+password-hash = { version = "0.6", features = ["getrandom"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 mime_guess = "2"
 tokio-util = { version = "0.7", features = ["io"] }
