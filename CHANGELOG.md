@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.17.0](https://github.com/mightea/MotoManager-Api/compare/v0.16.1...v0.17.0) (2026-08-21)
+
+
+### Features
+
+* cost consumed parts onto their maintenance record ([c50e605](https://github.com/mightea/MotoManager-Api/commit/c50e6058c224ea70dd7159124b5cdaf28c09d8d7))
+* create a missing sqlite database file on startup ([3876304](https://github.com/mightea/MotoManager-Api/commit/3876304ea783003f514ee5db95a047c50ffe3f4c))
+
+
+### Bug Fixes
+
+* include per-user averages in the stats response ([59b6ab5](https://github.com/mightea/MotoManager-Api/commit/59b6ab51be7120537996b77114a01b03ec2fd8cc))
+
 ## [0.16.1](https://github.com/mightea/MotoManager-Api/compare/v0.16.0...v0.16.1) (2026-08-07)
 
 
