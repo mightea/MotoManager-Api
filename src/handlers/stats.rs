@@ -309,9 +309,24 @@ pub async fn get_stats(
         }
     });
 
+    // Instance-wide averages for the webapp's server-stats page, which reads
+    // them from the response root (not from `stats.global`).
+    let avg_moto_per_user = if users_count > 0 {
+        motorcycles_count_global as f64 / users_count as f64
+    } else {
+        0.0
+    };
+    let avg_docs_per_user = if users_count > 0 {
+        docs_count_global as f64 / users_count as f64
+    } else {
+        0.0
+    };
+
     Ok(Json(json!({
         "stats": stats_data,
         "motorcycles": motorcycles_json,
         "version": config.app_version,
+        "avgMotoPerUser": avg_moto_per_user,
+        "avgDocsPerUser": avg_docs_per_user,
     })))
 }
