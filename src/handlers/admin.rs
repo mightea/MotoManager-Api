@@ -14,7 +14,7 @@ use crate::{
     auth::{password::hash_password, AdminUser},
     config::Config,
     error::{AppError, AppResult},
-    models::{CurrencySetting, PublicUser, User, UserSettings},
+    models::{AppUpgradeSettings, CurrencySetting, PublicUser, User, UserSettings},
 };
 
 // ─── User Management ─────────────────────────────────────────────────────────
@@ -532,6 +532,84 @@ pub async fn delete_currency(
     }
 
     Ok(Json(json!({ "message": "Currency deleted" })))
+}
+
+// ─── App Upgrade Requirements ────────────────────────────────────────────────
+
+async fn load_app_upgrade_settings(pool: &SqlitePool) -> AppResult<AppUpgradeSettings> {
+    Ok(
+        sqlx::query_as::<_, AppUpgradeSettings>("SELECT * FROM appUpgradeSettings WHERE id = 1")
+            .fetch_one(pool)
+            .await?,
+    )
+}
+
+/// Public (unauthenticated): the iOS app must be able to learn it is out of
+/// support even when it holds no valid session, and a hard-blocked client
+/// checks this route — and only this route — to detect recovery.
+pub async fn get_app_upgrade_public(State(pool): State<SqlitePool>) -> AppResult<Json<Value>> {
+    let settings = load_app_upgrade_settings(&pool).await?;
+    Ok(Json(json!({
+        "softUpgradeBuild": settings.soft_upgrade_build,
+        "hardUpgradeBuild": settings.hard_upgrade_build,
+    })))
+}
+
+pub async fn get_app_upgrade(
+    State(pool): State<SqlitePool>,
+    AdminUser(_admin): AdminUser,
+) -> AppResult<Json<Value>> {
+    let settings = load_app_upgrade_settings(&pool).await?;
+    Ok(Json(json!({ "appUpgrade": settings })))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateAppUpgradeRequest {
+    pub soft_upgrade_build: Option<i64>,
+    pub hard_upgrade_build: Option<i64>,
+}
+
+pub async fn update_app_upgrade(
+    State(pool): State<SqlitePool>,
+    AdminUser(admin): AdminUser,
+    Json(body): Json<UpdateAppUpgradeRequest>,
+) -> AppResult<Json<Value>> {
+    let existing = load_app_upgrade_settings(&pool).await?;
+
+    let soft = body
+        .soft_upgrade_build
+        .unwrap_or(existing.soft_upgrade_build);
+    let hard = body
+        .hard_upgrade_build
+        .unwrap_or(existing.hard_upgrade_build);
+    if soft < 0 || hard < 0 {
+        return Err(AppError::BadRequest(
+            "Build numbers must not be negative".to_string(),
+        ));
+    }
+
+    let now = Utc::now().to_rfc3339();
+    sqlx::query!(
+        "UPDATE appUpgradeSettings SET softUpgradeBuild = ?, hardUpgradeBuild = ?, updatedAt = ? \
+         WHERE id = 1",
+        soft,
+        hard,
+        now
+    )
+    .execute(&pool)
+    .await?;
+
+    tracing::info!(
+        "Admin {} (ID: {}) set app upgrade builds: soft={}, hard={}",
+        admin.username,
+        admin.id,
+        soft,
+        hard
+    );
+
+    let settings = load_app_upgrade_settings(&pool).await?;
+    Ok(Json(json!({ "appUpgrade": settings })))
 }
 
 // ─── Exchange Rate Helper ─────────────────────────────────────────────────────

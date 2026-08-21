@@ -340,6 +340,19 @@ pub struct UserSettings {
     pub updated_at: Option<String>,
 }
 
+/// Single-row table (id = 1): minimum iOS app build numbers. Builds at or
+/// below `soft_upgrade_build` get an update reminder; builds below
+/// `hard_upgrade_build` are out of support and must update.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct AppUpgradeSettings {
+    pub id: i64,
+    pub soft_upgrade_build: i64,
+    pub hard_upgrade_build: i64,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 #[sqlx(rename_all = "camelCase")]

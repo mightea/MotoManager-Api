@@ -317,8 +317,16 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::backups::download_backup),
         )
         .route(
+            "/api/admin/app-upgrade",
+            get(handlers::admin::get_app_upgrade).put(handlers::admin::update_app_upgrade),
+        )
+        .route(
             "/api/currencies",
             get(handlers::admin::list_currencies_public),
+        )
+        .route(
+            "/api/app-upgrade",
+            get(handlers::admin::get_app_upgrade_public),
         )
         .route("/api/stats", get(handlers::stats::get_stats))
         .route("/api/home", get(handlers::home::get_home_data))
