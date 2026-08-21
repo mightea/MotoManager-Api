@@ -38,8 +38,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Connect to database. WAL is sticky: once enabled it persists in the DB file
-    // and creates `-wal`/`-shm` sibling files next to it.
+    // and creates `-wal`/`-shm` sibling files next to it. A missing database
+    // file is created (regardless of whether the URL carries `?mode=rwc`) so a
+    // fresh deployment bootstraps itself: migrations run on the empty file and
+    // the first registered account becomes the administrator.
     let connect_options = SqliteConnectOptions::from_str(&config.database_url)?
+        .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)
         .busy_timeout(Duration::from_secs(5))
