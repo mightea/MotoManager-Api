@@ -15,6 +15,10 @@ pub struct User {
     pub created_at: String,
     pub updated_at: String,
     pub last_login_at: Option<String>,
+    /// Last iOS app version/build seen on an authorized request (from the
+    /// X-App-Version / X-App-Build headers); NULL for webapp-only users.
+    pub app_version: Option<String>,
+    pub app_build: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +32,8 @@ pub struct PublicUser {
     pub created_at: String,
     pub updated_at: String,
     pub last_login_at: Option<String>,
+    pub app_version: Option<String>,
+    pub app_build: Option<i64>,
 }
 
 impl From<User> for PublicUser {
@@ -41,6 +47,8 @@ impl From<User> for PublicUser {
             created_at: u.created_at,
             updated_at: u.updated_at,
             last_login_at: u.last_login_at,
+            app_version: u.app_version,
+            app_build: u.app_build,
         }
     }
 }

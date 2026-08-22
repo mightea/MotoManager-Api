@@ -19,6 +19,49 @@ pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
 #[derive(Debug, Clone)]
 pub struct AuthUser(pub User);
 
+/// Record the client app version reported via the `X-App-Version` /
+/// `X-App-Build` headers. Piggybacks on the user row the extractor already
+/// loaded: compares in memory and writes only when the value actually changed
+/// (roughly once per app update per user). Clients that send no headers
+/// (webapp, older app builds) never touch the stored values, and a failed
+/// write must not fail the request.
+async fn record_app_version(pool: &SqlitePool, user: &mut User, headers: &HeaderMap) {
+    let Some(version) = headers
+        .get("x-app-version")
+        .and_then(|v| v.to_str().ok())
+        .map(str::trim)
+        .filter(|v| !v.is_empty() && v.len() <= 32)
+    else {
+        return;
+    };
+    let Some(build) = headers
+        .get("x-app-build")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|b| *b >= 0)
+    else {
+        return;
+    };
+
+    if user.app_version.as_deref() == Some(version) && user.app_build == Some(build) {
+        return;
+    }
+
+    let result = sqlx::query("UPDATE users SET appVersion = ?, appBuild = ? WHERE id = ?")
+        .bind(version)
+        .bind(build)
+        .bind(user.id)
+        .execute(pool)
+        .await;
+    match result {
+        Ok(_) => {
+            user.app_version = Some(version.to_string());
+            user.app_build = Some(build);
+        }
+        Err(e) => tracing::warn!("Failed to record app version for user {}: {}", user.id, e),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AdminUser(pub User);
 
@@ -71,7 +114,8 @@ where
 
         let token = extract_bearer_token(&parts.headers).ok_or(AppError::Unauthorized)?;
 
-        let user = session::get_user_from_token(&pool, &token).await?;
+        let mut user = session::get_user_from_token(&pool, &token).await?;
+        record_app_version(&pool, &mut user, &parts.headers).await;
         Ok(AuthUser(user))
     }
 }
