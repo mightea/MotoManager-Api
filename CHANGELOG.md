@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/mightea/MotoManager-Api/compare/v0.18.0...v0.18.1) (2026-08-23)
+
+
+### Bug Fixes
+
+* recognize workshop location changes ([548e6f8](https://github.com/mightea/MotoManager-Api/commit/548e6f8b5a128243f6c8a4c3076133dd6da1b65a))
+
 ## [0.18.0](https://github.com/mightea/MotoManager-Api/compare/v0.17.0...v0.18.0) (2026-08-22)
 
 
