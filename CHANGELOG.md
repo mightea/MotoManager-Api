@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0](https://github.com/mightea/MotoManager-Api/compare/v0.17.0...v0.18.0) (2026-08-22)
+
+
+### Features
+
+* add admin-configurable app upgrade build requirements ([a5d3273](https://github.com/mightea/MotoManager-Api/commit/a5d3273f18b859c399d07cbfc5a9792786004589))
+* record the ios app version a user last connected with ([7c47ca3](https://github.com/mightea/MotoManager-Api/commit/7c47ca346eb9f5f80f9e9b56a3212d9214adecd7))
+
 ## [0.17.0](https://github.com/mightea/MotoManager-Api/compare/v0.16.1...v0.17.0) (2026-08-21)
 
 
