@@ -749,7 +749,8 @@ async fn test_home_data_location_logic() {
     .unwrap()
     .last_insert_rowid();
 
-    // Storage-typed: only storage locations count as "where the bike lives".
+    // Garages are normal homes; workshops qualify only for an explicit
+    // `location` record, not an ordinary service visit.
     let loc1_id = sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
         .bind("Location 1")
         .bind("storage")
@@ -761,6 +762,14 @@ async fn test_home_data_location_logic() {
     let loc2_id = sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
         .bind("Location 2")
         .bind("storage")
+        .bind(1)
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+    let workshop_id = sqlx::query("INSERT INTO locations (name, type, userId) VALUES (?, ?, ?)")
+        .bind("Workshop")
+        .bind("maintenance_shop")
         .bind(1)
         .execute(&pool)
         .await
@@ -822,6 +831,7 @@ async fn test_home_data_location_logic() {
         .bind(moto_id).bind("2025-03-01").bind(53000).bind("tire").bind(loc1_id).execute(&pool).await.unwrap();
 
     let response = app
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/api/home")
@@ -840,6 +850,55 @@ async fn test_home_data_location_logic() {
     let moto = &body["motorcycles"][0];
     assert_eq!(moto["currentLocationId"], loc1_id);
     assert_eq!(moto["currentLocationName"], "Location 1");
+
+    // SCENARIO 4: A service visit at a workshop does not move the bike.
+    sqlx::query("INSERT INTO maintenanceRecords (motorcycleId, date, odo, type, locationId) VALUES (?, ?, ?, ?, ?)")
+        .bind(moto_id).bind("2025-04-01").bind(54000).bind("service").bind(workshop_id).execute(&pool).await.unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/home")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let moto = &body["motorcycles"][0];
+    assert_eq!(moto["currentLocationId"], loc1_id);
+    assert_eq!(moto["currentLocationName"], "Location 1");
+
+    // SCENARIO 5: An explicit location change may move the bike to a workshop.
+    sqlx::query("INSERT INTO maintenanceRecords (motorcycleId, date, odo, type, locationId) VALUES (?, ?, ?, ?, ?)")
+        .bind(moto_id).bind("2025-05-01").bind(55000).bind("location").bind(workshop_id).execute(&pool).await.unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/home")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let moto = &body["motorcycles"][0];
+    assert_eq!(moto["currentLocationId"], workshop_id);
+    assert_eq!(moto["currentLocationName"], "Workshop");
 }
 
 #[tokio::test]

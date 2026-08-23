@@ -167,20 +167,30 @@ pub async fn get_home_data(
             .max(last_issues_date)
             .max(last_location_date);
 
-        // Current Location — only Storage-typed locations count as "where the bike lives".
-        // Fuel / workshop / inspection visits don't change the bike's home.
+        // Current Location — an explicit location-change record may point to a
+        // garage/storage place or a workshop (a bike can be left there). An
+        // ordinary service visit at a workshop must not move the bike's home.
         let is_storage_loc = |id: i64| -> bool {
             location_map
                 .get(&id)
                 .map(|l| matches!(l.location_type, LocationType::Storage))
                 .unwrap_or(false)
         };
+        let is_workshop_loc = |id: i64| -> bool {
+            location_map
+                .get(&id)
+                .map(|l| matches!(l.location_type, LocationType::MaintenanceShop))
+                .unwrap_or(false)
+        };
+        let is_explicit_location_target = |id: i64| is_storage_loc(id) || is_workshop_loc(id);
         let latest_loc_record = moto_loc_records
             .iter()
-            .find(|r| is_storage_loc(r.location_id));
-        let latest_m_with_loc = moto_maintenance
-            .iter()
-            .find(|m| m.location_id.is_some_and(is_storage_loc));
+            .find(|r| is_explicit_location_target(r.location_id));
+        let latest_m_with_loc = moto_maintenance.iter().find(|m| {
+            m.location_id.is_some_and(|id| {
+                is_storage_loc(id) || (m.record_type == "location" && is_workshop_loc(id))
+            })
+        });
 
         let current_location_id = match (latest_loc_record, latest_m_with_loc) {
             (Some(lr), Some(mr)) => {
