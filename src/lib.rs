@@ -301,6 +301,10 @@ pub fn build_app(state: AppState) -> Router {
             put(handlers::admin::update_currency).delete(handlers::admin::delete_currency),
         )
         .route(
+            "/api/admin/users/{uid}/impersonate",
+            post(handlers::admin::impersonate_user),
+        )
+        .route(
             "/api/admin/regenerate-previews",
             post(handlers::admin::regenerate_previews),
         )

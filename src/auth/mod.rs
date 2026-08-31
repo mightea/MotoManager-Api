@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 use crate::{error::AppError, models::User};
 
 pub const SESSION_DURATION_DAYS: i64 = 14;
+pub const IMPERSONATION_DURATION_HOURS: i64 = 1;
 
 pub fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
@@ -117,6 +118,36 @@ where
         let mut user = session::get_user_from_token(&pool, &token).await?;
         record_app_version(&pool, &mut user, &parts.headers).await;
         Ok(AuthUser(user))
+    }
+}
+
+/// Rejects requests made through an impersonation session. Guards the
+/// credential-management routes (password change, passkey add/remove): a
+/// support admin acting as a user helps with the user's data, but must not
+/// be able to change what lets that user — or someone else — log in.
+#[derive(Debug, Clone)]
+pub struct NotImpersonated;
+
+impl<S> FromRequestParts<S> for NotImpersonated
+where
+    S: Send + Sync,
+    SqlitePool: axum::extract::FromRef<S>,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let pool = SqlitePool::from_ref(state);
+        let token = extract_bearer_token(&parts.headers).ok_or(AppError::Unauthorized)?;
+
+        let impersonator: Option<Option<i64>> =
+            sqlx::query_scalar("SELECT impersonatorId FROM sessions WHERE token = ?")
+                .bind(&token)
+                .fetch_optional(&pool)
+                .await?;
+        if impersonator.flatten().is_some() {
+            return Err(AppError::Forbidden);
+        }
+        Ok(NotImpersonated)
     }
 }
 

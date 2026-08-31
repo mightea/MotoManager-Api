@@ -3,7 +3,7 @@ use rand::Rng;
 use sqlx::SqlitePool;
 
 use crate::{
-    auth::SESSION_DURATION_DAYS,
+    auth::{IMPERSONATION_DURATION_HOURS, SESSION_DURATION_DAYS},
     error::{AppError, AppResult},
     models::User,
 };
@@ -29,6 +29,34 @@ pub async fn create_session(pool: &SqlitePool, user_id: i64) -> AppResult<String
         user_id,
         expires_at_str,
         created_at
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(token)
+}
+
+/// Create a short-lived session acting as `user_id`, recording the admin who
+/// impersonates. Expires after [`IMPERSONATION_DURATION_HOURS`] instead of the
+/// regular two weeks — support access should not outlive the support case.
+pub async fn create_impersonation_session(
+    pool: &SqlitePool,
+    user_id: i64,
+    impersonator_id: i64,
+) -> AppResult<String> {
+    let token = generate_session_token();
+    let now = Utc::now();
+    let expires_at_str = (now + Duration::hours(IMPERSONATION_DURATION_HOURS)).to_rfc3339();
+    let created_at = now.to_rfc3339();
+
+    sqlx::query!(
+        "INSERT INTO sessions (token, userId, expiresAt, createdAt, impersonatorId) \
+         VALUES (?, ?, ?, ?, ?)",
+        token,
+        user_id,
+        expires_at_str,
+        created_at,
+        impersonator_id
     )
     .execute(pool)
     .await?;

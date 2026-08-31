@@ -11,7 +11,7 @@ use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::{
-    auth::{password::hash_password, AdminUser},
+    auth::{password::hash_password, session::create_impersonation_session, AdminUser},
     config::Config,
     error::{AppError, AppResult},
     models::{AppUpgradeSettings, CurrencySetting, PublicUser, User, UserSettings},
@@ -204,6 +204,41 @@ pub async fn delete_user(
     }
 
     Ok(Json(json!({ "message": "User deleted" })))
+}
+
+/// Mint a short-lived session acting as the given user (support tooling).
+/// The session row carries `impersonatorId` as the audit link; credential
+/// routes reject it via the `NotImpersonated` guard.
+pub async fn impersonate_user(
+    State(pool): State<SqlitePool>,
+    AdminUser(admin): AdminUser,
+    Path(uid): Path<i64>,
+) -> AppResult<Json<Value>> {
+    if uid == admin.id {
+        return Err(AppError::BadRequest(
+            "You are already logged in as this user".to_string(),
+        ));
+    }
+
+    let target = sqlx::query_as::<_, User>("SELECT * FROM users WHERE id = ?")
+        .bind(uid)
+        .fetch_optional(&pool)
+        .await?
+        .ok_or_else(|| AppError::NotFound("User not found".to_string()))?;
+
+    let token = create_impersonation_session(&pool, target.id, admin.id).await?;
+    tracing::info!(
+        "Admin {} (ID: {}) started impersonating user {} (ID: {})",
+        admin.username,
+        admin.id,
+        target.username,
+        target.id
+    );
+
+    Ok(Json(json!({
+        "token": token,
+        "user": PublicUser::from(target),
+    })))
 }
 
 pub async fn regenerate_previews(

@@ -11,7 +11,7 @@ use uuid::Uuid;
 use webauthn_rs::prelude::*;
 
 use crate::{
-    auth::{session, AuthUser},
+    auth::{session, AuthUser, NotImpersonated},
     error::{AppError, AppResult},
     models::{Authenticator, Challenge},
 };
@@ -25,6 +25,7 @@ pub async fn register_options(
     State(pool): State<SqlitePool>,
     State(webauthn): State<Arc<Webauthn>>,
     AuthUser(user): AuthUser,
+    _guard: NotImpersonated,
 ) -> AppResult<Json<Value>> {
     tracing::info!(
         "Passkey register options requested for user: {} (ID: {})",
@@ -95,6 +96,7 @@ pub async fn register_verify(
     State(pool): State<SqlitePool>,
     State(webauthn): State<Arc<Webauthn>>,
     AuthUser(user): AuthUser,
+    _guard: NotImpersonated,
     Json(body): Json<RegisterVerifyRequest>,
 ) -> AppResult<Json<Value>> {
     tracing::info!(

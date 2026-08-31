@@ -10,7 +10,7 @@ use sqlx::SqlitePool;
 use crate::{
     auth::{
         password::{hash_password, verify_password},
-        AuthUser,
+        AuthUser, NotImpersonated,
     },
     error::{AppError, AppResult},
     models::{Authenticator, PublicUser, UserSettings},
@@ -204,6 +204,7 @@ pub async fn get_authenticators(
 pub async fn delete_authenticator(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
+    _guard: NotImpersonated,
     Path(id): Path<String>,
 ) -> AppResult<Json<Value>> {
     let result = sqlx::query!(
@@ -232,6 +233,7 @@ pub struct ChangePasswordRequest {
 pub async fn change_password(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
+    _guard: NotImpersonated,
     Json(body): Json<ChangePasswordRequest>,
 ) -> AppResult<Json<Value>> {
     if body.new_password != body.confirm_password {

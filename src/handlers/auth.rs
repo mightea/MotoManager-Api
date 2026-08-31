@@ -102,13 +102,36 @@ pub async fn logout(State(pool): State<SqlitePool>, headers: HeaderMap) -> AppRe
     Ok((StatusCode::OK, Json(json!({ "message": "Logged out" }))).into_response())
 }
 
-pub async fn me(AuthUser(user): AuthUser) -> AppResult<Json<serde_json::Value>> {
+pub async fn me(
+    State(pool): State<SqlitePool>,
+    AuthUser(user): AuthUser,
+    headers: HeaderMap,
+) -> AppResult<Json<serde_json::Value>> {
     tracing::debug!(
         "User info requested for: {} (ID: {})",
         user.username,
         user.id
     );
-    Ok(Json(json!({ "user": PublicUser::from(user) })))
+
+    let mut response = json!({ "user": PublicUser::from(user) });
+
+    // Impersonation sessions surface the acting admin so clients can show a
+    // "viewing as" banner. Additive: absent for regular sessions, and old
+    // clients ignore the extra key.
+    if let Some(token) = extract_bearer_token(&headers) {
+        let impersonator = sqlx::query_as::<_, (i64, String, String)>(
+            "SELECT u.id, u.username, u.name FROM sessions s \
+             JOIN users u ON u.id = s.impersonatorId WHERE s.token = ?",
+        )
+        .bind(&token)
+        .fetch_optional(&pool)
+        .await?;
+        if let Some((id, username, name)) = impersonator {
+            response["impersonatedBy"] = json!({ "id": id, "username": username, "name": name });
+        }
+    }
+
+    Ok(Json(response))
 }
 
 pub async fn register(
