@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/mightea/MotoManager-Api/compare/v0.18.1...v0.19.0) (2026-08-31)
+
+
+### Features
+
+* admin impersonation for user support ([3daa514](https://github.com/mightea/MotoManager-Api/commit/3daa51463ba4b7ad0388d0e18f131ddf5557c420))
+* match F 650 GS VINs via type code 0172 ([4d5fd4a](https://github.com/mightea/MotoManager-Api/commit/4d5fd4a46c8632eb8f312d67be2d9f41ec669c65))
+
 ## [0.18.1](https://github.com/mightea/MotoManager-Api/compare/v0.18.0...v0.18.1) (2026-08-23)
 
 
