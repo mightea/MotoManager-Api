@@ -1226,6 +1226,26 @@ async fn test_vin_decode() {
         "{body}"
     );
 
+    // F 650 GS (R13): type code 0172, model year letter 3 = 2003.
+    let (status, body) = request(
+        &app,
+        Method::GET,
+        "/api/vin/decode?vin=WB10172A63ZH93686",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["isBmw"], true);
+    assert_eq!(body["typeCode"], "0172");
+    assert_eq!(body["modelYear"], 2003);
+    assert_eq!(body["checkDigitValid"], true);
+    assert_eq!(
+        body["match"]["name"].as_str().unwrap(),
+        "F 650 GS",
+        "{body}"
+    );
+
     // Unknown type code: BMW VIN but no catalog match.
     let (_, body) = request(
         &app,
