@@ -27,6 +27,7 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
    DATA_DIR=./data                   # where uploaded files are stored
    ENABLE_REGISTRATION=false         # false = only the first user can register
    RUST_LOG=info
+   MCP_ALLOWED_HOSTS=                # optional Host allowlist for /mcp, see "MCP server"
    ```
 
 3. Build and run:
@@ -170,6 +171,10 @@ All routes are prefixed with `/api`. Routes marked **auth** require a valid bear
 | POST | `/api/settings/change-password` | auth | Change password |
 | GET | `/api/settings/authenticators` | auth | List registered passkeys |
 | DELETE | `/api/settings/authenticators/{id}` | auth | Delete a passkey |
+| GET | `/api/settings/api-tokens` | auth | List the user's active API tokens (MCP) |
+| POST | `/api/settings/api-tokens` | auth, not impersonated | Create an API token; the secret is returned once |
+| DELETE | `/api/settings/api-tokens/{id}` | auth, not impersonated | Revoke an API token |
+| GET | `/api/settings/mcp-audit?limit=` | auth | Recent MCP tool calls made with the user's tokens |
 
 ### Admin
 
@@ -193,6 +198,41 @@ All routes are prefixed with `/api`. Routes marked **auth** require a valid bear
 | GET | `/api/stats` | auth | App statistics |
 | GET | `/api/home` | auth | Home dashboard data |
 | GET | `/api/health` | — | Health check |
+
+### MCP server
+
+`POST /mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server
+(Streamable HTTP, stateless) that lets AI clients such as Claude Code, Claude
+Desktop or the Claude API's MCP connector read and write a user's own garage
+data. It is implemented in `src/mcp/` on top of the same handlers the apps use.
+
+- **Auth**: a personal API token (`mm_…`, created under Settings) sent as
+  `Authorization: Bearer`. Session tokens are not accepted on `/mcp`, and API
+  tokens are not accepted on `/api/*`.
+- **User-level only**: every tool runs as the token's user through the normal
+  ownership checks. No admin handler is reachable, so an admin's token sees
+  exactly their own data. Impersonation sessions cannot create or revoke tokens.
+- **Scopes**: `read` tokens can call only tools annotated `readOnlyHint`;
+  `write` tokens can additionally call the additive write tools (log
+  maintenance/fuel, create issue, update issue status, add expense, create
+  part, add stock, consume part). Nothing deletes.
+- **Validation**: dates must be `YYYY-MM-DD`, numbers are range-checked,
+  enumerations and currencies are validated against the configured values,
+  text is trimmed and length-capped, unknown arguments are rejected. An
+  optional `idempotency_key` makes retried writes safe.
+- **Audit**: every call is written to `mcpAuditLog` (90-day retention) and
+  visible via `GET /api/settings/mcp-audit`.
+- **Config**: `MCP_ALLOWED_HOSTS` (comma-separated `host` or `host:port`)
+  enables the transport's `Host` header check; unset/empty disables it, which
+  is fine because the token middleware already rejects unauthenticated
+  requests before they reach the MCP layer.
+
+Connect Claude Code:
+
+```sh
+claude mcp add --transport http motomanager https://moto-api.example.com/mcp \
+  --header "Authorization: Bearer mm_…"
+```
 
 ### File Serving
 

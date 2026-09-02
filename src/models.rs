@@ -639,3 +639,39 @@ pub struct BackupRecord {
     /// failed rows and rows from before this was introduced.
     pub content_hash: Option<String>,
 }
+
+/// Personal API token for the MCP server. The secret itself is returned once
+/// at creation and never stored — only its hash (see migration 051).
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct ApiToken {
+    pub id: i64,
+    pub user_id: i64,
+    pub name: String,
+    #[serde(skip_serializing)]
+    pub token_hash: String,
+    pub token_prefix: String,
+    /// "read" or "write" (write implies read).
+    pub scope: String,
+    pub created_at: String,
+    pub last_used_at: Option<String>,
+    pub expires_at: Option<String>,
+    pub revoked_at: Option<String>,
+}
+
+/// One MCP tool invocation, as shown in the user's audit view.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct McpAuditEntry {
+    pub id: i64,
+    pub token_id: i64,
+    pub token_name: Option<String>,
+    pub tool: String,
+    pub arguments: Option<String>,
+    /// "ok" | "error" | "denied"
+    pub outcome: String,
+    pub detail: Option<String>,
+    pub created_at: String,
+}

@@ -37,6 +37,7 @@ async fn setup_test_app() -> (axum::Router, sqlx::SqlitePool, String) {
         backup_interval_hours: 24,
         backup_keep: 14,
         frontend_version: None,
+        mcp_allowed_hosts: Vec::new(),
     };
 
     let rp_origin = url::Url::parse("http://localhost:5173").unwrap();
@@ -195,4 +196,117 @@ async fn test_expense_lifecycle() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+/// Expenses may only be attributed to the caller's own motorcycles — an id
+/// belonging to another user is rejected on create and update.
+#[tokio::test]
+async fn test_expense_rejects_foreign_motorcycle_ids() {
+    let (app, pool, token) = setup_test_app().await;
+
+    let other_user = sqlx::query(
+        "INSERT INTO users (email, username, name, passwordHash, role) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("other@example.com")
+    .bind("other")
+    .bind("Other")
+    .bind(hash_password("password123").unwrap())
+    .bind("user")
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let foreign_bike = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("Ducati")
+    .bind("Monster")
+    .bind(other_user)
+    .bind(0)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/expenses")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "date": "2026-01-01",
+                        "amount": 10.0,
+                        "currency": "CHF",
+                        "category": "Steuern",
+                        "motorcycleIds": [foreign_bike]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM expenses")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+
+    // Create a legitimate expense, then try to re-point it at the foreign bike.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/expenses")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "date": "2026-01-01",
+                        "amount": 10.0,
+                        "currency": "CHF",
+                        "category": "Steuern",
+                        "motorcycleIds": []
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let created: Value = serde_json::from_slice(&bytes).unwrap();
+    let expense_id = created["expense"]["id"].as_i64().unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/expenses/{expense_id}"))
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({ "motorcycleIds": [foreign_bike] }).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let linked: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM expenseMotorcycles")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(linked, 0);
 }

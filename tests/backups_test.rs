@@ -29,6 +29,7 @@ fn test_config(data_dir: &std::path::Path) -> Config {
         backup_interval_hours: 24,
         backup_keep: 2,
         frontend_version: Some("frontend-9.9.9".to_string()),
+        mcp_allowed_hosts: Vec::new(),
     }
 }
 

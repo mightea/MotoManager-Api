@@ -3,6 +3,7 @@ pub mod backup;
 pub mod config;
 pub mod error;
 pub mod handlers;
+pub mod mcp;
 pub mod models;
 pub mod pdfium_lib;
 
@@ -285,6 +286,18 @@ pub fn build_app(state: AppState) -> Router {
             post(handlers::settings::change_password),
         )
         .route(
+            "/api/settings/api-tokens",
+            get(handlers::api_tokens::list_api_tokens).post(handlers::api_tokens::create_api_token),
+        )
+        .route(
+            "/api/settings/api-tokens/{id}",
+            delete(handlers::api_tokens::revoke_api_token),
+        )
+        .route(
+            "/api/settings/mcp-audit",
+            get(handlers::api_tokens::list_mcp_audit),
+        )
+        .route(
             "/api/admin/users",
             get(handlers::admin::list_users).post(handlers::admin::create_user),
         )
@@ -367,7 +380,19 @@ pub fn build_app(state: AppState) -> Router {
         )
         .layer(GovernorLayer::new(governor_conf));
 
-    router.merge(auth_routes).with_state(state)
+    // MCP endpoint: the token middleware runs before the protocol handler, so
+    // an unauthenticated request never reaches the MCP layer (see `mcp`).
+    let mcp_routes = Router::new()
+        .route_service("/mcp", mcp::service(&state))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            mcp::auth::require_api_token,
+        ));
+
+    router
+        .merge(auth_routes)
+        .merge(mcp_routes)
+        .with_state(state)
 }
 
 pub fn build_cors(origin: &str) -> CorsLayer {

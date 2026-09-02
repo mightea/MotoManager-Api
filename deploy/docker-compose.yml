@@ -23,6 +23,8 @@ services:
       # version too (manual backups already send it). Keep in sync on deploy.
       FRONTEND_VERSION: "2026.7.3"
       # LLM_BASE_URL / LLM_MODEL / LLM_API_KEY as needed
+      # Optional Host allowlist for the MCP endpoint (/mcp); empty = disabled.
+      # MCP_ALLOWED_HOSTS: "api.your.domain"
     volumes:
       - data:/app/data
       - cache:/app/cache

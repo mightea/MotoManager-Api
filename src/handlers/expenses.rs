@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
+    handlers::motorcycles::verify_motorcycle_ownership,
     models::Expense,
 };
 
@@ -90,6 +91,9 @@ pub async fn create_expense(
     let category = body
         .category
         .ok_or_else(|| AppError::BadRequest("category is required".to_string()))?;
+    for mid in &body.motorcycle_ids {
+        verify_motorcycle_ownership(&pool, *mid, user.id).await?;
+    }
 
     let mut tx = pool.begin().await?;
 
@@ -148,6 +152,9 @@ pub async fn update_expense(
     let category = body.category.unwrap_or(existing.category);
     let description = body.description.or(existing.description);
     let interval_months = body.interval_months.or(existing.interval_months);
+    for mid in &body.motorcycle_ids {
+        verify_motorcycle_ownership(&pool, *mid, user.id).await?;
+    }
 
     let mut tx = pool.begin().await?;
 

@@ -59,3 +59,5 @@ flate2 = "1"
 # Content fingerprint (pure-Rust) so a scheduled backup can skip when nothing
 # changed since the last one.
 sha2 = "0.11"
+# MCP server (Streamable HTTP transport, mounted at /mcp). Pure-Rust.
+rmcp = { version = "3.2", features = ["transport-streamable-http-server"] }

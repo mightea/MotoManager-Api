@@ -30,6 +30,13 @@ pub struct Config {
     /// tag so scheduled backups record it. Manual backups from the webapp send
     /// their own version, which takes precedence. None = "unknown".
     pub frontend_version: Option<String>,
+    /// `Host` header allowlist for the MCP endpoint (`MCP_ALLOWED_HOSTS`,
+    /// comma-separated, entries may carry a port). Empty disables the check.
+    /// The check guards against DNS rebinding of *local* servers; here every
+    /// `/mcp` request is already rejected before reaching the MCP layer unless
+    /// it carries a valid API token, so the default is off and the option is
+    /// for deployments that want defence in depth.
+    pub mcp_allowed_hosts: Vec<String>,
 }
 
 impl Config {
@@ -76,6 +83,16 @@ impl Config {
                 .ok()
                 .map(|v| v.trim().to_string())
                 .filter(|v| !v.is_empty()),
+            mcp_allowed_hosts: env::var("MCP_ALLOWED_HOSTS")
+                .ok()
+                .map(|v| {
+                    v.split(',')
+                        .map(str::trim)
+                        .filter(|h| !h.is_empty() && *h != "*")
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
     }
 
