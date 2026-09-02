@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.20.0](https://github.com/mightea/MotoManager-Api/compare/v0.19.0...v0.20.0) (2026-09-02)
+
+
+### Features
+
+* MCP server with personal API tokens ([f4293da](https://github.com/mightea/MotoManager-Api/commit/f4293da9bb0d812d449dc2f0a719de74cbc76e15))
+* **mcp:** OAuth 2.1 authorization server for connector clients ([80c1ae2](https://github.com/mightea/MotoManager-Api/commit/80c1ae280c994a7aa13215e93d936b9f2862e152))
+
+
+### Bug Fixes
+
+* **mcp:** emit ttlMs/cacheScope on tools/list for MCP 2026-07-28 clients ([63d3789](https://github.com/mightea/MotoManager-Api/commit/63d37894eb684efa098986e85f024673ea870e13))
+
 ## [0.19.0](https://github.com/mightea/MotoManager-Api/compare/v0.18.1...v0.19.0) (2026-08-31)
 
 
