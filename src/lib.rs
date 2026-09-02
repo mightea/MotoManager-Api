@@ -58,6 +58,13 @@ impl axum::extract::FromRef<AppState> for backup::BackupGuard {
     }
 }
 
+/// Make ring the process-wide rustls crypto provider. Idempotent: a second
+/// call (e.g. from a test or a client builder) is a no-op, and a provider
+/// installed by someone else is left alone.
+pub fn install_crypto_provider() {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
 /// Body-size cap for the multipart upload routes (motorcycle images, documents).
 /// Axum's default is 2 MB, which silently 413s ordinary phone photos; everything
 /// else keeps the small default so JSON endpoints can't be used to buffer megabytes.

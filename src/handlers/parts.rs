@@ -699,6 +699,7 @@ pub async fn import_part_image_from_url(
     verify_part_ownership(&pool, id, user.id).await?;
     let source = validate_image_source(&payload.url)?;
 
+    crate::install_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .redirect(reqwest::redirect::Policy::none())

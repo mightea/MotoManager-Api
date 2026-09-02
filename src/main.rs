@@ -21,6 +21,10 @@ async fn main() -> anyhow::Result<()> {
 
     let config = Config::from_env()?;
 
+    // reqwest is built with `rustls-no-provider`; register the ring provider
+    // once so outbound TLS (part image fetches) has a crypto backend.
+    moto_manager_api::install_crypto_provider();
+
     // Create data directories
     if !config.images_dir().exists() {
         tokio::fs::create_dir_all(config.images_dir()).await?;

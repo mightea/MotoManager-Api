@@ -1,5 +1,5 @@
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    password_hash::{phc::PasswordHash, PasswordHasher, PasswordVerifier},
     Argon2,
 };
 
@@ -8,10 +8,9 @@ use crate::error::{AppError, AppResult};
 /// Hash a password using Argon2id with OWASP-recommended parameters.
 /// Returns a PHC string: `$argon2id$v=19$m=19456,t=2,p=1$<salt>$<hash>`
 pub fn hash_password(password: &str) -> AppResult<String> {
-    let salt = SaltString::generate(&mut OsRng);
-
+    // `hash_password` draws a fresh random salt from the OS for every call.
     argon2()
-        .hash_password(password.as_bytes(), &salt)
+        .hash_password(password.as_bytes())
         .map(|h| h.to_string())
         .map_err(|e| AppError::Internal(format!("Failed to hash password: {}", e)))
 }

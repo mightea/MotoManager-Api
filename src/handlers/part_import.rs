@@ -296,6 +296,7 @@ async fn structure_with_llm(config: &Config, text: &str) -> Result<ParsedInvoice
         },
     });
 
+    crate::install_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()

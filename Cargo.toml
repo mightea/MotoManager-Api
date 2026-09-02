@@ -24,11 +24,9 @@ uuid = { version = "1", features = ["v4"] }
 rand = "0.10"
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
-argon2 = "0.5"
-# Held at 0.5 — argon2 0.5.3 is still the latest *stable* release and requires
-# password-hash ^0.5 (argon2 0.6 is pre-release only, 0.6.0-rc.8 as of 2026-08).
-# Bump both together once argon2 0.6.0 ships.
-password-hash = { version = "0.5", features = ["getrandom"] }
+argon2 = "0.6"
+# argon2 and password-hash must move together (argon2 0.6 requires password-hash ^0.6).
+password-hash = { version = "0.6", features = ["getrandom"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 mime_guess = "2"
 tokio-util = { version = "0.7", features = ["io"] }
@@ -45,11 +43,12 @@ base64 = "0.23.1"
 url = "2.5.8"
 pdfium-render = "0.9.3"
 # Outbound HTTP, used only to fetch part images from allowlisted hosts (BMWBike import).
-# Held at 0.12 — 0.13 renames the `rustls-tls` feature to `rustls` and switches the
-# default crypto provider to aws-lc-rs, which needs cmake and a C toolchain in the
-# builder image. That contradicts the pure-Rust/cross-arch constraint the tar+flate2
-# choice below is built around. Revisit if reqwest exposes a ring-backed default again.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# `rustls-no-provider` instead of the default `rustls` feature: the default pulls in
+# aws-lc-rs, which needs cmake and a C toolchain in the builder image. The ring
+# provider below is what reqwest 0.12 used, and it is installed process-wide in
+# `main` (and defensively where the client is built) so the TLS stack finds it.
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 regex = "1"
 # Backup archiving. Both are pure-Rust (flate2 defaults to the miniz_oxide
 # backend) so they cross-compile cleanly in the arm64/amd64 Docker build with
