@@ -16,9 +16,9 @@ use rmcp::{
         wrapper::Parameters,
     },
     model::{
-        CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ErrorData,
-        Implementation, ListToolsResult, PaginatedRequestParams, ProtocolVersion, ResultType,
-        ServerCapabilities, ServerInfo,
+        CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
+        ErrorData, Implementation, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
+        ResultType, ServerCapabilities, ServerInfo,
     },
     schemars::{self, JsonSchema},
     service::RequestContext,
@@ -56,6 +56,8 @@ const AUDIT_RETENTION_DAYS: i64 = 90;
 const AUDIT_ARGS_MAX_CHARS: usize = 4000;
 const DEFAULT_LIST_LIMIT: usize = 50;
 const MAX_LIST_LIMIT: usize = 200;
+/// How long a client may cache the tool list (5 minutes).
+const TOOL_LIST_TTL_MS: u64 = 5 * 60 * 1000;
 
 #[derive(Clone)]
 pub struct McpServer {
@@ -1002,9 +1004,16 @@ impl ServerHandler for McpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
+        // MCP 2026-07-28 (SEP-2549) makes `ttlMs`/`cacheScope` mandatory on
+        // list results; rmcp advertises that revision via `server/discover`
+        // and Claude Code rejects a tools/list reply without them. Older
+        // peers ignore the extra fields. The tool set is fixed per build,
+        // so a private, short-lived cache entry is safe.
         Ok(ListToolsResult {
             result_type: Some(ResultType::COMPLETE),
             tools: self.tool_router.list_all(),
+            ttl_ms: Some(TOOL_LIST_TTL_MS),
+            cache_scope: Some(CacheScope::Private),
             ..Default::default()
         })
     }

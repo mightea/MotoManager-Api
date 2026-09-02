@@ -283,6 +283,54 @@ async fn api_tokens_are_not_accepted_on_the_rest_api() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+/// Claude Code negotiates MCP 2026-07-28 through `server/discover` and then
+/// sends header-addressed requests. That revision requires `ttlMs` and
+/// `cacheScope` on every list result; a reply without them is rejected by
+/// the client ("Invalid result for tools/list").
+#[tokio::test]
+async fn tools_list_carries_cache_hints_for_2026_07_28_clients() {
+    let env = setup().await;
+    let token = mint_token(&env, &env.alice_session, "claude-code", "read").await;
+
+    let response = env
+        .app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/mcp")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::ACCEPT, "application/json, text/event-stream")
+                .header("MCP-Protocol-Version", "2026-07-28")
+                .header("Mcp-Method", "tools/list")
+                .header(header::HOST, "localhost")
+                .body(Body::from(
+                    json!({
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "tools/list",
+                        "params": { "_meta": {
+                            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                            "io.modelcontextprotocol/clientCapabilities": {},
+                        } },
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = response.status();
+    let body = read_json(response).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let result = &body["result"];
+    assert_eq!(result["resultType"], "complete", "{body}");
+    assert!(result["ttlMs"].is_u64(), "ttlMs must be a number: {body}");
+    assert_eq!(result["cacheScope"], "private", "{body}");
+    assert!(!result["tools"].as_array().unwrap().is_empty());
+}
+
 #[tokio::test]
 async fn revoked_and_expired_tokens_stop_working() {
     let env = setup().await;
