@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/mightea/MotoManager-Api/compare/v0.20.0...v0.20.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **config:** read the public API URL from BACKEND_URL ([61cbce7](https://github.com/mightea/MotoManager-Api/commit/61cbce7551e3f8ff8c1da2396edbf8fe893b16fa))
+
 ## [0.20.0](https://github.com/mightea/MotoManager-Api/compare/v0.19.0...v0.20.0) (2026-09-02)
 
 
