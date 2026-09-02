@@ -37,8 +37,9 @@ pub struct Config {
     /// it carries a valid API token, so the default is off and the option is
     /// for deployments that want defence in depth.
     pub mcp_allowed_hosts: Vec<String>,
-    /// Public base URL of this API (`PUBLIC_URL`, e.g.
-    /// "https://moto-api.example.com", no trailing slash). It is the OAuth
+    /// Public base URL of this API (`BACKEND_URL`, the same variable the
+    /// webapp uses to reach the API, e.g. "https://moto-api.example.com", no
+    /// trailing slash; `PUBLIC_URL` is accepted as an alias). It is the OAuth
     /// issuer and the base of the `/mcp` resource identifier, so connector
     /// clients (claude.ai, Claude Desktop) can discover the authorization
     /// server. Defaults to `http://localhost:<port>` for development.
@@ -100,11 +101,11 @@ impl Config {
                         .collect()
                 })
                 .unwrap_or_default(),
-            public_url: env::var("PUBLIC_URL")
-                .ok()
-                .map(|v| v.trim().trim_end_matches('/').to_string())
-                .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| format!("http://localhost:{port}")),
+            public_url: resolve_public_url(
+                env::var("BACKEND_URL").ok(),
+                env::var("PUBLIC_URL").ok(),
+                port,
+            ),
         })
     }
 
@@ -133,5 +134,50 @@ impl Config {
 
     pub fn resized_images_dir(&self) -> std::path::PathBuf {
         std::path::Path::new(&self.cache_dir).join("resized")
+    }
+}
+
+/// `BACKEND_URL` wins, `PUBLIC_URL` is the alias, otherwise the local
+/// development address. Trailing slashes are dropped so the issuer and the
+/// paths built from it are stable.
+fn resolve_public_url(
+    backend_url: Option<String>,
+    public_url: Option<String>,
+    port: u16,
+) -> String {
+    backend_url
+        .into_iter()
+        .chain(public_url)
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .find(|v| !v.is_empty())
+        .unwrap_or_else(|| format!("http://localhost:{port}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_public_url;
+
+    #[test]
+    fn backend_url_is_preferred_then_public_url_then_localhost() {
+        assert_eq!(
+            resolve_public_url(
+                Some("https://api.example/".into()),
+                Some("https://x".into()),
+                3001
+            ),
+            "https://api.example"
+        );
+        assert_eq!(
+            resolve_public_url(
+                Some("  ".into()),
+                Some("https://alias.example".into()),
+                3001
+            ),
+            "https://alias.example"
+        );
+        assert_eq!(
+            resolve_public_url(None, None, 4000),
+            "http://localhost:4000"
+        );
     }
 }

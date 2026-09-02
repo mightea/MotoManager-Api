@@ -13,8 +13,9 @@ services:
       CACHE_DIR: /app/cache
       RP_ID: your.domain
       ORIGIN: https://your.domain
-      # Public URL of the API itself (OAuth issuer for MCP connector clients).
-      PUBLIC_URL: https://api.your.domain
+      # Public URL of the API itself (OAuth issuer for MCP connector clients);
+      # same value as the webapp's BACKEND_URL.
+      BACKEND_URL: https://api.your.domain
       ENABLE_REGISTRATION: "false"
       RUST_LOG: info
       # Automatic backups (admins can also trigger/download from the webapp).

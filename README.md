@@ -28,7 +28,7 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
    ENABLE_REGISTRATION=false         # false = only the first user can register
    RUST_LOG=info
    MCP_ALLOWED_HOSTS=                # optional Host allowlist for /mcp, see "MCP server"
-   PUBLIC_URL=http://localhost:3001  # public API base URL (OAuth issuer / MCP resource)
+   BACKEND_URL=http://localhost:3001 # public API base URL (OAuth issuer / MCP resource)
    ```
 
 3. Build and run:
@@ -264,9 +264,10 @@ documents, registers itself, and sends the user to the webapp's consent page.
   address, or a custom native-app scheme. Registrations that never lead to a
   grant are pruned after 24 hours; the mutable endpoints share the login
   rate limiter.
-- `PUBLIC_URL` must be the API's public base URL (issuer and resource
-  identifier, e.g. `https://moto-api.example.com`); `ORIGIN` must be the
-  webapp origin hosting the consent page.
+- `BACKEND_URL` must be the API's public base URL (issuer and resource
+  identifier, e.g. `https://moto-api.example.com`) — the same value the
+  webapp is given; `PUBLIC_URL` is accepted as an alias. `ORIGIN` must be
+  the webapp origin hosting the consent page.
 
 ### File Serving
 
