@@ -38,6 +38,7 @@ async fn setup_test_app() -> (axum::Router, String, String) {
         backup_keep: 14,
         frontend_version: None,
         mcp_allowed_hosts: Vec::new(),
+        public_url: "http://localhost:3001".to_string(),
     };
     let rp_origin = url::Url::parse("http://localhost:5173").unwrap();
     let webauthn = std::sync::Arc::new(

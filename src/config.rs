@@ -37,17 +37,24 @@ pub struct Config {
     /// it carries a valid API token, so the default is off and the option is
     /// for deployments that want defence in depth.
     pub mcp_allowed_hosts: Vec<String>,
+    /// Public base URL of this API (`PUBLIC_URL`, e.g.
+    /// "https://moto-api.example.com", no trailing slash). It is the OAuth
+    /// issuer and the base of the `/mcp` resource identifier, so connector
+    /// clients (claude.ai, Claude Desktop) can discover the authorization
+    /// server. Defaults to `http://localhost:<port>` for development.
+    pub public_url: String,
 }
 
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
+        let port: u16 = env::var("PORT")
+            .unwrap_or_else(|_| "3001".to_string())
+            .parse()
+            .unwrap_or(3001);
         Ok(Config {
             database_url: env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite:./db.sqlite".to_string()),
-            port: env::var("PORT")
-                .unwrap_or_else(|_| "3001".to_string())
-                .parse()
-                .unwrap_or(3001),
+            port,
             rp_id: env::var("RP_ID").unwrap_or_else(|_| "localhost".to_string()),
             rp_name: env::var("RP_NAME").unwrap_or_else(|_| "MotoManager".to_string()),
             origin: env::var("ORIGIN").unwrap_or_else(|_| "http://localhost:5174".to_string()),
@@ -93,7 +100,17 @@ impl Config {
                         .collect()
                 })
                 .unwrap_or_default(),
+            public_url: env::var("PUBLIC_URL")
+                .ok()
+                .map(|v| v.trim().trim_end_matches('/').to_string())
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| format!("http://localhost:{port}")),
         })
+    }
+
+    /// The MCP endpoint as seen by clients — the OAuth resource identifier.
+    pub fn mcp_resource(&self) -> String {
+        format!("{}/mcp", self.public_url)
     }
 
     /// Where backup archives (and the transient DB snapshot) are written. Kept

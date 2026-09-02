@@ -5,11 +5,12 @@ pub mod error;
 pub mod handlers;
 pub mod mcp;
 pub mod models;
+pub mod oauth;
 pub mod pdfium_lib;
 
 use axum::{
     extract::DefaultBodyLimit,
-    http::{HeaderValue, Method},
+    http::{HeaderName, HeaderValue, Method},
     routing::{delete, get, post, put},
     Json, Router,
 };
@@ -19,7 +20,7 @@ use std::sync::Arc;
 use tower_governor::{
     governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor, GovernorLayer,
 };
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use webauthn_rs::Webauthn;
 
 use config::Config;
@@ -297,6 +298,12 @@ pub fn build_app(state: AppState) -> Router {
             "/api/settings/mcp-audit",
             get(handlers::api_tokens::list_mcp_audit),
         )
+        // Consent exchange for the OAuth flow: the webapp's consent page reads
+        // the client here and posts the user's decision (see `oauth`).
+        .route(
+            "/api/oauth/consent",
+            get(oauth::authorize::consent_info).post(oauth::authorize::consent_decide),
+        )
         .route(
             "/api/admin/users",
             get(handlers::admin::list_users).post(handlers::admin::create_user),
@@ -378,6 +385,7 @@ pub fn build_app(state: AppState) -> Router {
             "/api/auth/passkey/login-verify",
             post(handlers::passkey::login_verify),
         )
+        .merge(oauth::public_routes())
         .layer(GovernorLayer::new(governor_conf));
 
     // MCP endpoint: the token middleware runs before the protocol handler, so
@@ -392,7 +400,16 @@ pub fn build_app(state: AppState) -> Router {
     router
         .merge(auth_routes)
         .merge(mcp_routes)
+        .merge(oauth::metadata_routes())
         .with_state(state)
+}
+
+/// Paths that browser-based MCP clients and OAuth flows fetch from origins
+/// other than the webapp (MCP Inspector, claude.ai's discovery). They carry
+/// no cookies and are either public metadata or bearer-authenticated, so
+/// any origin may call them.
+fn is_cross_origin_path(path: &str) -> bool {
+    path == "/mcp" || path.starts_with("/oauth/") || path.starts_with("/.well-known/")
 }
 
 pub fn build_cors(origin: &str) -> CorsLayer {
@@ -402,7 +419,9 @@ pub fn build_cors(origin: &str) -> CorsLayer {
         .unwrap_or_else(|_| HeaderValue::from_static("*"));
 
     CorsLayer::new()
-        .allow_origin(allowed_origin)
+        .allow_origin(AllowOrigin::predicate(move |request_origin, parts| {
+            request_origin == allowed_origin || is_cross_origin_path(parts.uri.path())
+        }))
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -413,6 +432,13 @@ pub fn build_cors(origin: &str) -> CorsLayer {
         .allow_headers([
             axum::http::header::CONTENT_TYPE,
             axum::http::header::AUTHORIZATION,
+            HeaderName::from_static("mcp-protocol-version"),
+            HeaderName::from_static("mcp-session-id"),
+            HeaderName::from_static("mcp-method"),
+        ])
+        .expose_headers([
+            HeaderName::from_static("mcp-session-id"),
+            HeaderName::from_static("www-authenticate"),
         ])
 }
 

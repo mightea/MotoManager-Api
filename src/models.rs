@@ -658,6 +658,51 @@ pub struct ApiToken {
     pub last_used_at: Option<String>,
     pub expires_at: Option<String>,
     pub revoked_at: Option<String>,
+    /// "personal" (created under Settings) or "oauth" (granted to a client
+    /// through the consent screen, see migration 052).
+    pub kind: String,
+    #[serde(skip_serializing)]
+    pub oauth_client_id: Option<i64>,
+    #[serde(skip_serializing)]
+    pub refresh_token_hash: Option<String>,
+    #[serde(skip_serializing)]
+    pub refresh_expires_at: Option<String>,
+    #[serde(skip_serializing)]
+    pub previous_refresh_token_hash: Option<String>,
+}
+
+/// A dynamically registered OAuth client (migration 052).
+#[derive(Debug, Clone, FromRow)]
+#[sqlx(rename_all = "camelCase")]
+pub struct OauthClient {
+    pub id: i64,
+    pub client_id: String,
+    pub client_name: String,
+    /// JSON array of redirect URIs.
+    pub redirect_uris: String,
+    pub token_endpoint_auth_method: String,
+    pub client_secret_hash: Option<String>,
+    pub client_uri: Option<String>,
+    pub created_at: String,
+    pub last_used_at: Option<String>,
+}
+
+/// A pending or consumed authorization code (migration 052).
+#[derive(Debug, Clone, FromRow)]
+#[sqlx(rename_all = "camelCase")]
+pub struct OauthAuthorizationCode {
+    pub id: i64,
+    pub code_hash: String,
+    pub client_id: i64,
+    pub user_id: i64,
+    pub scope: String,
+    pub redirect_uri: String,
+    pub code_challenge: String,
+    pub resource: Option<String>,
+    pub created_at: String,
+    pub expires_at: String,
+    pub used_at: Option<String>,
+    pub issued_token_id: Option<i64>,
 }
 
 /// One MCP tool invocation, as shown in the user's audit view.

@@ -28,6 +28,7 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
    ENABLE_REGISTRATION=false         # false = only the first user can register
    RUST_LOG=info
    MCP_ALLOWED_HOSTS=                # optional Host allowlist for /mcp, see "MCP server"
+   PUBLIC_URL=http://localhost:3001  # public API base URL (OAuth issuer / MCP resource)
    ```
 
 3. Build and run:
@@ -227,12 +228,45 @@ data. It is implemented in `src/mcp/` on top of the same handlers the apps use.
   is fine because the token middleware already rejects unauthenticated
   requests before they reach the MCP layer.
 
-Connect Claude Code:
+Connect Claude Code with a personal token:
 
 ```sh
 claude mcp add --transport http motomanager https://moto-api.example.com/mcp \
   --header "Authorization: Bearer mm_…"
 ```
+
+#### OAuth 2.1 (claude.ai, Claude Desktop, mobile connectors)
+
+Connector-style clients cannot be handed a pasted token, so the API is also an
+OAuth 2.1 authorization server for its own `/mcp` resource (`src/oauth/`).
+Pointing such a client at `https://moto-api.example.com/mcp` is enough: it
+discovers the flow from the `WWW-Authenticate` challenge and the metadata
+documents, registers itself, and sends the user to the webapp's consent page.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/.well-known/oauth-protected-resource[/mcp]` | Protected resource metadata (RFC 9728) |
+| GET | `/.well-known/oauth-authorization-server` | Authorization server metadata (RFC 8414) |
+| POST | `/oauth/register` | Dynamic client registration (RFC 7591); public PKCE clients or `client_secret_post`/`client_secret_basic` |
+| GET | `/oauth/authorize` | Validates the request and forwards to `<ORIGIN>/oauth/consent` |
+| GET/POST | `/api/oauth/consent` | Session-authenticated consent exchange used by the webapp page (impersonation sessions are refused) |
+| POST | `/oauth/token` | `authorization_code` (PKCE S256 required) and `refresh_token` grants |
+| POST | `/oauth/revoke` | Ends a grant (RFC 7009) |
+
+- Grants are rows in `apiTokens` with `kind = "oauth"` and the client's
+  registered name, so they appear in the token list of both apps and can be
+  revoked there. The user picks the scope (`read`/`write`) on the consent
+  screen regardless of what the client asked for.
+- Access tokens live one hour; refresh tokens rotate on every use and expire
+  after 90 days of inactivity. A replayed refresh token or authorization code
+  revokes the grant. Re-authorizing a client replaces its previous grant.
+- Redirect URIs are matched exactly and must be `https`, a loopback `http`
+  address, or a custom native-app scheme. Registrations that never lead to a
+  grant are pruned after 24 hours; the mutable endpoints share the login
+  rate limiter.
+- `PUBLIC_URL` must be the API's public base URL (issuer and resource
+  identifier, e.g. `https://moto-api.example.com`); `ORIGIN` must be the
+  webapp origin hosting the consent page.
 
 ### File Serving
 

@@ -11,15 +11,20 @@ use axum::{
 use serde_json::json;
 use sqlx::SqlitePool;
 
-use crate::auth::{api_token::authenticate_api_token, extract_bearer_token};
+use crate::{
+    auth::{api_token::authenticate_api_token, extract_bearer_token},
+    oauth::protected_resource_metadata_url,
+    AppState,
+};
 
 pub async fn require_api_token(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     mut request: Request,
     next: Next,
 ) -> Response {
+    let pool: &SqlitePool = &state.pool;
     let principal = match extract_bearer_token(request.headers()) {
-        Some(token) => authenticate_api_token(&pool, &token).await.ok(),
+        Some(token) => authenticate_api_token(pool, &token).await.ok(),
         None => None,
     };
 
@@ -29,10 +34,17 @@ pub async fn require_api_token(
             Json(json!({ "error": "Unauthorized: a valid API token is required" })),
         )
             .into_response();
-        response.headers_mut().insert(
-            header::WWW_AUTHENTICATE,
-            HeaderValue::from_static("Bearer realm=\"MotoManager MCP\""),
+        // RFC 9728 §5.1: point clients at the resource metadata so they can
+        // discover the authorization server and start the OAuth flow.
+        let challenge = format!(
+            "Bearer realm=\"MotoManager MCP\", resource_metadata=\"{}\"",
+            protected_resource_metadata_url(&state.config)
         );
+        if let Ok(value) = HeaderValue::from_str(&challenge) {
+            response
+                .headers_mut()
+                .insert(header::WWW_AUTHENTICATE, value);
+        }
         return response;
     };
 
