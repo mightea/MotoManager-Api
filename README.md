@@ -243,6 +243,17 @@ Pointing such a client at `https://moto-api.example.com/mcp` is enough: it
 discovers the flow from the `WWW-Authenticate` challenge and the metadata
 documents, registers itself, and sends the user to the webapp's consent page.
 
+Connect Claude Desktop, claude.ai or the Claude mobile apps (one connection
+per Claude account covers all of them):
+
+1. In Claude open **Settings → Connectors → Add custom connector**.
+2. Enter a name (e.g. "MotoManager") and `https://moto-api.example.com/mcp`
+   as the URL; leave the OAuth client ID and secret empty.
+3. Click **Connect**. The MotoManager webapp opens: sign in, pick *read* or
+   *read & write*, and allow access.
+4. Enable the connector in a chat. The grant appears under Settings →
+   API tokens in the webapp and iOS app and can be revoked there.
+
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/.well-known/oauth-protected-resource[/mcp]` | Protected resource metadata (RFC 9728) |
