@@ -4,7 +4,7 @@
 #   DF007: .dockerignore exists; droast flags COPY . regardless
 
 # --- Build Stage ---
-FROM rust:1.97-slim-bookworm AS builder
+FROM rust:1.98-slim-bookworm AS builder
 
 WORKDIR /app
 
