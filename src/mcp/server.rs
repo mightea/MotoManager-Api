@@ -18,7 +18,7 @@ use rmcp::{
     model::{
         CacheScope, CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock,
         ErrorData, Implementation, ListToolsResult, PaginatedRequestParams, ProtocolVersion,
-        ResultType, ServerCapabilities, ServerInfo,
+        ResultType, ServerCapabilities, ServerConfig,
     },
     schemars::{self, JsonSchema},
     service::RequestContext,
@@ -988,12 +988,12 @@ impl rmcp::handler::server::tool::IntoCallToolResult for ToolFailure {
 }
 
 impl ServerHandler for McpServer {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         let mut implementation = Implementation::from_build_env();
         implementation.name = "motomanager".to_string();
         implementation.title = Some("MotoManager".to_string());
         implementation.version = env!("CARGO_PKG_VERSION").to_string();
-        ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::default())
             .with_server_info(implementation)
             .with_instructions(SERVER_INSTRUCTIONS)
