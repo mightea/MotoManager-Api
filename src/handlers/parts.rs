@@ -180,6 +180,31 @@ async fn part_with_meta(pool: &SqlitePool, mut part: Part) -> AppResult<PartWith
     })
 }
 
+/// Canonical form of an OEM (BMW) part number: 11-digit BMW numbers get the
+/// catalogue's "12 32 1 244 409" spacing whatever the input separators were;
+/// anything else is kept as typed (trimmed). Blank clears the field.
+pub fn normalize_oem_part_number(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let digits: String = trimmed
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect();
+    if digits.len() == 11 && digits.chars().all(|c| c.is_ascii_digit()) {
+        return Some(format!(
+            "{} {} {} {} {}",
+            &digits[0..2],
+            &digits[2..4],
+            &digits[4..5],
+            &digits[5..8],
+            &digits[8..11]
+        ));
+    }
+    Some(trimmed.to_string())
+}
+
 async fn validate_series_ids(pool: &SqlitePool, series_ids: &[i64], user_id: i64) -> AppResult<()> {
     for sid in series_ids {
         verify_series_accessible(pool, *sid, user_id).await?;
@@ -332,6 +357,8 @@ pub struct CreatePartRequest {
     pub description: Option<String>,
     pub is_public: Option<bool>,
     pub series_ids: Option<Vec<i64>>,
+    /// BMW part number an aftermarket part corresponds to.
+    pub oem_part_number: Option<String>,
     /// Client-generated idempotency key (UUID).
     pub client_id: Option<String>,
 }
@@ -393,8 +420,9 @@ pub async fn create_part(
 
     let id = sqlx::query(
         "INSERT INTO parts \
-         (userId, partNumber, name, manufacturer, description, isPublic, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         (userId, partNumber, name, manufacturer, description, isPublic, oemPartNumber, \
+          clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(user.id)
     .bind(&part_number)
@@ -402,6 +430,11 @@ pub async fn create_part(
     .bind(&manufacturer)
     .bind(&body.description)
     .bind(body.is_public.unwrap_or(false))
+    .bind(
+        body.oem_part_number
+            .as_deref()
+            .and_then(normalize_oem_part_number),
+    )
     .bind(&body.client_id)
     .bind(&now)
     .execute(&mut *tx)
@@ -437,6 +470,8 @@ pub struct UpdatePartRequest {
     pub is_public: Option<bool>,
     /// Full replacement of the fitment set when present.
     pub series_ids: Option<Vec<i64>>,
+    /// Absent keeps the stored value; an empty string clears it.
+    pub oem_part_number: Option<String>,
 }
 
 pub async fn update_part(
@@ -459,6 +494,10 @@ pub async fn update_part(
     let manufacturer = body.manufacturer.unwrap_or(existing.manufacturer);
     let description = body.description.or(existing.description);
     let is_public = body.is_public.unwrap_or(existing.is_public);
+    let oem_part_number = match &body.oem_part_number {
+        Some(raw) => normalize_oem_part_number(raw),
+        None => existing.oem_part_number,
+    };
 
     if let Some(series_ids) = &body.series_ids {
         validate_series_ids(&pool, series_ids, user.id).await?;
@@ -485,13 +524,14 @@ pub async fn update_part(
 
     sqlx::query(
         "UPDATE parts SET partNumber = ?, name = ?, manufacturer = ?, description = ?, \
-         isPublic = ?, updatedAt = ? WHERE id = ?",
+         isPublic = ?, oemPartNumber = ?, updatedAt = ? WHERE id = ?",
     )
     .bind(&part_number)
     .bind(&name)
     .bind(&manufacturer)
     .bind(&description)
     .bind(is_public)
+    .bind(&oem_part_number)
     .bind(&now)
     .bind(id)
     .execute(&mut *tx)
@@ -847,7 +887,7 @@ pub async fn list_public_parts(
     // Catalog data of every other user's part is visible; availability and
     // stock detail are added below ONLY for parts marked public.
     let mut query_str = "SELECT p.id, p.partNumber, p.name, p.manufacturer, p.description, \
-         p.image, p.isPublic, u.username as ownerName, \
+         p.image, p.oemPartNumber, p.isPublic, u.username as ownerName, \
          COALESCE((SELECT SUM(s.quantity) FROM partStocks s \
                    WHERE s.partId = p.id AND s.deletedAt IS NULL), 0) \
        - COALESCE((SELECT SUM(c.quantity) FROM partConsumptions c \
@@ -861,7 +901,7 @@ pub async fn list_public_parts(
         .map(|q| q.trim().to_string())
         .filter(|q| !q.is_empty());
     if search.is_some() {
-        query_str.push_str(" AND (p.partNumber LIKE ? OR p.name LIKE ?)");
+        query_str.push_str(" AND (p.partNumber LIKE ? OR p.name LIKE ? OR p.oemPartNumber LIKE ?)");
     }
     if filter.series_id.is_some() {
         query_str.push_str(" AND p.id IN (SELECT partId FROM partSeriesCompat WHERE seriesId = ?)");
@@ -871,7 +911,7 @@ pub async fn list_public_parts(
     let mut query = sqlx::query(sqlx::AssertSqlSafe(query_str)).bind(user.id);
     if let Some(q) = &search {
         let like = format!("%{}%", q);
-        query = query.bind(like.clone()).bind(like);
+        query = query.bind(like.clone()).bind(like.clone()).bind(like);
     }
     if let Some(sid) = filter.series_id {
         query = query.bind(sid);
@@ -980,6 +1020,7 @@ pub async fn list_public_parts(
                 manufacturer: row.get("manufacturer"),
                 description: row.get("description"),
                 image: format_image_url(row.get("image")),
+                oem_part_number: row.get("oemPartNumber"),
                 series_ids: series_by_part.get(&id).cloned().unwrap_or_default(),
                 owner_name: row.get("ownerName"),
                 is_public,

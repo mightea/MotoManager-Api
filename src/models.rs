@@ -487,6 +487,8 @@ pub struct Part {
     pub description: Option<String>,
     pub is_public: bool,
     pub image: Option<String>,
+    /// BMW part number this (aftermarket) part corresponds to (migration 053).
+    pub oem_part_number: Option<String>,
     pub created_at: String,
     // Sync metadata (see migration 012).
     pub client_id: Option<String>,
@@ -579,6 +581,7 @@ pub struct PublicPart {
     pub manufacturer: String,
     pub description: Option<String>,
     pub image: Option<String>,
+    pub oem_part_number: Option<String>,
     pub series_ids: Vec<i64>,
     pub owner_name: String,
     pub is_public: bool,

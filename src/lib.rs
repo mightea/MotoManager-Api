@@ -260,6 +260,10 @@ pub fn build_app(state: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
         )
         .route(
+            "/api/part-imports/bmwbike/{part_number}",
+            get(handlers::bmwbike::lookup_part),
+        )
+        .route(
             "/api/part-imports/boxxerparts/{article_no}",
             get(handlers::boxxerparts::lookup_product),
         )

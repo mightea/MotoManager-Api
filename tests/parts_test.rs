@@ -1783,3 +1783,74 @@ async fn test_consumption_list_embeds_repair_context() {
     assert!(manual["motorcycleMake"].is_null());
     assert!(manual["maintenanceDate"].is_null());
 }
+
+#[tokio::test]
+async fn test_part_oem_part_number() {
+    let (app, _pool, token) = setup_test_app().await;
+
+    // Any separators in, canonical BMW spacing out.
+    let (status, body) = request(
+        &app,
+        Method::POST,
+        "/api/parts",
+        &token,
+        Some(json!({
+            "partNumber": "BXP-44555",
+            "name": "Spannungsregler",
+            "manufacturer": "Boxxerparts",
+            "oemPartNumber": "12-32-1244409"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["part"]["oemPartNumber"], "12 32 1 244 409");
+    let id = body["part"]["id"].as_i64().unwrap();
+
+    // Absent keeps the value.
+    let (status, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/parts/{}", id),
+        &token,
+        Some(json!({ "description": "Nachbau" })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["part"]["oemPartNumber"], "12 32 1 244 409");
+
+    // Non-BMW formats are kept as typed.
+    let (_, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/parts/{}", id),
+        &token,
+        Some(json!({ "oemPartNumber": " 7 123 456 " })),
+    )
+    .await;
+    assert_eq!(body["part"]["oemPartNumber"], "7 123 456");
+
+    // Blank clears it.
+    let (_, body) = request(
+        &app,
+        Method::PUT,
+        &format!("/api/parts/{}", id),
+        &token,
+        Some(json!({ "oemPartNumber": "  " })),
+    )
+    .await;
+    assert!(body["part"]["oemPartNumber"].is_null());
+}
+
+#[tokio::test]
+async fn test_bmwbike_lookup_rejects_garbage() {
+    let (app, _pool, token) = setup_test_app().await;
+    let (status, _) = request(
+        &app,
+        Method::GET,
+        "/api/part-imports/bmwbike/12-3",
+        &token,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

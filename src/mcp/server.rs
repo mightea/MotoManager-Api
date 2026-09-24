@@ -267,6 +267,8 @@ pub struct CreatePartParams {
     pub manufacturer: Option<String>,
     /// Free-text description (up to 4000 characters).
     pub description: Option<String>,
+    /// BMW (OEM) part number this aftermarket part replaces, if any.
+    pub oem_part_number: Option<String>,
     /// Client-chosen key (8-64 chars) that makes a retried call return the
     /// existing part instead of creating a second one.
     pub idempotency_key: Option<String>,
@@ -456,11 +458,13 @@ impl McpServer {
             let out_of_stock_only = args.out_of_stock_only.unwrap_or(false);
             parts.retain(|part| {
                 let matches_search = search.as_deref().is_none_or(|needle| {
-                    ["partNumber", "name", "manufacturer"].iter().any(|key| {
-                        part.get(key)
-                            .and_then(Value::as_str)
-                            .is_some_and(|s| s.to_lowercase().contains(needle))
-                    })
+                    ["partNumber", "oemPartNumber", "name", "manufacturer"]
+                        .iter()
+                        .any(|key| {
+                            part.get(key)
+                                .and_then(Value::as_str)
+                                .is_some_and(|s| s.to_lowercase().contains(needle))
+                        })
                 });
                 let on_hand = part.get("onHand").and_then(Value::as_i64).unwrap_or(0);
                 matches_search && (!out_of_stock_only || on_hand <= 0)
@@ -801,6 +805,11 @@ impl McpServer {
             // Never publish to the shared catalogue from an AI client.
             is_public: Some(false),
             series_ids: None,
+            oem_part_number: v::text(
+                "oem_part_number",
+                args.oem_part_number.as_deref(),
+                v::SHORT_TEXT,
+            )?,
             client_id: v::idempotency_key(args.idempotency_key.as_deref())?,
         };
         let (_, Json(value)) =
