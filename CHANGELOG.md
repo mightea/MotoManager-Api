@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.22.0](https://github.com/mightea/MotoManager-Api/compare/v0.21.0...v0.22.0) (2026-09-24)
+
+
+### Features
+
+* **part-import:** OCR raw scans and photos of invoices on the server ([304d8b5](https://github.com/mightea/MotoManager-Api/commit/304d8b5d298488465ea2de3f02d68a5e72135c3a))
+* **parts:** link aftermarket parts to a BMW part number ([0e61f5c](https://github.com/mightea/MotoManager-Api/commit/0e61f5c27749d6fa62d83abb8299eb878ae18fcc))
+
+
+### Bug Fixes
+
+* **part-import:** recognize OCR'd scans of Huggett paper invoices ([5b261d9](https://github.com/mightea/MotoManager-Api/commit/5b261d9fe994d944f00d623f2df58987dcfa839c))
+
 ## [0.21.0](https://github.com/mightea/MotoManager-Api/compare/v0.20.1...v0.21.0) (2026-09-24)
 
 
