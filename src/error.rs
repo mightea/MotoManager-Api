@@ -34,6 +34,10 @@ pub enum AppError {
 
     #[error("Image error: {0}")]
     Image(String),
+
+    /// An upstream service this handler proxies (supplier catalog) failed.
+    #[error("Bad gateway: {0}")]
+    BadGateway(String),
 }
 
 impl IntoResponse for AppError {
@@ -62,6 +66,10 @@ impl IntoResponse for AppError {
             AppError::Image(msg) => {
                 tracing::error!("Image error: {}", msg);
                 (StatusCode::INTERNAL_SERVER_ERROR, msg.clone())
+            }
+            AppError::BadGateway(msg) => {
+                tracing::warn!("Upstream error: {}", msg);
+                (StatusCode::BAD_GATEWAY, msg.clone())
             }
         };
 

@@ -2,6 +2,7 @@ pub mod admin;
 pub mod api_tokens;
 pub mod auth;
 pub mod backups;
+pub mod boxxerparts;
 pub mod documents;
 pub mod expenses;
 pub mod files;

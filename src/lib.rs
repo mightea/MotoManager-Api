@@ -260,6 +260,10 @@ pub fn build_app(state: AppState) -> Router {
                 .layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
         )
         .route(
+            "/api/part-imports/boxxerparts/{article_no}",
+            get(handlers::boxxerparts::lookup_product),
+        )
+        .route(
             "/api/part-stocks",
             get(handlers::parts::list_part_stocks).post(handlers::parts::create_part_stock),
         )

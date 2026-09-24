@@ -657,6 +657,7 @@ pub async fn upload_part_image(
 const IMAGE_SOURCE_HOSTS: &[&str] = &[
     "bmw-classic-media-prod.s3.eu-central-1.amazonaws.com",
     "admin.bmwbike.com",
+    "www.boxxerparts.de",
 ];
 
 const IMAGE_DOWNLOAD_LIMIT: usize = 15 * 1024 * 1024; // matches the upload cap

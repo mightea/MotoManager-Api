@@ -1,12 +1,14 @@
-//! Supplier-invoice import: parse an uploaded PDF (Mark Huggett GmbH order
-//! invoices and similar) into structured line items ready for review in the
-//! client. This endpoint only PARSES — nothing is written to the database;
-//! the client commits confirmed rows through the normal part/stock endpoints.
+//! Supplier-document import: parse an uploaded PDF (Mark Huggett GmbH
+//! invoices, boxxerparts.de order confirmations and similar) into structured
+//! line items ready for review in the client. This endpoint only PARSES —
+//! nothing is written to the database; the client commits confirmed rows
+//! through the normal part/stock endpoints.
 //!
-//! Extraction strategy: pdfium pulls the text layer, then a local LLM
-//! (OpenAI-compatible vLLM, reachable only from this server — see
-//! `Config::llm_base_url`) structures it under a strict JSON schema. A
-//! deterministic line parser for the known invoice layout doubles as the
+//! Extraction strategy: pdfium pulls the text layer, then a deterministic
+//! layout parser for each known supplier runs. For unknown layouts (and as a
+//! second opinion on Huggett invoices) a local LLM (OpenAI-compatible vLLM,
+//! reachable only from this server — see `Config::llm_base_url`) structures
+//! the text under a strict JSON schema; the layout parser doubles as the
 //! fallback when the LLM is unreachable or returns something that fails
 //! validation, so the feature degrades gracefully.
 
@@ -28,15 +30,74 @@ use crate::{
 /// checks must tolerate a nickel per line.
 const LINE_TOTAL_TOLERANCE: f64 = 0.051;
 
+/// Part numbers of boxxerparts.de articles are 5-digit shop numbers that
+/// would collide with other suppliers' short numbers, so they are stored
+/// namespaced: article 44555 becomes `BXP-44555`.
+pub const BOXXERPARTS_PREFIX: &str = "BXP-";
+
+/// Supplier whose document layout the text was recognized as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum Supplier {
+    Huggett,
+    Boxxerparts,
+    #[default]
+    Unknown,
+}
+
+impl Supplier {
+    /// Stable key the client dispatches its enrichment on.
+    pub fn key(self) -> Option<&'static str> {
+        match self {
+            Supplier::Huggett => Some("huggett"),
+            Supplier::Boxxerparts => Some("boxxerparts"),
+            Supplier::Unknown => None,
+        }
+    }
+}
+
+/// What kind of document was parsed — decides the wording of the stock note
+/// ("Rechnung 242511" vs "Bestellung 72669") and thereby the duplicate guard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum DocumentKind {
+    #[default]
+    Invoice,
+    Order,
+}
+
+impl DocumentKind {
+    /// German label used in stock notes, e.g. "Bestellung 72669".
+    pub fn note_label(self) -> &'static str {
+        match self {
+            DocumentKind::Invoice => "Rechnung",
+            DocumentKind::Order => "Bestellung",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct InvoiceItem {
     pub quantity: i64,
-    /// Part number as printed, e.g. "61 31 2 300 383".
+    /// Part number as printed, e.g. "61 31 2 300 383" — or namespaced for
+    /// suppliers with their own numbering ("BXP-44555").
     pub part_number: String,
     pub name: String,
     pub unit_price: Option<f64>,
     pub line_total: Option<f64>,
+    /// Descriptive text printed under the line (order confirmations carry
+    /// the shop's product description).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// The supplier's own article number without namespace prefix, for
+    /// catalog lookups ("44555").
+    #[serde(default)]
+    pub supplier_article_no: Option<String>,
+    /// BMW part numbers cited in the description ("12 32 1 244 409") — used
+    /// to match aftermarket lines against parts stored under the OEM number.
+    #[serde(default)]
+    pub oem_part_numbers: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -48,6 +109,10 @@ pub struct ParsedInvoice {
     pub invoice_date: Option<String>,
     pub currency: Option<String>,
     pub items: Vec<InvoiceItem>,
+    #[serde(default)]
+    pub supplier_kind: Supplier,
+    #[serde(default)]
+    pub document_kind: DocumentKind,
 }
 
 /// One reviewed line as returned to the client: the parsed item plus how it
@@ -60,6 +125,9 @@ struct ReviewItem {
     /// Existing part with the same (normalized) part number, if any.
     matched_part_id: Option<i64>,
     matched_part_name: Option<String>,
+    /// "partNumber" for a direct hit, "oemPartNumber" when an OEM number in
+    /// the description matched an existing part.
+    matched_via: Option<&'static str>,
     warnings: Vec<String>,
 }
 
@@ -105,22 +173,30 @@ pub async fn parse_invoice(
 
     // Deterministic parse always runs: it is the fallback result and the
     // yardstick the LLM output is validated against.
-    let fallback = parse_invoice_text(&text);
+    let fallback = parse_layout(&text);
 
-    let (mut parsed, source) = match structure_with_llm(&config, &text).await {
-        Ok(llm) if is_plausible(&llm, &fallback) => (llm, "llm"),
-        Ok(_) => {
-            tracing::warn!("LLM invoice parse failed validation; using fallback parser");
-            (fallback.clone(), "fallback")
-        }
-        Err(e) => {
-            tracing::warn!(
-                "LLM invoice parse unavailable ({}); using fallback parser",
-                e
-            );
-            (fallback.clone(), "fallback")
-        }
-    };
+    let (mut parsed, source) =
+        if fallback.supplier_kind == Supplier::Boxxerparts && !fallback.items.is_empty() {
+            // The boxxerparts layout is fully deterministic (one closing line
+            // with article number and price per item) and the LLM prompt is
+            // tuned to BMW numbers — the model could only add noise here.
+            (fallback.clone(), "layout")
+        } else {
+            match structure_with_llm(&config, &text).await {
+                Ok(llm) if is_plausible(&llm, &fallback) => (llm, "llm"),
+                Ok(_) => {
+                    tracing::warn!("LLM invoice parse failed validation; using fallback parser");
+                    (fallback.clone(), "fallback")
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "LLM invoice parse unavailable ({}); using fallback parser",
+                        e
+                    );
+                    (fallback.clone(), "fallback")
+                }
+            }
+        };
 
     // Header metadata: where the deterministic parser matched, its values are
     // exact — small-model output is only trusted to FILL the gaps it left
@@ -130,6 +206,8 @@ pub async fn parse_invoice(
     parsed.invoice_number = fallback.invoice_number.clone().or(parsed.invoice_number);
     parsed.invoice_date = fallback.invoice_date.clone().or(parsed.invoice_date);
     parsed.currency = fallback.currency.clone().or(parsed.currency);
+    parsed.supplier_kind = fallback.supplier_kind;
+    parsed.document_kind = fallback.document_kind;
 
     if parsed.items.is_empty() {
         return Err(AppError::BadRequest(
@@ -148,17 +226,44 @@ pub async fn parse_invoice(
         .iter()
         .map(|r| (r.get("id"), r.get("partNumber"), r.get("name")))
         .collect();
+    let find_existing = |number: &str| {
+        let normalized = normalize_part_number(number);
+        existing
+            .iter()
+            .find(|(_, pn, _)| normalize_part_number(pn) == normalized)
+    };
 
     let items: Vec<ReviewItem> = parsed
         .items
         .iter()
         .map(|item| {
-            let normalized = normalize_part_number(&item.part_number);
-            let matched = existing
-                .iter()
-                .find(|(_, pn, _)| normalize_part_number(pn) == normalized);
             let mut warnings = Vec::new();
-            if !is_bmw_part_number(&item.part_number) {
+            let mut matched_via = None;
+            let mut matched = None;
+            if !item.part_number.trim().is_empty() {
+                matched = find_existing(&item.part_number);
+                if matched.is_some() {
+                    matched_via = Some("partNumber");
+                }
+            } else {
+                warnings.push("Keine Artikelnummer erkannt".to_string());
+            }
+            // Aftermarket lines citing the OEM number: book the stock onto
+            // the part the user already keeps under that BMW number.
+            if matched.is_none() {
+                for oem in &item.oem_part_numbers {
+                    if let Some(hit) = find_existing(oem) {
+                        matched = Some(hit);
+                        matched_via = Some("oemPartNumber");
+                        warnings.push(format!("Über BMW-Nr. {} zugeordnet", oem));
+                        break;
+                    }
+                }
+            }
+            if parsed.supplier_kind != Supplier::Boxxerparts
+                && !item.part_number.trim().is_empty()
+                && !is_bmw_part_number(&item.part_number)
+            {
                 warnings.push("Teilenummer hat kein BMW-Format".to_string());
             }
             if let (Some(unit), Some(total)) = (item.unit_price, item.line_total) {
@@ -173,12 +278,14 @@ pub async fn parse_invoice(
                 item: item.clone(),
                 matched_part_id: matched.map(|(id, _, _)| *id),
                 matched_part_name: matched.map(|(_, _, name)| name.clone()),
+                matched_via,
                 warnings,
             }
         })
         .collect();
 
-    // Duplicate guard: committed rows carry the invoice number in their notes.
+    // Duplicate guard: committed rows carry the document number in their
+    // notes ("… Rechnung 242511" / "… Bestellung 72669").
     let already_imported = match &parsed.invoice_number {
         Some(no) if !no.is_empty() => {
             let cnt: i64 = sqlx::query(
@@ -186,7 +293,7 @@ pub async fn parse_invoice(
                  WHERE p.userId = ? AND s.deletedAt IS NULL AND s.notes LIKE ?",
             )
             .bind(user.id)
-            .bind(format!("%Rechnung {}%", no))
+            .bind(format!("%{} {}%", parsed.document_kind.note_label(), no))
             .fetch_one(&pool)
             .await?
             .get("cnt");
@@ -198,6 +305,8 @@ pub async fn parse_invoice(
     Ok(Json(json!({
         "invoice": {
             "supplier": parsed.supplier,
+            "supplierKey": parsed.supplier_kind.key(),
+            "documentKind": parsed.document_kind,
             "invoiceNumber": parsed.invoice_number,
             "invoiceDate": parsed.invoice_date,
             "currency": parsed.currency.unwrap_or_else(|| "CHF".to_string()),
@@ -334,11 +443,15 @@ fn condense_invoice_text(text: &str) -> String {
         "IBAN",
         "SWIFT",
         "Registergericht",
+        "Registriergericht",
+        "Geschäftsführer",
         "Postanschrift",
         "Telefon",
         "Internet",
         "bmwbike.com",
         "Keine Garantie",
+        "Widerruf",
+        "Reply-To:",
     ];
     let mut out = String::new();
     for line in text.lines() {
@@ -382,7 +495,7 @@ fn is_plausible(llm: &ParsedInvoice, fallback: &ParsedInvoice) -> bool {
         .all(|i| llm_numbers.contains(&normalize_part_number(&i.part_number)))
 }
 
-// MARK: - Deterministic fallback parser (Mark Huggett GmbH layout)
+// MARK: - Deterministic layout parsers
 
 pub fn normalize_part_number(raw: &str) -> String {
     raw.chars()
@@ -397,17 +510,61 @@ fn is_bmw_part_number(raw: &str) -> bool {
     normalized.len() == 11 && normalized.chars().all(|c| c.is_ascii_digit())
 }
 
+/// Find BMW part numbers cited in free text ("BMW 12321244409", "12 32 1 244
+/// 409") and return them in canonical 2-2-1-3-3 spacing, deduplicated.
+pub fn extract_oem_part_numbers(text: &str) -> Vec<String> {
+    let re = regex::Regex::new(r"(?:^|[^0-9])(\d{2}) ?(\d{2}) ?(\d) ?(\d{3}) ?(\d{3})(?:[^0-9]|$)")
+        .expect("static regex");
+    let mut out: Vec<String> = Vec::new();
+    for cap in re.captures_iter(text) {
+        let number = format!(
+            "{} {} {} {} {}",
+            &cap[1], &cap[2], &cap[3], &cap[4], &cap[5]
+        );
+        if !out.contains(&number) {
+            out.push(number);
+        }
+    }
+    out
+}
+
+/// Recognize the supplier from the text layer.
+pub fn detect_supplier(text: &str) -> Supplier {
+    if text.contains("boxxerparts") || text.contains("KEC GmbH") {
+        Supplier::Boxxerparts
+    } else if text.contains("Mark Huggett") || text.contains("CHE-102.220.642") {
+        Supplier::Huggett
+    } else {
+        Supplier::Unknown
+    }
+}
+
+/// Dispatch to the layout parser of the recognized supplier. Unknown layouts
+/// go through the Huggett parser, whose line regex is strict enough to find
+/// nothing rather than something wrong.
+pub fn parse_layout(text: &str) -> ParsedInvoice {
+    match detect_supplier(text) {
+        Supplier::Boxxerparts => parse_boxxerparts_text(text),
+        Supplier::Huggett | Supplier::Unknown => parse_invoice_text(text),
+    }
+}
+
 /// Parse the extracted text of a Huggett invoice. Line items look like
 /// `3 12 11 1 351 564 Kondensator R50/5 - R100RS, 1969 - 1980 13.70 41.10`
 /// (qty, 11-digit part number in 2-2-1-3-3 groups, name, unit price, total).
 pub fn parse_invoice_text(text: &str) -> ParsedInvoice {
+    let supplier_kind = match detect_supplier(text) {
+        Supplier::Huggett => Supplier::Huggett,
+        _ => Supplier::Unknown,
+    };
     let mut invoice = ParsedInvoice {
         currency: text.contains("CHF").then(|| "CHF".to_string()),
         // The letterhead is vector graphics — the company name never appears
         // in the text layer. Their VAT id does, and identifies the supplier
         // unambiguously.
-        supplier: (text.contains("Mark Huggett") || text.contains("CHE-102.220.642"))
-            .then(|| "Mark Huggett GmbH".to_string()),
+        supplier: (supplier_kind == Supplier::Huggett).then(|| "Mark Huggett GmbH".to_string()),
+        supplier_kind,
+        document_kind: DocumentKind::Invoice,
         ..Default::default()
     };
 
@@ -422,6 +579,9 @@ pub fn parse_invoice_text(text: &str) -> ParsedInvoice {
             name: cap[3].trim().to_string(),
             unit_price: parse_amount(&cap[4]),
             line_total: parse_amount(&cap[5]),
+            description: None,
+            supplier_article_no: None,
+            oem_part_numbers: Vec::new(),
         });
     }
 
@@ -434,15 +594,124 @@ pub fn parse_invoice_text(text: &str) -> ParsedInvoice {
     // "Holderbank, den 23.9.2024" → 2024-09-23
     let date_re = regex::Regex::new(r"den (\d{1,2})\.(\d{1,2})\.(\d{4})").expect("static regex");
     if let Some(cap) = date_re.captures(text) {
-        invoice.invoice_date = Some(format!(
-            "{}-{:02}-{:02}",
-            &cap[3],
-            cap[2].parse::<u32>().unwrap_or(1),
-            cap[1].parse::<u32>().unwrap_or(1)
-        ));
+        invoice.invoice_date = Some(iso_date(&cap[3], &cap[2], &cap[1]));
     }
 
     invoice
+}
+
+/// Parse a boxxerparts.de order confirmation (the "Auftragsbestätigung"
+/// e-mail, typically printed to PDF from the mail client). Each item is a
+/// block of lines:
+///
+/// ```text
+/// 2 x Winkelventil 8,3 mm. für BMW R 100 / 80 GS R Kreuzspeichen Felgen
+/// ALU Winkel Ventil 90 Grad, Durchmesser 8,3 mm (bitte den Lochdurchmesser …
+/// Lieferzeit: 3-4 Tage
+/// 96065 4,12 EUR 8
+/// ```
+///
+/// The trailing line total is clipped by the mail client's print layout
+/// (only its first digit survives), so totals are computed from quantity ×
+/// unit price instead of read.
+pub fn parse_boxxerparts_text(text: &str) -> ParsedInvoice {
+    let mut invoice = ParsedInvoice {
+        supplier: Some("Boxxerparts".to_string()),
+        supplier_kind: Supplier::Boxxerparts,
+        document_kind: DocumentKind::Order,
+        currency: text.contains(" EUR").then(|| "EUR".to_string()),
+        ..Default::default()
+    };
+
+    let header_re = regex::Regex::new(r"^(\d{1,3}) x (.+)$").expect("static regex");
+    let closing_re = regex::Regex::new(r"^(\d{4,6}) (\d{1,3}(?:\.\d{3})*,\d{2}) EUR(?:\s.*)?$")
+        .expect("static regex");
+
+    struct Open {
+        quantity: i64,
+        name: String,
+        description: Vec<String>,
+    }
+    let mut open: Option<Open> = None;
+    let finish =
+        |open: Open, article: Option<(&str, Option<f64>)>, items: &mut Vec<InvoiceItem>| {
+            let description = open.description.join(" ");
+            let description = description.trim();
+            let oem_part_numbers = extract_oem_part_numbers(description);
+            let (part_number, supplier_article_no, unit_price) = match article {
+                Some((no, price)) => (
+                    format!("{}{}", BOXXERPARTS_PREFIX, no),
+                    Some(no.to_string()),
+                    price,
+                ),
+                None => (String::new(), None, None),
+            };
+            items.push(InvoiceItem {
+                quantity: open.quantity,
+                part_number,
+                name: open.name,
+                unit_price,
+                line_total: unit_price.map(|p| (p * open.quantity as f64 * 100.0).round() / 100.0),
+                description: (!description.is_empty()).then(|| description.to_string()),
+                supplier_article_no,
+                oem_part_numbers,
+            });
+        };
+
+    for raw in text.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with("Lieferzeit:") || line == "[...]" {
+            continue;
+        }
+        if let Some(cap) = header_re.captures(line) {
+            if let Some(previous) = open.take() {
+                // Item without a closing line — keep it visible for review
+                // instead of silently dropping it.
+                finish(previous, None, &mut invoice.items);
+            }
+            open = Some(Open {
+                quantity: cap[1].parse().unwrap_or(1),
+                name: cap[2].trim().to_string(),
+                description: Vec::new(),
+            });
+            continue;
+        }
+        if let Some(cap) = closing_re.captures(line) {
+            if let Some(current) = open.take() {
+                let price = parse_amount(&cap[2].replace('.', "").replace(',', "."));
+                finish(current, Some((&cap[1], price)), &mut invoice.items);
+            }
+            continue;
+        }
+        if let Some(current) = open.as_mut() {
+            current
+                .description
+                .push(line.trim_end_matches("[...]").trim().to_string());
+        }
+    }
+    if let Some(previous) = open.take() {
+        finish(previous, None, &mut invoice.items);
+    }
+
+    let number_re = regex::Regex::new(r"(?i)Bestellung\s+Nr\.?:?\s*(\d+)").expect("static regex");
+    invoice.invoice_number = number_re.captures(text).map(|cap| cap[1].to_string());
+
+    let date_re =
+        regex::Regex::new(r"Bestelldatum:\s*(\d{1,2})\.(\d{1,2})\.(\d{4})").expect("static regex");
+    if let Some(cap) = date_re.captures(text) {
+        invoice.invoice_date = Some(iso_date(&cap[3], &cap[2], &cap[1]));
+    }
+
+    invoice
+}
+
+fn iso_date(year: &str, month: &str, day: &str) -> String {
+    format!(
+        "{}-{:02}-{:02}",
+        year,
+        month.parse::<u32>().unwrap_or(1),
+        day.parse::<u32>().unwrap_or(1)
+    )
 }
 
 fn parse_amount(raw: &str) -> Option<f64> {
@@ -458,6 +727,11 @@ mod tests {
     const INVOICE_242511: &str = "11995\n242511\n2024-09-23-00002\n99.37.126432.00026680\nHalil Kimsesiz\nKunde/Customer:\nHolderbank, den 23.9.2024 Seite 1\nBst-Nr./Order-no.:\nRECHNUNG\nAnz. Ersatzteilnummer Artikelbezeichnung Stk/Preis Rab Betrag\nTrackingnummer:\nBearbeiter/Processor:\nShipping: Priority Gew./kg: 0.530\n3 12 11 1 351 564 Kondensator R50/5 - R100RS, 1969 - 1980 (NORIS Fabrikat) 13.70 41.10\n1 61 13 8 080 160 Tachowelle Gummitülle am Getriebe 2.10 2.10\n1 62 12 1 351 554 Gummitülle zur Drehzahlmesserwelle, R50/5 - R100RT 9.70 9.70\n1 62 12 1 357 731 Tachowelle, R60/6 - R100RT, R45 - R65, R80 - R100MYS 22.85 22.85\nMWSt. %\n75.75\nWarenwert\n6.95\nMWST: CHE-102.220.642 MWST\nEORI: DE714612052877641\n8.1\nTWINT\n92.90\nKeine Garantie auf elektronische Bauteile.\n0.00\nVerpackung\n10.20\nPorto\n85.95\nTotal vor MWSt Rechnungstotal in CHF\n";
 
     const INVOICE_242312: &str = "11995\n242312\n2024-08-27-00012\n99.37.126432.00026577\nHalil Kimsesiz\nKunde/Customer:\nHolderbank, den 30.8.2024 Seite 1\nBst-Nr./Order-no.:\nRECHNUNG\nAnz. Ersatzteilnummer Artikelbezeichnung Stk/Preis Rab Betrag\n2 13 11 1 260 874 Dellorto Gummitülle zu Gaszug, R90S 3.57 7.15\n1 46 63 2 315 304 Zylinderschraube mit Innensechskant M10 x 90 4.41 4.40\n4 51 18 1 823 474 Abdeckkappe 0.47 1.90\n1 61 31 1 244 708 Schalter Warnblinke 57.80 57.80\n1 61 31 2 300 383 Nachrüstsatz Griff beheizt 231.16 231.15\nMWSt. %\n302.40\nWarenwert\n25.30\nMWST: CHE-102.220.642 MWST\nEORI: DE714612052877641\n8.1\nKartenzahlung\n337.90\nKeine Garantie auf elektronische Bauteile.\n0.00\nVerpackung\n10.20\nPorto\n312.60\nTotal vor MWSt Rechnungstotal in CHF\n";
+
+    // Text layer of a real boxxerparts.de order confirmation (Gmail print to
+    // PDF, addresses trimmed), as pdfium extracts it — note the clipped line
+    // totals ("8" instead of "8,24") and the CRLF line endings.
+    const ORDER_72669: &str = "Auftragsbestätigung Nr:72669 / 21.09.2026\r\n1 message\r\nboxxerparts.de Onlineshop <shop@boxxerparts.com> 21 September 2026 at 21:55\r\nReply-To: \"boxxerparts.de Onlineshop\" <shop@boxxerparts.com>\r\nIHRE BESTELLUNG NR. 72669\r\nSehr geehrter Herr Tobias Herrmann,\r\nIhre Bestellung ist bei uns eingegangen. Sie erhalten von uns diese Auftragsbestätigung, mit der wir Ihr Vertragsangebo\r\nannehmen. Der Vertrag zwischen Ihnen und uns ist daher zustande gekommen.\r\nVersandart: Paketversand\r\nZahlungsmethode: PayPal\r\nBestellung Nr: 72669\r\nBestelldatum: 21.09.2026\r\nRechnungs-/Lieferadresse\r\nIhre bestellten Produkte nochmals zur Kontrolle:\r\nStk. Produkt Art.-Nr. Einzelpreis\r\n2 x Winkelventil 8,3 mm. für BMW R 100 / 80 GS R Kreuzspeichen Felgen\r\nALU Winkel Ventil 90 Grad, Durchmesser 8,3 mm (bitte den Lochdurchmesser an der eigenen Felge\r\nmessen). Geeignet für Speichenfelgen mit schlauchlosen Reifen. Erleichtert den Umgang mit den\r\nReifenluftdruckgeräten an den Tankstellen. Anzugs-Drehmoment: 7 - 10 [...]\r\nLieferzeit: 3-4 Tage\r\n96065 4,12 EUR 8\r\n1 x Regler Wehrle für alle R2V Boxer ab 69\r\nRegler passend für alle 2 V Boxer ab Baujahr 1969 vom Erstausrüster BMW 12321244409 Wehrle\r\n[...]\r\nLieferzeit: 3-4 Tage\r\n44555 49,16 EUR 49\r\n2 x Auspuff Sternmutter für die 2V Boxer\r\nFür alle BMW 2 V 80/100 Modelle ab /7 Ausnahme: R 45 und R 65 Preis je Stück BMW Teilenummer:\r\n[...]\r\n44545 24,79 EUR 49\nLieferzeit: 3-4 Tage\r\n2 x Benzinleitung Schnellverschluss für 6 mm Benzinleitung\r\nSchnellkupplung für 6 mm Benzinschlauch zum Bespiel für die BMW 2 V Boxer Ideal zum Trennen von\r\nBenzinleitungen zwischen Vergaser und [...]\r\nLieferzeit: 3-4 Tage\r\n91095 16,30 EUR 32\r\n2 x Neopren Kraftstoffschlauch 6.0mm. - 1m.\r\nKraftstoffschlauch aus Neopren - Besteht aus 2 Materialien (Außen: Neoprene, Innen: Gummi) - Das\r\nInnere Gummi ist hitzebeständig (max. 120 Grad) - Das äußere Neoprene ist resistent gegenüber Öl\r\n(max. 100 Grad) - Benzinresistent, nicht E10 tauglich - Verstärkte Ausführung [...]\r\nLieferzeit: 3-4 Tage\r\n44245 10,00 EUR 20\r\n1 x Stahlflex Bremsleitung mit ABE für BMW R 100/80 GS, ab Sep 90\r\nStahlflexbremsleitungen mit ABE / Teilegutachten Konstanter Druckpunkt der Bremse Langjährig\r\ngleichbleibende Bremsleistung Bewährt auch unter härtesten Bedingungen. Bestehend aus: 1 Leitung\r\n800mm, Dichtringe. Für BMW R 2V Boxer Modelle R 80GS, R 80GS PD, R 100GS, R 100GS PD, R\r\n80GS [...]\r\nLieferzeit: 3-4 Tage\r\n44064 39,41 EUR 39\r\nZwischensumme: 198\r\nPaketversand (Versand nach CH: (2.62 kg)): 35\r\nSumme, netto: 233,\r\nSumme: 233,\r\nmit freundlichen Grüßen\r\nKEC GmbH\r\nBoxxerparts\r\nPoststr. 2\r\nD-35794 Mengerskirchen\r\nWiderrufsbelehrung und Muster-Widerrufsformular für Verbraucher\r\n";
 
     #[test]
     fn parses_all_line_items_of_242511() {
@@ -481,6 +755,8 @@ mod tests {
         assert_eq!(parsed.invoice_date.as_deref(), Some("2024-09-23"));
         assert_eq!(parsed.currency.as_deref(), Some("CHF"));
         assert_eq!(parsed.supplier.as_deref(), Some("Mark Huggett GmbH"));
+        assert_eq!(parsed.supplier_kind, Supplier::Huggett);
+        assert_eq!(parsed.document_kind, DocumentKind::Invoice);
     }
 
     #[test]
@@ -498,20 +774,136 @@ mod tests {
     }
 
     #[test]
+    fn layout_dispatch_recognizes_both_suppliers() {
+        assert_eq!(detect_supplier(INVOICE_242511), Supplier::Huggett);
+        assert_eq!(detect_supplier(ORDER_72669), Supplier::Boxxerparts);
+        assert_eq!(detect_supplier("Irgendeine Rechnung"), Supplier::Unknown);
+        assert_eq!(parse_layout(INVOICE_242511).items.len(), 4);
+        assert_eq!(parse_layout(ORDER_72669).items.len(), 6);
+    }
+
+    #[test]
+    fn parses_all_boxxerparts_order_lines() {
+        let parsed = parse_boxxerparts_text(ORDER_72669);
+        assert_eq!(parsed.items.len(), 6);
+
+        let numbers: Vec<&str> = parsed
+            .items
+            .iter()
+            .map(|i| i.part_number.as_str())
+            .collect();
+        assert_eq!(
+            numbers,
+            [
+                "BXP-96065",
+                "BXP-44555",
+                "BXP-44545",
+                "BXP-91095",
+                "BXP-44245",
+                "BXP-44064"
+            ]
+        );
+        let quantities: Vec<i64> = parsed.items.iter().map(|i| i.quantity).collect();
+        assert_eq!(quantities, [2, 1, 2, 2, 2, 1]);
+
+        let valve = &parsed.items[0];
+        assert_eq!(
+            valve.name,
+            "Winkelventil 8,3 mm. für BMW R 100 / 80 GS R Kreuzspeichen Felgen"
+        );
+        assert_eq!(valve.supplier_article_no.as_deref(), Some("96065"));
+        assert_eq!(valve.unit_price, Some(4.12));
+        // Line totals are clipped in the print — computed, not read.
+        assert_eq!(valve.line_total, Some(8.24));
+        let description = valve.description.as_deref().unwrap();
+        assert!(description.starts_with("ALU Winkel Ventil 90 Grad"));
+        assert!(description.ends_with("Anzugs-Drehmoment: 7 - 10"));
+        assert!(!description.contains("Lieferzeit"));
+
+        // The closing line of the Sternmutter precedes its Lieferzeit line.
+        let nut = &parsed.items[2];
+        assert_eq!(nut.unit_price, Some(24.79));
+        assert_eq!(nut.line_total, Some(49.58));
+
+        let hose = &parsed.items[4];
+        assert_eq!(hose.name, "Neopren Kraftstoffschlauch 6.0mm. - 1m.");
+        assert_eq!(hose.line_total, Some(20.00));
+    }
+
+    #[test]
+    fn boxxerparts_order_metadata_and_oem_numbers() {
+        let parsed = parse_boxxerparts_text(ORDER_72669);
+        assert_eq!(parsed.supplier.as_deref(), Some("Boxxerparts"));
+        assert_eq!(parsed.supplier_kind, Supplier::Boxxerparts);
+        assert_eq!(parsed.document_kind, DocumentKind::Order);
+        assert_eq!(parsed.invoice_number.as_deref(), Some("72669"));
+        assert_eq!(parsed.invoice_date.as_deref(), Some("2026-09-21"));
+        assert_eq!(parsed.currency.as_deref(), Some("EUR"));
+
+        // The Wehrle regulator cites its OEM number in the description.
+        let regulator = &parsed.items[1];
+        assert_eq!(
+            regulator.oem_part_numbers,
+            vec!["12 32 1 244 409".to_string()]
+        );
+        assert!(parsed.items[0].oem_part_numbers.is_empty());
+    }
+
+    #[test]
+    fn item_without_closing_line_is_kept_for_review() {
+        let text =
+            "boxxerparts\n1 x Erstes Teil\nBeschreibung\n2 x Zweites Teil\n12345 1,00 EUR 1\n";
+        let parsed = parse_boxxerparts_text(text);
+        assert_eq!(parsed.items.len(), 2);
+        assert_eq!(parsed.items[0].part_number, "");
+        assert_eq!(parsed.items[0].supplier_article_no, None);
+        assert_eq!(parsed.items[0].description.as_deref(), Some("Beschreibung"));
+        assert_eq!(parsed.items[1].part_number, "BXP-12345");
+    }
+
+    #[test]
+    fn extracts_oem_numbers_in_any_spacing() {
+        assert_eq!(
+            extract_oem_part_numbers("vom Erstausrüster BMW 12321244409 Wehrle 55990002"),
+            vec!["12 32 1 244 409".to_string()]
+        );
+        assert_eq!(
+            extract_oem_part_numbers("BMW Teilenummer: 18 12 1 234 567 und 18121234567"),
+            vec!["18 12 1 234 567".to_string()]
+        );
+        // Order numbers and phone numbers are not 11 digits.
+        assert!(extract_oem_part_numbers("Bestellung Nr: 72669 Fon: +49 6476 419401").is_empty());
+    }
+
+    #[test]
     fn normalizes_part_numbers() {
         assert_eq!(normalize_part_number("61 31 2 300 383"), "61312300383");
         assert_eq!(normalize_part_number("61-31-2-300-383"), "61312300383");
+        assert_eq!(normalize_part_number("BXP-44555"), "BXP44555");
         assert!(is_bmw_part_number("61 31 2 300 383"));
         assert!(!is_bmw_part_number("12345"));
+        assert!(!is_bmw_part_number("BXP-44555"));
     }
 
     #[test]
     fn condense_drops_footer_noise() {
-        let text = "1 61 31 1 244 708 Schalter 57.80 57.80\nBankkonto PostFinance\nIBAN CH49\nTelefon +41\n";
+        let text = "1 61 31 1 244 708 Schalter 57.80 57.80\nBankkonto PostFinance\nIBAN CH49\nTelefon +41\nWiderrufsbelehrung\n";
         let condensed = condense_invoice_text(text);
         assert!(condensed.contains("Schalter"));
         assert!(!condensed.contains("IBAN"));
         assert!(!condensed.contains("Telefon"));
+        assert!(!condensed.contains("Widerruf"));
+    }
+
+    #[test]
+    fn llm_json_without_new_fields_still_parses() {
+        // The LLM schema predates description/oem fields — they must default.
+        let json = r#"{"supplier":null,"invoiceNumber":"1","invoiceDate":null,"currency":"CHF","items":[{"quantity":1,"partNumber":"12 11 1 351 564","name":"Kondensator","unitPrice":1.0,"lineTotal":1.0}]}"#;
+        let parsed: ParsedInvoice = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.items[0].description, None);
+        assert!(parsed.items[0].oem_part_numbers.is_empty());
+        assert_eq!(parsed.supplier_kind, Supplier::Unknown);
+        assert_eq!(parsed.document_kind, DocumentKind::Invoice);
     }
 
     /// Opt-in integration test against the real vLLM instance:
