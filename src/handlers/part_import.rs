@@ -151,25 +151,8 @@ pub async fn parse_invoice(
             pdf_data = Some(data.to_vec());
         }
     }
-    let pdf_data =
-        pdf_data.ok_or_else(|| AppError::BadRequest("Keine PDF-Datei erhalten".to_string()))?;
-    if !pdf_data.starts_with(b"%PDF") {
-        return Err(AppError::BadRequest(
-            "Datei ist kein PDF (nur PDF-Rechnungen werden unterstützt)".to_string(),
-        ));
-    }
-
-    // Pdfium is CPU-bound and its bindings are not Send-friendly: extract on a
-    // blocking thread, same as document previews.
-    let text = tokio::task::spawn_blocking(move || extract_pdf_text(&pdf_data))
-        .await
-        .map_err(|e| AppError::Internal(format!("PDF task panicked: {}", e)))??;
-
-    if text.trim().is_empty() {
-        return Err(AppError::BadRequest(
-            "PDF enthält keinen Text (gescannte Rechnungen werden nicht unterstützt)".to_string(),
-        ));
-    }
+    let data = pdf_data.ok_or_else(|| AppError::BadRequest("Keine Datei erhalten".to_string()))?;
+    let (text, text_source) = document_text(data).await?;
 
     // Deterministic parse always runs: it is the fallback result and the
     // yardstick the LLM output is validated against.
@@ -314,8 +297,77 @@ pub async fn parse_invoice(
         },
         "items": items,
         "source": source,
+        // "pdf" = embedded text layer, "ocr" = server-side text recognition
+        // (scans/photos) — the client asks for a closer review then.
+        "textSource": text_source,
         "alreadyImported": already_imported,
     })))
+}
+
+/// Text of an uploaded supplier document: the PDF's own text layer, or —
+/// for image-only PDFs (raw scans) and photos — server-side OCR.
+async fn document_text(data: Vec<u8>) -> AppResult<(String, &'static str)> {
+    let is_pdf = data.starts_with(b"%PDF");
+    if !is_pdf && !is_supported_image(&data) {
+        return Err(AppError::BadRequest(
+            "Datei ist weder PDF noch Bild (unterstützt: PDF, JPEG, PNG, WebP)".to_string(),
+        ));
+    }
+
+    let pages = if is_pdf {
+        // Pdfium is CPU-bound and its bindings are not Send-friendly: extract
+        // on a blocking thread, same as document previews.
+        let (text, data) =
+            tokio::task::spawn_blocking(move || extract_pdf_text(&data).map(|text| (text, data)))
+                .await
+                .map_err(|e| AppError::Internal(format!("PDF task panicked: {}", e)))??;
+        if has_text_layer(&text) {
+            return Ok((text, "pdf"));
+        }
+        tokio::task::spawn_blocking(move || crate::ocr::render_pdf_pages(&data))
+    } else {
+        tokio::task::spawn_blocking(move || crate::ocr::decode_image(&data).map(|p| vec![p]))
+    }
+    .await
+    .map_err(|e| AppError::Internal(format!("OCR task panicked: {}", e)))?
+    .map_err(ocr_error)?;
+
+    let text = crate::ocr::recognize_pages(pages)
+        .await
+        .map_err(ocr_error)?;
+    if !has_text_layer(&text) {
+        return Err(AppError::BadRequest(
+            "Keine Schrift erkannt — ist der Scan scharf und richtig herum?".to_string(),
+        ));
+    }
+    Ok((crate::ocr::clean_ocr_text(&text), "ocr"))
+}
+
+fn ocr_error(e: crate::ocr::OcrError) -> AppError {
+    use crate::ocr::OcrError;
+    match e {
+        OcrError::BadInput(msg) => AppError::BadRequest(msg),
+        OcrError::Unavailable(msg) => {
+            tracing::error!("OCR unavailable: {}", msg);
+            AppError::Internal("Texterkennung (OCR) ist auf dem Server nicht verfügbar".to_string())
+        }
+        OcrError::Failed(msg) => {
+            AppError::Internal(format!("Texterkennung fehlgeschlagen: {}", msg))
+        }
+    }
+}
+
+/// A scanner's image-only PDF has no text at all, but some add a stray
+/// producer string — a few characters are not a document.
+fn has_text_layer(text: &str) -> bool {
+    text.chars().filter(|c| c.is_alphanumeric()).count() >= 20
+}
+
+fn is_supported_image(data: &[u8]) -> bool {
+    matches!(
+        image::guess_format(data),
+        Ok(image::ImageFormat::Jpeg | image::ImageFormat::Png | image::ImageFormat::WebP)
+    )
 }
 
 fn extract_pdf_text(data: &[u8]) -> AppResult<String> {
@@ -592,23 +644,27 @@ pub fn parse_invoice_text(text: &str) -> ParsedInvoice {
         ..Default::default()
     };
 
-    // Tolerant of OCR'd paper invoices (scanned, then OCRmyPDF): the table
-    // rule between quantity and part number is read as "|", "[", "!" …, the
-    // number's group spacing can collapse, and thousands separators vary.
+    // Tolerant of OCR'd paper invoices: the table rule between quantity and
+    // part number is read as "|", "[", "!" or nothing at all ("183 30 0 401
+    // 758" = qty 1 + 83 30 0 401 758 — the rigid 2-2-1-3-3 groups leave only
+    // one split), the number's group spacing can collapse, and thousands
+    // separators vary.
     let item_re = regex::Regex::new(
-        r"(?m)^\s*(\d{1,3})(?:\s*[|\[\]!]\s*|\s+)(\d{2}) ?(\d{2}) ?(\d) ?(\d{3}) ?(\d{3}) (.+?) (\d+(?:['’`]\d{3})*\.\d{2}) (\d+(?:['’`]\d{3})*\.\d{2})\s*$",
+        r"(?m)^\s*(\d{1,3})(?:\s*[|\[\]!]\s*|\s*)(\d{2}) ?(\d{2}) ?(\d) ?(\d{3}) ?(\d{3}) (.+?) (\d+(?:['’`]\d{3})*\.\d{2}) (\d+(?:['’`]\d{3})*\.\d{2})\s*$",
     )
     .expect("static regex");
     for cap in item_re.captures_iter(text) {
+        let unit_price = parse_amount(&cap[8]);
+        let line_total = parse_amount(&cap[9]);
         invoice.items.push(InvoiceItem {
-            quantity: cap[1].parse().unwrap_or(1),
+            quantity: consistent_quantity(cap[1].parse().unwrap_or(1), unit_price, line_total),
             part_number: format!(
                 "{} {} {} {} {}",
                 &cap[2], &cap[3], &cap[4], &cap[5], &cap[6]
             ),
             name: cap[7].trim().to_string(),
-            unit_price: parse_amount(&cap[8]),
-            line_total: parse_amount(&cap[9]),
+            unit_price,
+            line_total,
             description: None,
             supplier_article_no: None,
             oem_part_numbers: Vec::new(),
@@ -746,6 +802,24 @@ fn iso_date(year: &str, month: &str, day: &str) -> String {
     )
 }
 
+/// The quantity printed on the row, unless the row's own prices say
+/// otherwise: OCR can read the table rule next to the quantity as an extra
+/// "1" ("1183 30 0 401 758" → qty 11), while total ÷ unit price is exact.
+fn consistent_quantity(printed: i64, unit_price: Option<f64>, line_total: Option<f64>) -> i64 {
+    let (Some(unit), Some(total)) = (unit_price, line_total) else {
+        return printed;
+    };
+    if unit <= 0.0 || (unit * printed as f64 - total).abs() <= LINE_TOTAL_TOLERANCE {
+        return printed;
+    }
+    let derived = (total / unit).round();
+    if derived >= 1.0 && (unit * derived - total).abs() <= LINE_TOTAL_TOLERANCE {
+        derived as i64
+    } else {
+        printed
+    }
+}
+
 fn parse_amount(raw: &str) -> Option<f64> {
     raw.replace(['\'', '’', '`'], "").parse().ok()
 }
@@ -785,6 +859,28 @@ mod tests {
         assert_eq!(parsed.invoice_number.as_deref(), Some("262462"));
         assert_eq!(parsed.invoice_date.as_deref(), Some("2026-09-22"));
         assert_eq!(parsed.currency.as_deref(), Some("CHF"));
+    }
+
+    // Tesseract output (deu+eng, --psm 4) of the same invoice scanned
+    // without a text layer, as the server-side OCR produces it: the table
+    // rule vanished between qty and part number, or became an extra "1".
+    #[test]
+    fn parses_server_ocr_output() {
+        for row in [
+            "183 30 0 401 758 Sternmutterschlissel (Nr. 180600) 51.62 51.62",
+            "1183 30 0 401 758 Sternmutterschliissel (Nr. 180600) 51.62 51.62",
+            "183300401758  Sternmutterschlissel (Nr. 180600) 51.62 51.62",
+        ] {
+            let text = format!(
+                "RECHNUNG 262462\nHolderbank den 22.9.2026 Seite 1\n{}\nMWST: CHE-102.220.642 MWST\n",
+                row
+            );
+            let parsed = parse_layout(&text);
+            assert_eq!(parsed.items.len(), 1, "{}", row);
+            assert_eq!(parsed.items[0].quantity, 1, "{}", row);
+            assert_eq!(parsed.items[0].part_number, "83 30 0 401 758", "{}", row);
+            assert_eq!(parsed.items[0].line_total, Some(51.62));
+        }
     }
 
     #[test]

@@ -45,11 +45,15 @@ WORKDIR /app
 #  - libstdc++6: required by libpdfium.so (present in the base image today,
 #    but named explicitly so a slimmer base can't silently break PDF parsing)
 #  - curl: pdfium download below + container healthchecks
+#  - tesseract-ocr (+ German model): OCR for scanned/photographed invoices in
+#    the part import; English ships with the base package
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
     libstdc++6 \
     curl \
+    tesseract-ocr \
+    tesseract-ocr-deu \
     && rm -rf /var/lib/apt/lists/*
 
 # Download and install PDFium — required for document previews AND the
