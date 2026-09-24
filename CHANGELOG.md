@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/mightea/MotoManager-Api/compare/v0.20.1...v0.21.0) (2026-09-24)
+
+
+### Features
+
+* **part-import:** import boxxerparts.de order confirmations ([59be8ab](https://github.com/mightea/MotoManager-Api/commit/59be8ab4defdc5e4a5bbe9d72543811cf68927a2))
+
 ## [0.20.1](https://github.com/mightea/MotoManager-Api/compare/v0.20.0...v0.20.1) (2026-09-02)
 
 
