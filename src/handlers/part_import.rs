@@ -208,6 +208,7 @@ pub async fn parse_invoice(
     parsed.currency = fallback.currency.clone().or(parsed.currency);
     parsed.supplier_kind = fallback.supplier_kind;
     parsed.document_kind = fallback.document_kind;
+    prefer_layout_line_values(&mut parsed, &fallback);
 
     if parsed.items.is_empty() {
         return Err(AppError::BadRequest(
@@ -495,6 +496,26 @@ fn is_plausible(llm: &ParsedInvoice, fallback: &ParsedInvoice) -> bool {
         .all(|i| llm_numbers.contains(&normalize_part_number(&i.part_number)))
 }
 
+/// Same rule for line items: where the layout parser matched a line, its
+/// quantity and prices are read straight off the row and win over the LLM's
+/// (observed failure: the model returning the invoice total incl. shipping
+/// as a line amount). The LLM keeps only what the regex could not see.
+fn prefer_layout_line_values(parsed: &mut ParsedInvoice, fallback: &ParsedInvoice) {
+    for item in &mut parsed.items {
+        let number = normalize_part_number(&item.part_number);
+        if let Some(exact) = fallback
+            .items
+            .iter()
+            .find(|f| normalize_part_number(&f.part_number) == number)
+        {
+            item.part_number = exact.part_number.clone();
+            item.quantity = exact.quantity;
+            item.unit_price = exact.unit_price;
+            item.line_total = exact.line_total;
+        }
+    }
+}
+
 // MARK: - Deterministic layout parsers
 
 pub fn normalize_part_number(raw: &str) -> String {
@@ -558,7 +579,10 @@ pub fn parse_invoice_text(text: &str) -> ParsedInvoice {
         _ => Supplier::Unknown,
     };
     let mut invoice = ParsedInvoice {
-        currency: text.contains("CHF").then(|| "CHF".to_string()),
+        // Huggett bills in CHF; an OCR'd paper invoice can lose the footer
+        // line that names the currency.
+        currency: (text.contains("CHF") || supplier_kind == Supplier::Huggett)
+            .then(|| "CHF".to_string()),
         // The letterhead is vector graphics — the company name never appears
         // in the text layer. Their VAT id does, and identifies the supplier
         // unambiguously.
@@ -568,17 +592,23 @@ pub fn parse_invoice_text(text: &str) -> ParsedInvoice {
         ..Default::default()
     };
 
+    // Tolerant of OCR'd paper invoices (scanned, then OCRmyPDF): the table
+    // rule between quantity and part number is read as "|", "[", "!" …, the
+    // number's group spacing can collapse, and thousands separators vary.
     let item_re = regex::Regex::new(
-        r"(?m)^\s*(\d{1,3}) (\d{2} \d{2} \d \d{3} \d{3}) (.+?) (\d+(?:'\d{3})*\.\d{2}) (\d+(?:'\d{3})*\.\d{2})\s*$",
+        r"(?m)^\s*(\d{1,3})(?:\s*[|\[\]!]\s*|\s+)(\d{2}) ?(\d{2}) ?(\d) ?(\d{3}) ?(\d{3}) (.+?) (\d+(?:['’`]\d{3})*\.\d{2}) (\d+(?:['’`]\d{3})*\.\d{2})\s*$",
     )
     .expect("static regex");
     for cap in item_re.captures_iter(text) {
         invoice.items.push(InvoiceItem {
             quantity: cap[1].parse().unwrap_or(1),
-            part_number: cap[2].to_string(),
-            name: cap[3].trim().to_string(),
-            unit_price: parse_amount(&cap[4]),
-            line_total: parse_amount(&cap[5]),
+            part_number: format!(
+                "{} {} {} {} {}",
+                &cap[2], &cap[3], &cap[4], &cap[5], &cap[6]
+            ),
+            name: cap[7].trim().to_string(),
+            unit_price: parse_amount(&cap[8]),
+            line_total: parse_amount(&cap[9]),
             description: None,
             supplier_article_no: None,
             oem_part_numbers: Vec::new(),
@@ -588,7 +618,9 @@ pub fn parse_invoice_text(text: &str) -> ParsedInvoice {
     // The invoice number is a standalone 6-digit line near the top of the
     // text stream (customer number is 5 digits, the order number is dashed,
     // the tracking number is dotted — none of them match).
-    let number_re = regex::Regex::new(r"(?m)^\s*(\d{6})\s*$").expect("static regex");
+    // OCR'd scans keep the label on the same line: "RECHNUNG 262462".
+    let number_re =
+        regex::Regex::new(r"(?m)^\s*(?:RECHNUNG\s+)?(\d{6})\s*$").expect("static regex");
     invoice.invoice_number = number_re.captures(text).map(|cap| cap[1].to_string());
 
     // "Holderbank, den 23.9.2024" → 2024-09-23
@@ -715,7 +747,7 @@ fn iso_date(year: &str, month: &str, day: &str) -> String {
 }
 
 fn parse_amount(raw: &str) -> Option<f64> {
-    raw.replace('\'', "").parse().ok()
+    raw.replace(['\'', '’', '`'], "").parse().ok()
 }
 
 #[cfg(test)]
@@ -732,6 +764,53 @@ mod tests {
     // PDF, addresses trimmed), as pdfium extracts it — note the clipped line
     // totals ("8" instead of "8,24") and the CRLF line endings.
     const ORDER_72669: &str = "Auftragsbestätigung Nr:72669 / 21.09.2026\r\n1 message\r\nboxxerparts.de Onlineshop <shop@boxxerparts.com> 21 September 2026 at 21:55\r\nReply-To: \"boxxerparts.de Onlineshop\" <shop@boxxerparts.com>\r\nIHRE BESTELLUNG NR. 72669\r\nSehr geehrter Herr Tobias Herrmann,\r\nIhre Bestellung ist bei uns eingegangen. Sie erhalten von uns diese Auftragsbestätigung, mit der wir Ihr Vertragsangebo\r\nannehmen. Der Vertrag zwischen Ihnen und uns ist daher zustande gekommen.\r\nVersandart: Paketversand\r\nZahlungsmethode: PayPal\r\nBestellung Nr: 72669\r\nBestelldatum: 21.09.2026\r\nRechnungs-/Lieferadresse\r\nIhre bestellten Produkte nochmals zur Kontrolle:\r\nStk. Produkt Art.-Nr. Einzelpreis\r\n2 x Winkelventil 8,3 mm. für BMW R 100 / 80 GS R Kreuzspeichen Felgen\r\nALU Winkel Ventil 90 Grad, Durchmesser 8,3 mm (bitte den Lochdurchmesser an der eigenen Felge\r\nmessen). Geeignet für Speichenfelgen mit schlauchlosen Reifen. Erleichtert den Umgang mit den\r\nReifenluftdruckgeräten an den Tankstellen. Anzugs-Drehmoment: 7 - 10 [...]\r\nLieferzeit: 3-4 Tage\r\n96065 4,12 EUR 8\r\n1 x Regler Wehrle für alle R2V Boxer ab 69\r\nRegler passend für alle 2 V Boxer ab Baujahr 1969 vom Erstausrüster BMW 12321244409 Wehrle\r\n[...]\r\nLieferzeit: 3-4 Tage\r\n44555 49,16 EUR 49\r\n2 x Auspuff Sternmutter für die 2V Boxer\r\nFür alle BMW 2 V 80/100 Modelle ab /7 Ausnahme: R 45 und R 65 Preis je Stück BMW Teilenummer:\r\n[...]\r\n44545 24,79 EUR 49\nLieferzeit: 3-4 Tage\r\n2 x Benzinleitung Schnellverschluss für 6 mm Benzinleitung\r\nSchnellkupplung für 6 mm Benzinschlauch zum Bespiel für die BMW 2 V Boxer Ideal zum Trennen von\r\nBenzinleitungen zwischen Vergaser und [...]\r\nLieferzeit: 3-4 Tage\r\n91095 16,30 EUR 32\r\n2 x Neopren Kraftstoffschlauch 6.0mm. - 1m.\r\nKraftstoffschlauch aus Neopren - Besteht aus 2 Materialien (Außen: Neoprene, Innen: Gummi) - Das\r\nInnere Gummi ist hitzebeständig (max. 120 Grad) - Das äußere Neoprene ist resistent gegenüber Öl\r\n(max. 100 Grad) - Benzinresistent, nicht E10 tauglich - Verstärkte Ausführung [...]\r\nLieferzeit: 3-4 Tage\r\n44245 10,00 EUR 20\r\n1 x Stahlflex Bremsleitung mit ABE für BMW R 100/80 GS, ab Sep 90\r\nStahlflexbremsleitungen mit ABE / Teilegutachten Konstanter Druckpunkt der Bremse Langjährig\r\ngleichbleibende Bremsleistung Bewährt auch unter härtesten Bedingungen. Bestehend aus: 1 Leitung\r\n800mm, Dichtringe. Für BMW R 2V Boxer Modelle R 80GS, R 80GS PD, R 100GS, R 100GS PD, R\r\n80GS [...]\r\nLieferzeit: 3-4 Tage\r\n44064 39,41 EUR 39\r\nZwischensumme: 198\r\nPaketversand (Versand nach CH: (2.62 kg)): 35\r\nSumme, netto: 233,\r\nSumme: 233,\r\nmit freundlichen Grüßen\r\nKEC GmbH\r\nBoxxerparts\r\nPoststr. 2\r\nD-35794 Mengerskirchen\r\nWiderrufsbelehrung und Muster-Widerrufsformular für Verbraucher\r\n";
+
+    // Text layer of a scanned paper invoice after OCRmyPDF/Tesseract, as
+    // pdfium extracts it (customer address, bank and footer trimmed). Note
+    // the "1|83" table rule, the invoice number sharing the RECHNUNG line and
+    // no "CHF" anywhere.
+    const SCANNED_262462: &str = "Mark Huggett GmbH \nBMW Motorrad Classic \nLieferadresse/Dellvery address \nBMW \nCLASSIC \nRECHNUNG 262462 \nBst-Nr./Order-no.: 2026-09-21-10016 \nKunde/Customer: 8810 \nTrackingnummer: 99.37.126432.00029845 \nShipping: Priority Gew./kg: 1.620 \nBearbeiter/Processor: Susan Vardi Holderbank, den 22.9.2026 Seite 1 \nAnz, Ersatzteilnummer Artikelbezeichnung StW/Preis | Rab Betrag \n1|83 30 0 401 758 Sternmutterschlüssel (Nr. 180600) 51.62 51.62 \nWarenwert Verpackung Porto Total vorMWSt . MWSt. 8.1 % \n51.62 0.00 10.22 61.84 5.01 \nKeine Garantie auf elektronische Bauteile. MWST: CHE-102.220.642 MWST \nGP-ID: 1000943745 \nEORI: DE714612052877641 \nFax CHE-102.220.642 MWST CHE-102.220.842 MWST CHE-102.220.842 MWST \n+41 82 887 60 21 0E714612052877641 0E714612052877841 DE714812052877641 \n";
+
+    #[test]
+    fn parses_ocr_scanned_invoice() {
+        let parsed = parse_layout(SCANNED_262462);
+        assert_eq!(parsed.supplier_kind, Supplier::Huggett);
+        assert_eq!(parsed.items.len(), 1);
+        let item = &parsed.items[0];
+        assert_eq!(item.quantity, 1);
+        assert_eq!(item.part_number, "83 30 0 401 758");
+        assert_eq!(item.name, "Sternmutterschlüssel (Nr. 180600)");
+        assert_eq!(item.unit_price, Some(51.62));
+        assert_eq!(item.line_total, Some(51.62));
+        assert_eq!(parsed.invoice_number.as_deref(), Some("262462"));
+        assert_eq!(parsed.invoice_date.as_deref(), Some("2026-09-22"));
+        assert_eq!(parsed.currency.as_deref(), Some("CHF"));
+    }
+
+    #[test]
+    fn layout_line_values_override_llm_amounts() {
+        let fallback = parse_layout(SCANNED_262462);
+        let mut llm = fallback.clone();
+        llm.items[0].part_number = "83300401758".to_string();
+        llm.items[0].line_total = Some(61.84);
+        llm.items[0].name = "Sternmutterschlüssel".to_string();
+        prefer_layout_line_values(&mut llm, &fallback);
+        assert_eq!(llm.items[0].line_total, Some(51.62));
+        assert_eq!(llm.items[0].part_number, "83 30 0 401 758");
+        // Names stay the model's — only the row's numbers are authoritative.
+        assert_eq!(llm.items[0].name, "Sternmutterschlüssel");
+    }
+
+    #[test]
+    fn tolerates_ocr_noise_in_item_lines() {
+        let text = "RECHNUNG 262462\n2 [ 8330 0 401758 Sternmutter 1’051.62 2’103.24 \n3 ! 12 11 1 351 564 Kondensator 13.70 41.10\n";
+        let parsed = parse_invoice_text(text);
+        assert_eq!(parsed.items.len(), 2);
+        assert_eq!(parsed.items[0].quantity, 2);
+        assert_eq!(parsed.items[0].part_number, "83 30 0 401 758");
+        assert_eq!(parsed.items[0].unit_price, Some(1051.62));
+        assert_eq!(parsed.items[1].part_number, "12 11 1 351 564");
+    }
 
     #[test]
     fn parses_all_line_items_of_242511() {
