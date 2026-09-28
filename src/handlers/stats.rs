@@ -12,6 +12,17 @@ use crate::{
     models::{Issue, MaintenanceRecord, Motorcycle},
 };
 
+fn parse_date(date_str: &str) -> Option<NaiveDate> {
+    if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+        return Some(dt.date_naive());
+    }
+    if date_str.len() >= 10 {
+        NaiveDate::parse_from_str(&date_str[0..10], "%Y-%m-%d").ok()
+    } else {
+        None
+    }
+}
+
 fn parse_year(date_str: &str) -> Option<i32> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
         return Some(dt.year());
@@ -139,12 +150,22 @@ pub async fn get_stats(
             .as_ref()
             .and_then(|d| parse_year(d))
             .unwrap_or(start_year);
+        let purchase_day = moto.purchase_date.as_deref().and_then(parse_date);
 
         // Map max ODO per year for this bike
         let mut odo_by_year: HashMap<i32, i64> = HashMap::new();
         odo_by_year.insert(purchase_year - 1, initial_odo); // Baseline
 
-        for m in maintenance.iter().filter(|m| m.motorcycle_id == moto.id) {
+        // Records logged by previous owners predate the purchase and sit below
+        // initialOdo, so they must not feed the yearly distances.
+        let owned_records = maintenance.iter().filter(|m| {
+            m.motorcycle_id == moto.id
+                && match (purchase_day, parse_date(&m.date)) {
+                    (Some(bought), Some(day)) => day >= bought,
+                    _ => true,
+                }
+        });
+        for m in owned_records {
             let odo = m.odo;
             if let Some(y) = parse_year(&m.date) {
                 let current = odo_by_year.get(&y).cloned().unwrap_or(0);
@@ -157,10 +178,17 @@ pub async fn get_stats(
         // Calculate yearly metrics for this bike
         let mut last_odo = initial_odo;
         let mut bike_max_odo = initial_odo;
+        let mut distance_this_year = 0i64;
 
         for y in start_year..=current_year {
             if y >= purchase_year {
-                let max_odo_for_year = odo_by_year.get(&y).cloned().unwrap_or(last_odo);
+                // Clamped so a reading below an earlier year's (typo, late
+                // entry) cannot make a year negative.
+                let max_odo_for_year = odo_by_year
+                    .get(&y)
+                    .cloned()
+                    .unwrap_or(last_odo)
+                    .max(last_odo);
                 let distance = max_odo_for_year - last_odo;
 
                 let yearly_cost = maintenance
@@ -190,6 +218,7 @@ pub async fn get_stats(
 
                 if y == current_year {
                     total_km_this_year += distance;
+                    distance_this_year = distance;
                 }
                 last_odo = max_odo_for_year;
                 if max_odo_for_year > bike_max_odo {
@@ -211,7 +240,7 @@ pub async fn get_stats(
             "status": moto.status,
             "initialOdo": initial_odo,
             "odometer": bike_max_odo,
-            "odometerThisYear": odo_by_year.get(&current_year).map(|&v| v - odo_by_year.get(&(current_year - 1)).cloned().unwrap_or(initial_odo)).unwrap_or(0),
+            "odometerThisYear": distance_this_year,
         }));
     }
 

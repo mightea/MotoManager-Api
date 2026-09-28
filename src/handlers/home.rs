@@ -133,7 +133,8 @@ pub async fn get_home_data(
             .max(max_location_odo)
             .max(manual_odo);
 
-        // Odometer at start of year
+        // Odometer at start of year. Floored at initialOdo so a previous
+        // owner's older reading cannot count toward this year's distance.
         let last_year_odo = moto_maintenance
             .iter()
             .filter(|m| {
@@ -142,8 +143,7 @@ pub async fn get_home_data(
                     .unwrap_or(false)
             })
             .map(|m| m.odo)
-            .max()
-            .unwrap_or(initial_odo);
+            .fold(initial_odo, i64::max);
         let odo_this_year = current_odo - last_year_odo;
 
         if is_active {

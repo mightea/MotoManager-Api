@@ -2,6 +2,7 @@ use axum::{
     body::Body,
     http::{header, Request, StatusCode},
 };
+use chrono::Datelike;
 use moto_manager_api::{
     auth::{password::hash_password, session::create_session},
     build_app,
@@ -163,4 +164,129 @@ async fn test_per_user_averages_zero_without_data() {
     assert_eq!(body["stats"]["global"]["users"], 1);
     assert_eq!(body["avgMotoPerUser"], 0.0);
     assert_eq!(body["avgDocsPerUser"], 0.0);
+}
+
+async fn insert_bike_bought(pool: &sqlx::SqlitePool, purchase_date: &str, initial_odo: i64) -> i64 {
+    sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo, purchaseDate) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("BMW")
+    .bind("R80GS")
+    .bind(1)
+    .bind(initial_odo)
+    .bind(purchase_date)
+    .execute(pool)
+    .await
+    .unwrap()
+    .last_insert_rowid()
+}
+
+async fn insert_service(pool: &sqlx::SqlitePool, motorcycle_id: i64, date: &str, odo: i64) {
+    sqlx::query(
+        "INSERT INTO maintenanceRecords (motorcycleId, type, date, odo) VALUES (?, 'service', ?, ?)",
+    )
+    .bind(motorcycle_id)
+    .bind(date)
+    .bind(odo)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+fn year_distance(body: &Value, year: i64) -> i64 {
+    body["stats"]["yearly"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|y| y["year"] == year)
+        .map(|y| y["distance"].as_i64().unwrap())
+        .unwrap_or_else(|| panic!("no yearly entry for {year}"))
+}
+
+/// Services logged by a previous owner earlier in the purchase year sit below
+/// the odometer at purchase; they must not pull that year negative (#154).
+#[tokio::test]
+async fn test_yearly_distance_ignores_records_before_purchase() {
+    let (app, pool, token) = setup_test_app().await;
+
+    let bike = insert_bike_bought(&pool, "2022-06-01", 12_000).await;
+    insert_service(&pool, bike, "2022-02-01", 10_000).await; // previous owner
+    insert_service(&pool, bike, "2023-05-01", 15_000).await;
+
+    let body = get_stats(app, &token).await;
+
+    assert_eq!(year_distance(&body, 2022), 0);
+    assert_eq!(year_distance(&body, 2023), 3_000);
+    assert_eq!(body["stats"]["overall"]["totalDistance"], 3_000);
+}
+
+/// An odometer reading lower than an earlier year's (typo, late entry) must
+/// not produce a negative year or inflate the following one.
+#[tokio::test]
+async fn test_yearly_distance_never_negative_for_lower_reading() {
+    let (app, pool, token) = setup_test_app().await;
+
+    let bike = insert_bike_bought(&pool, "2021-01-01", 10_000).await;
+    insert_service(&pool, bike, "2022-06-01", 15_000).await;
+    insert_service(&pool, bike, "2023-06-01", 14_000).await;
+    insert_service(&pool, bike, "2024-06-01", 16_000).await;
+
+    let body = get_stats(app, &token).await;
+
+    assert_eq!(year_distance(&body, 2022), 5_000);
+    assert_eq!(year_distance(&body, 2023), 0);
+    assert_eq!(year_distance(&body, 2024), 1_000);
+    let years = body["stats"]["yearly"].as_array().unwrap();
+    assert!(years.iter().all(|y| y["distance"].as_i64().unwrap() >= 0));
+}
+
+/// A bike bought this year whose only reading this year predates the
+/// purchase has not been ridden yet — in the stats and on the dashboard.
+#[tokio::test]
+async fn test_km_this_year_ignores_previous_owner_records() {
+    let (app, pool, token) = setup_test_app().await;
+    let year = chrono::Utc::now().year();
+
+    let fresh = insert_bike_bought(&pool, &format!("{year}-01-02"), 12_000).await;
+    insert_service(&pool, fresh, &format!("{year}-01-01"), 10_000).await;
+
+    let ridden = insert_bike_bought(&pool, &format!("{year}-01-02"), 12_000).await;
+    insert_service(&pool, ridden, &format!("{}-06-01", year - 1), 10_000).await;
+    insert_service(&pool, ridden, &format!("{year}-01-03"), 13_000).await;
+
+    let body = get_stats(app.clone(), &token).await;
+    let this_year = |body: &Value, id: i64| {
+        body["motorcycles"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["id"] == id)
+            .unwrap()["odometerThisYear"]
+            .as_i64()
+            .unwrap()
+    };
+    assert_eq!(this_year(&body, fresh), 0);
+    assert_eq!(this_year(&body, ridden), 1_000);
+    assert_eq!(body["stats"]["totalKmThisYear"], 1_000);
+
+    let response = app
+        .oneshot(auth(
+            Request::builder()
+                .uri("/api/home")
+                .body(Body::empty())
+                .unwrap(),
+            &token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let home: Value = serde_json::from_slice(
+        &axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(this_year(&home, fresh), 0);
+    assert_eq!(this_year(&home, ridden), 1_000);
+    assert_eq!(home["stats"]["totalKmThisYear"], 1_000);
 }
