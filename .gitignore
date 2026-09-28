@@ -32,3 +32,6 @@
 libpdfium.dylib
 *.sqlite.bak
 *.sqlite.bak-*
+
+# Tesseract models (scripts/install-tessdata.sh)
+.tessdata/

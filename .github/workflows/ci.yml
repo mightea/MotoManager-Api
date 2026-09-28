@@ -19,7 +19,10 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev sqlite3 tesseract-ocr tesseract-ocr-deu
+          sudo apt-get install -y pkg-config libssl-dev sqlite3 tesseract-ocr
+          # Same OCR models as the Docker image (the apt ones misread scans).
+          scripts/install-tessdata.sh "$RUNNER_TEMP/tessdata"
+          echo "TESSDATA_PREFIX=$RUNNER_TEMP/tessdata" >> $GITHUB_ENV
       
       - name: Set up database for sqlx macros
         run: |
@@ -54,7 +57,10 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev sqlite3 tesseract-ocr tesseract-ocr-deu
+          sudo apt-get install -y pkg-config libssl-dev sqlite3 tesseract-ocr
+          # Same OCR models as the Docker image (the apt ones misread scans).
+          scripts/install-tessdata.sh "$RUNNER_TEMP/tessdata"
+          echo "TESSDATA_PREFIX=$RUNNER_TEMP/tessdata" >> $GITHUB_ENV
       
       - name: Set up database for sqlx macros
         run: |
@@ -87,7 +93,10 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libssl-dev sqlite3 tesseract-ocr tesseract-ocr-deu
+          sudo apt-get install -y pkg-config libssl-dev sqlite3 tesseract-ocr
+          # Same OCR models as the Docker image (the apt ones misread scans).
+          scripts/install-tessdata.sh "$RUNNER_TEMP/tessdata"
+          echo "TESSDATA_PREFIX=$RUNNER_TEMP/tessdata" >> $GITHUB_ENV
 
       - name: Set up database for sqlx macros
         run: |

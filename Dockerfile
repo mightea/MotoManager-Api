@@ -45,16 +45,21 @@ WORKDIR /app
 #  - libstdc++6: required by libpdfium.so (present in the base image today,
 #    but named explicitly so a slimmer base can't silently break PDF parsing)
 #  - curl: pdfium download below + container healthchecks
-#  - tesseract-ocr (+ German model): OCR for scanned/photographed invoices in
-#    the part import; English ships with the base package
+#  - tesseract-ocr: OCR for scanned/photographed invoices in the part import
+#    (its models are installed separately below)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libssl3 \
     libstdc++6 \
     curl \
     tesseract-ocr \
-    tesseract-ocr-deu \
     && rm -rf /var/lib/apt/lists/*
+
+# Standard (not "fast") German + English models — Debian's packages ship the
+# fast ones, which misread part numbers on scanned invoices.
+COPY scripts/install-tessdata.sh /tmp/install-tessdata.sh
+RUN /tmp/install-tessdata.sh /usr/local/share/tessdata && rm /tmp/install-tessdata.sh
+ENV TESSDATA_PREFIX=/usr/local/share/tessdata
 
 # Download and install PDFium — required for document previews AND the
 # invoice import's text extraction (a missing library is a hard error there).
