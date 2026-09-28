@@ -41,7 +41,7 @@ webauthn-rs = { version = "0.5.5", features = ["danger-allow-state-serialisation
 tower_governor = { version = "0.8", default-features = false, features = ["axum"] }
 base64 = "0.23.1"
 url = "2.5.8"
-pdfium-render = "0.9.3"
+pdfium-render = "0.9.4"
 # Outbound HTTP, used only to fetch part images from allowlisted hosts (BMWBike import).
 # `rustls-no-provider` instead of the default `rustls` feature: the default pulls in
 # aws-lc-rs, which needs cmake and a C toolchain in the builder image. The ring
@@ -59,4 +59,4 @@ flate2 = "1"
 # changed since the last one.
 sha2 = "0.11"
 # MCP server (Streamable HTTP transport, mounted at /mcp). Pure-Rust.
-rmcp = { version = "3.4", features = ["transport-streamable-http-server"] }
+rmcp = { version = "3.5", features = ["transport-streamable-http-server"] }
