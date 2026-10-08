@@ -64,6 +64,9 @@ pub struct CreateTorqueSpecRequest {
     pub variation: Option<f64>,
     pub tool_size: Option<String>,
     pub description: Option<String>,
+    /// Formatted twin of `description` (see migration 054); optional so older
+    /// clients keep posting the previous shape.
+    pub description_markup: Option<String>,
     pub unverified: Option<bool>,
     /// Client-generated idempotency key (UUID).
     pub client_id: Option<String>,
@@ -95,8 +98,8 @@ pub async fn create_torque_spec(
 
     let id = sqlx::query(
         "INSERT INTO torqueSpecs \
-         (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, unverified, createdAt, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, descriptionMarkup, unverified, createdAt, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
     .bind(&body.category)
@@ -106,6 +109,7 @@ pub async fn create_torque_spec(
     .bind(body.variation)
     .bind(&body.tool_size)
     .bind(&body.description)
+    .bind(non_empty(body.description_markup))
     .bind(body.unverified.unwrap_or(false))
     .bind(&now)
     .bind(&body.client_id)
@@ -154,8 +158,8 @@ pub async fn import_torque_specs(
 
         sqlx::query(
             "INSERT INTO torqueSpecs \
-             (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, unverified, createdAt, updatedAt) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (motorcycleId, category, name, torque, torqueEnd, variation, toolSize, description, descriptionMarkup, unverified, createdAt, updatedAt) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(motorcycle_id)
         .bind(&spec.category)
@@ -165,6 +169,7 @@ pub async fn import_torque_specs(
         .bind(spec.variation)
         .bind(&spec.tool_size)
         .bind(&spec.description)
+        .bind(&spec.description_markup)
         .bind(spec.unverified)
         .bind(&now)
         .bind(&now)
@@ -190,7 +195,45 @@ pub struct UpdateTorqueSpecRequest {
     pub variation: Option<f64>,
     pub tool_size: Option<String>,
     pub description: Option<String>,
+    /// Absent = derive from `description` (kept while the plain text is
+    /// unchanged, cleared once an older client edits it); null/empty = clear;
+    /// value = replace.
+    #[serde(default, deserialize_with = "double_option_string")]
+    pub description_markup: Option<Option<String>>,
     pub unverified: Option<bool>,
+}
+
+/// Distinguish "field absent" from "explicit null".
+fn double_option_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize as _;
+    Ok(Some(Option::<String>::deserialize(deserializer)?))
+}
+
+/// Empty markup is stored as NULL so "no formatting" has one representation.
+fn non_empty(value: Option<String>) -> Option<String> {
+    value.filter(|v| !v.trim().is_empty())
+}
+
+/// Resolve the stored markup for an update. The plain `description` is the
+/// compatibility surface older iOS builds read and write; markup from a newer
+/// client wins when sent, and silently expires when the plain text moved on
+/// without it (an older build edited the entry).
+fn resolve_description_markup(
+    sent_markup: Option<Option<String>>,
+    sent_description: Option<&String>,
+    existing_description: Option<&String>,
+    existing_markup: Option<String>,
+) -> Option<String> {
+    match sent_markup {
+        Some(markup) => non_empty(markup),
+        None => match sent_description {
+            Some(new) if Some(new) != existing_description => None,
+            _ => existing_markup,
+        },
+    }
 }
 
 pub async fn update_torque_spec(
@@ -216,6 +259,12 @@ pub async fn update_torque_spec(
     let torque_end = body.torque_end.or(existing.torque_end);
     let variation = body.variation.or(existing.variation);
     let tool_size = body.tool_size.or(existing.tool_size);
+    let description_markup = resolve_description_markup(
+        body.description_markup,
+        body.description.as_ref(),
+        existing.description.as_ref(),
+        existing.description_markup,
+    );
     let description = body.description.or(existing.description);
     let unverified = body.unverified.unwrap_or(existing.unverified);
 
@@ -224,7 +273,7 @@ pub async fn update_torque_spec(
     sqlx::query(
         "UPDATE torqueSpecs SET \
          category = ?, name = ?, torque = ?, torqueEnd = ?, variation = ?, \
-         toolSize = ?, description = ?, unverified = ?, updatedAt = ? \
+         toolSize = ?, description = ?, descriptionMarkup = ?, unverified = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&category)
@@ -234,6 +283,7 @@ pub async fn update_torque_spec(
     .bind(variation)
     .bind(&tool_size)
     .bind(&description)
+    .bind(&description_markup)
     .bind(unverified)
     .bind(&now)
     .bind(tid)

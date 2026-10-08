@@ -486,7 +486,7 @@ impl McpServer {
 
     #[tool(
         name = "list_torque_specs",
-        description = "Torque specifications recorded for one motorcycle (component, value in Nm, notes).",
+        description = "Torque specifications recorded for one motorcycle (component, value in Nm, notes). `description` is plain text; `descriptionMarkup` is its formatted twin (**bold**, *italic*, [red]/[yellow]/[blue] tags) when present.",
         annotations(title = "List torque specs", read_only_hint = true)
     )]
     async fn list_torque_specs(

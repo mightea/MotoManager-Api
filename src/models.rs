@@ -268,6 +268,9 @@ pub struct TorqueSpec {
     pub variation: Option<f64>,
     pub tool_size: Option<String>,
     pub description: Option<String>,
+    /// Formatted twin of `description` (see migration 054). Plain `description`
+    /// is what older clients read; this is only valid while it strips to it.
+    pub description_markup: Option<String>,
     /// Values from an uncertain source; flagged for review (see migration 031).
     pub unverified: bool,
     pub created_at: String,
