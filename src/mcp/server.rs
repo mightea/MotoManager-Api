@@ -361,7 +361,7 @@ impl McpServer {
 
     #[tool(
         name = "list_maintenance",
-        description = "Maintenance history of one motorcycle, newest first: services, fluid changes, tires, brakes, repairs, inspections and fuel stops with odometer, cost and details.",
+        description = "Maintenance history of one motorcycle, newest first: services, fluid changes, tires, brakes, repairs, inspections and fuel stops with odometer, cost and details. `description` is plain text; `descriptionMarkup` is its formatted twin (**bold**, *italic*, [red]/[yellow]/[blue] tags) when present.",
         annotations(title = "List maintenance records", read_only_hint = true)
     )]
     async fn list_maintenance(
@@ -400,7 +400,7 @@ impl McpServer {
 
     #[tool(
         name = "list_issues",
-        description = "Open issues (known defects, to-dos) across all motorcycles or for one motorcycle, with priority, status and the odometer reading when noticed.",
+        description = "Open issues (known defects, to-dos) across all motorcycles or for one motorcycle, with priority, status and the odometer reading when noticed. `description` is plain text; `descriptionMarkup` is its formatted twin when present.",
         annotations(title = "List issues", read_only_hint = true)
     )]
     async fn list_issues(
@@ -435,7 +435,7 @@ impl McpServer {
 
     #[tool(
         name = "list_parts",
-        description = "Parts inventory: part numbers, names, manufacturers and the quantity on hand (stock minus consumption). Optionally filtered by motorcycle compatibility, a search term, or out-of-stock only.",
+        description = "Parts inventory: part numbers, names, manufacturers and the quantity on hand (stock minus consumption). Optionally filtered by motorcycle compatibility, a search term, or out-of-stock only. `description` is plain text; `descriptionMarkup` is its formatted twin when present.",
         annotations(title = "List parts", read_only_hint = true)
     )]
     async fn list_parts(
@@ -476,7 +476,7 @@ impl McpServer {
 
     #[tool(
         name = "list_expenses",
-        description = "Recurring and one-off fleet expenses (insurance, tax, vignette, parking, gear) with amount, currency, interval and the motorcycles they are attributed to.",
+        description = "Recurring and one-off fleet expenses (insurance, tax, vignette, parking, gear) with amount, currency, interval and the motorcycles they are attributed to. `description` is plain text; `descriptionMarkup` is its formatted twin when present.",
         annotations(title = "List expenses", read_only_hint = true)
     )]
     async fn list_expenses(&self, Extension(p): Extension<McpPrincipal>) -> ToolResult {
@@ -539,6 +539,7 @@ impl McpServer {
             normalized_cost,
             currency,
             description: v::text("description", args.description.as_deref(), v::LONG_TEXT)?,
+            description_markup: None,
             brand: v::text("brand", args.brand.as_deref(), v::SHORT_TEXT)?,
             model: v::text("model", args.model.as_deref(), v::SHORT_TEXT)?,
             tire_position: v::optional_one_of(
@@ -624,6 +625,7 @@ impl McpServer {
             normalized_cost,
             currency,
             description: v::text("description", args.description.as_deref(), v::LONG_TEXT)?,
+            description_markup: None,
             brand: None,
             model: None,
             tire_position: None,
@@ -677,6 +679,7 @@ impl McpServer {
             odo: v::odo(args.odo)?,
             title: v::required_text("title", &args.title, v::SHORT_TEXT)?,
             description: v::text("description", args.description.as_deref(), v::LONG_TEXT)?,
+            description_markup: None,
             priority: v::optional_one_of(
                 "priority",
                 args.priority.as_deref(),
@@ -718,6 +721,7 @@ impl McpServer {
             odo: None,
             title: None,
             description: None,
+            description_markup: None,
             priority: None,
             status: Some(v::one_of("status", &args.status, v::ISSUE_STATUSES)?),
             date: None,
@@ -774,6 +778,7 @@ impl McpServer {
                 v::EXPENSE_CATEGORIES,
             )?),
             description: v::text("description", args.description.as_deref(), v::SHORT_TEXT)?,
+            description_markup: None,
             interval_months,
             motorcycle_ids,
         };
@@ -802,6 +807,7 @@ impl McpServer {
             name: v::required_text("name", &args.name, v::SHORT_TEXT)?,
             manufacturer: v::text("manufacturer", args.manufacturer.as_deref(), v::SHORT_TEXT)?,
             description: v::text("description", args.description.as_deref(), v::LONG_TEXT)?,
+            description_markup: None,
             // Never publish to the shared catalogue from an AI client.
             is_public: Some(false),
             series_ids: None,
@@ -847,6 +853,7 @@ impl McpServer {
             },
             storage_location_id: None,
             notes: v::text("notes", args.notes.as_deref(), v::SHORT_TEXT)?,
+            notes_markup: None,
             is_used: args.is_used,
             client_id: v::idempotency_key(args.idempotency_key.as_deref())?,
         };

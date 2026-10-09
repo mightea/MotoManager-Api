@@ -19,6 +19,7 @@ use crate::{
         model_series::verify_series_accessible,
         motorcycles::{format_image_url, save_image},
     },
+    markup::{double_option_string, non_empty, resolve_markup},
     models::{
         Part, PartConsumption, PartConsumptionWithContext, PartStock, PartWithMeta, PublicPart,
     },
@@ -355,6 +356,9 @@ pub struct CreatePartRequest {
     pub name: String,
     pub manufacturer: Option<String>,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055); optional so older
+    /// clients keep posting the previous shape.
+    pub description_markup: Option<String>,
     pub is_public: Option<bool>,
     pub series_ids: Option<Vec<i64>>,
     /// BMW part number an aftermarket part corresponds to.
@@ -420,15 +424,16 @@ pub async fn create_part(
 
     let id = sqlx::query(
         "INSERT INTO parts \
-         (userId, partNumber, name, manufacturer, description, isPublic, oemPartNumber, \
+         (userId, partNumber, name, manufacturer, description, descriptionMarkup, isPublic, oemPartNumber, \
           clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(user.id)
     .bind(&part_number)
     .bind(&name)
     .bind(&manufacturer)
     .bind(&body.description)
+    .bind(non_empty(body.description_markup))
     .bind(body.is_public.unwrap_or(false))
     .bind(
         body.oem_part_number
@@ -467,6 +472,10 @@ pub struct UpdatePartRequest {
     pub name: Option<String>,
     pub manufacturer: Option<String>,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055): absent = derive from
+    /// the plain text, null/empty = clear, value = replace.
+    #[serde(default, deserialize_with = "double_option_string")]
+    pub description_markup: Option<Option<String>>,
     pub is_public: Option<bool>,
     /// Full replacement of the fitment set when present.
     pub series_ids: Option<Vec<i64>>,
@@ -492,7 +501,13 @@ pub async fn update_part(
     let part_number = body.part_number.unwrap_or(existing.part_number);
     let name = body.name.unwrap_or(existing.name);
     let manufacturer = body.manufacturer.unwrap_or(existing.manufacturer);
-    let description = body.description.or(existing.description);
+    let description = body.description.or(existing.description.clone());
+    let description_markup = resolve_markup(
+        body.description_markup,
+        description.as_deref(),
+        existing.description.as_deref(),
+        existing.description_markup,
+    );
     let is_public = body.is_public.unwrap_or(existing.is_public);
     let oem_part_number = match &body.oem_part_number {
         Some(raw) => normalize_oem_part_number(raw),
@@ -524,12 +539,13 @@ pub async fn update_part(
 
     sqlx::query(
         "UPDATE parts SET partNumber = ?, name = ?, manufacturer = ?, description = ?, \
-         isPublic = ?, oemPartNumber = ?, updatedAt = ? WHERE id = ?",
+         descriptionMarkup = ?, isPublic = ?, oemPartNumber = ?, updatedAt = ? WHERE id = ?",
     )
     .bind(&part_number)
     .bind(&name)
     .bind(&manufacturer)
     .bind(&description)
+    .bind(&description_markup)
     .bind(is_public)
     .bind(&oem_part_number)
     .bind(&now)
@@ -887,7 +903,7 @@ pub async fn list_public_parts(
     // Catalog data of every other user's part is visible; availability and
     // stock detail are added below ONLY for parts marked public.
     let mut query_str = "SELECT p.id, p.partNumber, p.name, p.manufacturer, p.description, \
-         p.image, p.oemPartNumber, p.isPublic, u.username as ownerName, \
+         p.descriptionMarkup, p.image, p.oemPartNumber, p.isPublic, u.username as ownerName, \
          COALESCE((SELECT SUM(s.quantity) FROM partStocks s \
                    WHERE s.partId = p.id AND s.deletedAt IS NULL), 0) \
        - COALESCE((SELECT SUM(c.quantity) FROM partConsumptions c \
@@ -1019,6 +1035,7 @@ pub async fn list_public_parts(
                 name: row.get("name"),
                 manufacturer: row.get("manufacturer"),
                 description: row.get("description"),
+                description_markup: row.get("descriptionMarkup"),
                 image: format_image_url(row.get("image")),
                 oem_part_number: row.get("oemPartNumber"),
                 series_ids: series_by_part.get(&id).cloned().unwrap_or_default(),
@@ -1108,6 +1125,9 @@ pub struct CreatePartStockRequest {
     pub purchase_date: Option<String>,
     pub storage_location_id: Option<i64>,
     pub notes: Option<String>,
+    /// Formatted twin of `notes` (migration 055); optional so older clients
+    /// keep posting the previous shape.
+    pub notes_markup: Option<String>,
     pub is_used: Option<bool>,
     /// Client-generated idempotency key (UUID).
     pub client_id: Option<String>,
@@ -1148,8 +1168,8 @@ pub async fn create_part_stock(
     let id = sqlx::query(
         "INSERT INTO partStocks \
          (partId, quantity, price, currency, normalizedPrice, purchaseDate, \
-          storageLocationId, notes, isUsed, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          storageLocationId, notes, notesMarkup, isUsed, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(body.part_id)
     .bind(quantity)
@@ -1159,6 +1179,7 @@ pub async fn create_part_stock(
     .bind(&body.purchase_date)
     .bind(body.storage_location_id)
     .bind(&body.notes)
+    .bind(non_empty(body.notes_markup))
     .bind(body.is_used.unwrap_or(false))
     .bind(&body.client_id)
     .bind(&now)
@@ -1184,6 +1205,10 @@ pub struct UpdatePartStockRequest {
     pub purchase_date: Option<String>,
     pub storage_location_id: Option<i64>,
     pub notes: Option<String>,
+    /// Formatted twin of `notes` (migration 055): absent = derive from the
+    /// plain text, null/empty = clear, value = replace.
+    #[serde(default, deserialize_with = "double_option_string")]
+    pub notes_markup: Option<Option<String>>,
     pub is_used: Option<bool>,
 }
 
@@ -1217,13 +1242,19 @@ pub async fn update_part_stock(
     let normalized_price = body.normalized_price.or(existing.normalized_price);
     let purchase_date = body.purchase_date.or(existing.purchase_date);
     let storage_location_id = body.storage_location_id.or(existing.storage_location_id);
-    let notes = body.notes.or(existing.notes);
+    let notes = body.notes.or(existing.notes.clone());
+    let notes_markup = resolve_markup(
+        body.notes_markup,
+        notes.as_deref(),
+        existing.notes.as_deref(),
+        existing.notes_markup,
+    );
     let is_used = body.is_used.unwrap_or(existing.is_used);
 
     let now = sync_now();
     sqlx::query(
         "UPDATE partStocks SET quantity = ?, price = ?, currency = ?, normalizedPrice = ?, \
-         purchaseDate = ?, storageLocationId = ?, notes = ?, isUsed = ?, updatedAt = ? WHERE id = ?",
+         purchaseDate = ?, storageLocationId = ?, notes = ?, notesMarkup = ?, isUsed = ?, updatedAt = ? WHERE id = ?",
     )
     .bind(quantity)
     .bind(price)
@@ -1232,6 +1263,7 @@ pub async fn update_part_stock(
     .bind(&purchase_date)
     .bind(storage_location_id)
     .bind(&notes)
+    .bind(&notes_markup)
     .bind(is_used)
     .bind(&now)
     .bind(id)

@@ -11,6 +11,7 @@ use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::{maintenance::sync_now, motorcycles::verify_motorcycle_ownership},
+    markup::{double_option_string, non_empty, resolve_markup},
     models::TorqueSpec,
 };
 
@@ -203,39 +204,6 @@ pub struct UpdateTorqueSpecRequest {
     pub unverified: Option<bool>,
 }
 
-/// Distinguish "field absent" from "explicit null".
-fn double_option_string<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::Deserialize as _;
-    Ok(Some(Option::<String>::deserialize(deserializer)?))
-}
-
-/// Empty markup is stored as NULL so "no formatting" has one representation.
-fn non_empty(value: Option<String>) -> Option<String> {
-    value.filter(|v| !v.trim().is_empty())
-}
-
-/// Resolve the stored markup for an update. The plain `description` is the
-/// compatibility surface older iOS builds read and write; markup from a newer
-/// client wins when sent, and silently expires when the plain text moved on
-/// without it (an older build edited the entry).
-fn resolve_description_markup(
-    sent_markup: Option<Option<String>>,
-    sent_description: Option<&String>,
-    existing_description: Option<&String>,
-    existing_markup: Option<String>,
-) -> Option<String> {
-    match sent_markup {
-        Some(markup) => non_empty(markup),
-        None => match sent_description {
-            Some(new) if Some(new) != existing_description => None,
-            _ => existing_markup,
-        },
-    }
-}
-
 pub async fn update_torque_spec(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
@@ -259,13 +227,13 @@ pub async fn update_torque_spec(
     let torque_end = body.torque_end.or(existing.torque_end);
     let variation = body.variation.or(existing.variation);
     let tool_size = body.tool_size.or(existing.tool_size);
-    let description_markup = resolve_description_markup(
+    let description = body.description.or(existing.description.clone());
+    let description_markup = resolve_markup(
         body.description_markup,
-        body.description.as_ref(),
-        existing.description.as_ref(),
+        description.as_deref(),
+        existing.description.as_deref(),
         existing.description_markup,
     );
-    let description = body.description.or(existing.description);
     let unverified = body.unverified.unwrap_or(existing.unverified);
 
     let now = sync_now();

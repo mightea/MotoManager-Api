@@ -12,6 +12,7 @@ use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::{maintenance::sync_now, motorcycles::verify_motorcycle_ownership},
+    markup::{double_option_string, non_empty, resolve_markup},
     models::Issue,
 };
 
@@ -58,6 +59,9 @@ pub struct CreateIssueRequest {
     pub odo: i64,
     pub title: String,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055); optional so older
+    /// clients keep posting the previous shape.
+    pub description_markup: Option<String>,
     pub priority: Option<String>,
     pub status: Option<String>,
     pub date: Option<String>,
@@ -106,13 +110,14 @@ pub async fn create_issue(
     let now = sync_now();
 
     let id = sqlx::query(
-        "INSERT INTO issues (motorcycleId, odo, title, description, priority, status, date, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO issues (motorcycleId, odo, title, description, descriptionMarkup, priority, status, date, clientId, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
     .bind(body.odo)
     .bind(&title)
     .bind(&description)
+    .bind(non_empty(body.description_markup))
     .bind(&priority)
     .bind(&status)
     .bind(&date)
@@ -131,6 +136,7 @@ pub async fn create_issue(
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateIssueRequest {
     pub odo: Option<i64>,
     pub title: Option<String>,
@@ -138,6 +144,10 @@ pub struct UpdateIssueRequest {
     // explicitly set to null" — the latter clears description.
     #[serde(default, deserialize_with = "deserialize_optional_field")]
     pub description: Option<Option<String>>,
+    /// Formatted twin of `description` (migration 055): absent = derive from
+    /// the plain text, null/empty = clear, value = replace.
+    #[serde(default, deserialize_with = "double_option_string")]
+    pub description_markup: Option<Option<String>>,
     pub priority: Option<String>,
     pub status: Option<String>,
     pub date: Option<String>,
@@ -183,20 +193,27 @@ pub async fn update_issue(
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string),
-        None => existing.description,
+        None => existing.description.clone(),
     };
+    let description_markup = resolve_markup(
+        body.description_markup,
+        description.as_deref(),
+        existing.description.as_deref(),
+        existing.description_markup,
+    );
     let priority = body.priority.unwrap_or(existing.priority);
     let status = body.status.unwrap_or(existing.status);
     let date = body.date.unwrap_or(existing.date);
     let now = sync_now();
 
     sqlx::query(
-        "UPDATE issues SET odo = ?, title = ?, description = ?, priority = ?, status = ?, date = ?, updatedAt = ? \
+        "UPDATE issues SET odo = ?, title = ?, description = ?, descriptionMarkup = ?, priority = ?, status = ?, date = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(odo)
     .bind(&title)
     .bind(&description)
+    .bind(&description_markup)
     .bind(&priority)
     .bind(&status)
     .bind(&date)

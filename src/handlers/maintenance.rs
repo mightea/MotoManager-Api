@@ -12,6 +12,7 @@ use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::{locations::verify_location_ownership, motorcycles::verify_motorcycle_ownership},
+    markup::{double_option_string, non_empty, resolve_markup},
     models::MaintenanceRecord,
 };
 
@@ -141,6 +142,11 @@ pub struct MaintenanceRequest {
     pub normalized_cost: Option<f64>,
     pub currency: Option<String>,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055). Absent = derive from
+    /// `description` (kept while the plain text is unchanged, cleared once an
+    /// older client edits it); null/empty = clear; value = replace.
+    #[serde(default, deserialize_with = "double_option_string")]
+    pub description_markup: Option<Option<String>>,
     pub brand: Option<String>,
     pub model: Option<String>,
     pub tire_position: Option<String>,
@@ -214,12 +220,12 @@ pub async fn create_maintenance(
 
     let id = sqlx::query(
         "INSERT INTO maintenanceRecords \
-         (date, odo, motorcycleId, cost, normalizedCost, currency, description, type, \
+         (date, odo, motorcycleId, cost, normalizedCost, currency, description, descriptionMarkup, type, \
           brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
           oilType, locationId, fuelType, fuelAmount, pricePerUnit, \
           fuelConsumption, tripDistance, fuelAdditiveAdded, leadSubstituteAdded, \
           parentId, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&date)
     .bind(odo)
@@ -228,6 +234,7 @@ pub async fn create_maintenance(
     .bind(body.normalized_cost)
     .bind(&body.currency)
     .bind(&body.description)
+    .bind(non_empty(body.description_markup.flatten()))
     .bind(&record_type)
     .bind(&body.brand)
     .bind(&body.model)
@@ -348,7 +355,13 @@ pub async fn update_maintenance(
     let cost = body.cost.or(existing.cost);
     let normalized_cost = body.normalized_cost.or(existing.normalized_cost);
     let currency: Option<String> = body.currency.or(existing.currency);
-    let description: Option<String> = body.description.or(existing.description);
+    let description: Option<String> = body.description.or(existing.description.clone());
+    let description_markup = resolve_markup(
+        body.description_markup,
+        description.as_deref(),
+        existing.description.as_deref(),
+        existing.description_markup,
+    );
     let brand: Option<String> = body.brand.or(existing.brand);
     let model: Option<String> = body.model.or(existing.model);
     let tire_position: Option<String> = body.tire_position.or(existing.tire_position);
@@ -378,7 +391,7 @@ pub async fn update_maintenance(
     sqlx::query(
         "UPDATE maintenanceRecords SET \
          date = ?, odo = ?, cost = ?, normalizedCost = ?, currency = ?, description = ?, \
-         type = ?, brand = ?, model = ?, tirePosition = ?, tireSize = ?, dotCode = ?, \
+         descriptionMarkup = ?, type = ?, brand = ?, model = ?, tirePosition = ?, tireSize = ?, dotCode = ?, \
          batteryType = ?, fluidType = ?, viscosity = ?, oilType = ?, \
          locationId = ?, fuelType = ?, fuelAmount = ?, pricePerUnit = ?, \
          fuelConsumption = ?, tripDistance = ?, fuelAdditiveAdded = ?, \
@@ -391,6 +404,7 @@ pub async fn update_maintenance(
     .bind(normalized_cost)
     .bind(&currency)
     .bind(&description)
+    .bind(&description_markup)
     .bind(&record_type)
     .bind(&brand)
     .bind(&model)

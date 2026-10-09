@@ -12,6 +12,7 @@ use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::motorcycles::verify_motorcycle_ownership,
+    markup::{double_option_string, non_empty, resolve_markup},
     models::Expense,
 };
 
@@ -23,6 +24,10 @@ pub struct ExpenseRequest {
     pub currency: Option<String>,
     pub category: Option<String>,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055): absent = derive from
+    /// the plain text, null/empty = clear, value = replace.
+    #[serde(default, deserialize_with = "double_option_string")]
+    pub description_markup: Option<Option<String>>,
     pub interval_months: Option<i64>,
     pub motorcycle_ids: Vec<i64>,
 }
@@ -98,8 +103,8 @@ pub async fn create_expense(
     let mut tx = pool.begin().await?;
 
     let id = sqlx::query(
-        "INSERT INTO expenses (userId, date, amount, currency, category, description, intervalMonths) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO expenses (userId, date, amount, currency, category, description, descriptionMarkup, intervalMonths) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(user.id)
     .bind(&date)
@@ -107,6 +112,7 @@ pub async fn create_expense(
     .bind(&currency)
     .bind(&category)
     .bind(&body.description)
+    .bind(non_empty(body.description_markup.flatten()))
     .bind(body.interval_months)
     .execute(&mut *tx)
     .await?
@@ -150,7 +156,13 @@ pub async fn update_expense(
     let amount = body.amount.unwrap_or(existing.amount);
     let currency = body.currency.unwrap_or(existing.currency);
     let category = body.category.unwrap_or(existing.category);
-    let description = body.description.or(existing.description);
+    let description = body.description.or(existing.description.clone());
+    let description_markup = resolve_markup(
+        body.description_markup,
+        description.as_deref(),
+        existing.description.as_deref(),
+        existing.description_markup,
+    );
     let interval_months = body.interval_months.or(existing.interval_months);
     for mid in &body.motorcycle_ids {
         verify_motorcycle_ownership(&pool, *mid, user.id).await?;
@@ -159,13 +171,14 @@ pub async fn update_expense(
     let mut tx = pool.begin().await?;
 
     sqlx::query(
-        "UPDATE expenses SET date = ?, amount = ?, currency = ?, category = ?, description = ?, intervalMonths = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?",
+        "UPDATE expenses SET date = ?, amount = ?, currency = ?, category = ?, description = ?, descriptionMarkup = ?, intervalMonths = ?, updatedAt = CURRENT_TIMESTAMP WHERE id = ?",
     )
     .bind(date)
     .bind(amount)
     .bind(currency)
     .bind(category)
     .bind(description)
+    .bind(description_markup)
     .bind(interval_months)
     .bind(id)
     .execute(&mut *tx)

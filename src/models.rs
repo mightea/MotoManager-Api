@@ -168,6 +168,9 @@ pub struct MaintenanceRecord {
     pub normalized_cost: Option<f64>,
     pub currency: Option<String>,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055): same text with **bold**,
+    /// *italic* and [red]/[yellow]/[blue] tags; NULL when unformatted.
+    pub description_markup: Option<String>,
     #[serde(rename = "type")]
     #[sqlx(rename = "type")]
     pub record_type: String,
@@ -208,6 +211,9 @@ pub struct Issue {
     pub odo: i64,
     pub title: String,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055): same text with **bold**,
+    /// *italic* and [red]/[yellow]/[blue] tags; NULL when unformatted.
+    pub description_markup: Option<String>,
     pub priority: String,
     pub status: String,
     pub date: String,
@@ -408,6 +414,9 @@ pub struct PreviousOwner {
     pub phone_number: Option<String>,
     pub email: Option<String>,
     pub comments: Option<String>,
+    /// Formatted twin of `comments` (migration 055): same text with **bold**,
+    /// *italic* and [red]/[yellow]/[blue] tags; NULL when unformatted.
+    pub comments_markup: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -488,6 +497,9 @@ pub struct Part {
     pub name: String,
     pub manufacturer: String,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055): same text with **bold**,
+    /// *italic* and [red]/[yellow]/[blue] tags; NULL when unformatted.
+    pub description_markup: Option<String>,
     pub is_public: bool,
     pub image: Option<String>,
     /// BMW part number this (aftermarket) part corresponds to (migration 053).
@@ -524,6 +536,9 @@ pub struct PartStock {
     pub purchase_date: Option<String>,
     pub storage_location_id: Option<i64>,
     pub notes: Option<String>,
+    /// Formatted twin of `notes` (migration 055): same text with **bold**,
+    /// *italic* and [red]/[yellow]/[blue] tags; NULL when unformatted.
+    pub notes_markup: Option<String>,
     /// Used/salvaged piece (e.g. pulled from a donor motorcycle).
     pub is_used: bool,
     pub created_at: String,
@@ -583,6 +598,7 @@ pub struct PublicPart {
     pub name: String,
     pub manufacturer: String,
     pub description: Option<String>,
+    pub description_markup: Option<String>,
     pub image: Option<String>,
     pub oem_part_number: Option<String>,
     pub series_ids: Vec<i64>,
@@ -618,6 +634,9 @@ pub struct Expense {
     pub currency: String,
     pub category: String,
     pub description: Option<String>,
+    /// Formatted twin of `description` (migration 055): same text with **bold**,
+    /// *italic* and [red]/[yellow]/[blue] tags; NULL when unformatted.
+    pub description_markup: Option<String>,
     pub interval_months: Option<i64>,
     pub created_at: String,
     pub updated_at: String,

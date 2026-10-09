@@ -3,6 +3,7 @@ pub mod backup;
 pub mod config;
 pub mod error;
 pub mod handlers;
+pub mod markup;
 pub mod mcp;
 pub mod models;
 pub mod oauth;

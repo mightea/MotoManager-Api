@@ -13,6 +13,7 @@ use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::motorcycles::verify_motorcycle_ownership,
+    markup::{double_option_string, non_empty, resolve_markup},
     models::PreviousOwner,
 };
 
@@ -46,6 +47,9 @@ pub struct CreatePreviousOwnerRequest {
     pub phone_number: Option<String>,
     pub email: Option<String>,
     pub comments: Option<String>,
+    /// Formatted twin of `comments` (migration 055); optional so older
+    /// clients keep posting the previous shape.
+    pub comments_markup: Option<String>,
 }
 
 pub async fn create_previous_owner(
@@ -69,8 +73,8 @@ pub async fn create_previous_owner(
     let id = sqlx::query(
         "INSERT INTO previousOwners \
          (motorcycleId, name, surname, purchaseDate, sortOrder, address, city, postcode, country, \
-          phoneNumber, email, comments, createdAt, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          phoneNumber, email, comments, commentsMarkup, createdAt, updatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
     .bind(&body.name)
@@ -84,6 +88,7 @@ pub async fn create_previous_owner(
     .bind(&body.phone_number)
     .bind(&body.email)
     .bind(&body.comments)
+    .bind(non_empty(body.comments_markup))
     .bind(&now)
     .bind(&now)
     .execute(&mut *tx)
@@ -113,6 +118,10 @@ pub struct UpdatePreviousOwnerRequest {
     pub phone_number: Option<String>,
     pub email: Option<String>,
     pub comments: Option<String>,
+    /// Formatted twin of `comments` (migration 055): absent = derive from the
+    /// plain text, null/empty = clear, value = replace.
+    #[serde(default, deserialize_with = "double_option_string")]
+    pub comments_markup: Option<Option<String>>,
 }
 
 pub async fn update_previous_owner(
@@ -145,13 +154,19 @@ pub async fn update_previous_owner(
     let country = body.country.or(existing.country);
     let phone_number = body.phone_number.or(existing.phone_number);
     let email = body.email.or(existing.email);
-    let comments = body.comments.or(existing.comments);
+    let comments = body.comments.or(existing.comments.clone());
+    let comments_markup = resolve_markup(
+        body.comments_markup,
+        comments.as_deref(),
+        existing.comments.as_deref(),
+        existing.comments_markup,
+    );
     let now = Utc::now().to_rfc3339();
 
     sqlx::query(
         "UPDATE previousOwners SET \
          name = ?, surname = ?, purchaseDate = ?, address = ?, city = ?, postcode = ?, \
-         country = ?, phoneNumber = ?, email = ?, comments = ?, updatedAt = ? \
+         country = ?, phoneNumber = ?, email = ?, comments = ?, commentsMarkup = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&name)
@@ -164,6 +179,7 @@ pub async fn update_previous_owner(
     .bind(&phone_number)
     .bind(&email)
     .bind(&comments)
+    .bind(&comments_markup)
     .bind(&now)
     .bind(oid)
     .execute(&pool)
