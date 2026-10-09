@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.23.0](https://github.com/mightea/MotoManager-Api/compare/v0.22.0...v0.23.0) (2026-10-09)
+
+
+### Features
+
+* **markup:** formatted twins for the remaining free-text fields ([9257a83](https://github.com/mightea/MotoManager-Api/commit/9257a833341e9e4acb77b413e6ba8324555775f0))
+* **torque-specs:** formatted notes via descriptionMarkup ([98cbd75](https://github.com/mightea/MotoManager-Api/commit/98cbd75e1f5f326a57cc26c5f84591a1e71904d4))
+
 ## [0.22.0](https://github.com/mightea/MotoManager-Api/compare/v0.21.0...v0.22.0) (2026-09-28)
 
 
