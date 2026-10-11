@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/mightea/MotoManager-Api/compare/v0.23.0...v0.24.0) (2026-10-11)
+
+
+### Features
+
+* trip analytics endpoint and riding-summary MCP tool ([7e39beb](https://github.com/mightea/MotoManager-Api/commit/7e39bebacd8375a299df94159579d45f1552cf8c))
+
 ## [0.23.0](https://github.com/mightea/MotoManager-Api/compare/v0.22.0...v0.23.0) (2026-10-09)
 
 
