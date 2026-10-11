@@ -290,3 +290,25 @@ async fn test_km_this_year_ignores_previous_owner_records() {
     assert_eq!(this_year(&home, ridden), 1_000);
     assert_eq!(home["stats"]["totalKmThisYear"], 1_000);
 }
+
+/// A fleet whose only bike was bought in the current year must still produce
+/// a usable yearly series (one entry, correct totals, chart maxima and top rider).
+#[tokio::test]
+async fn test_bike_bought_this_year_renders_stats() {
+    let (app, pool, token) = setup_test_app().await;
+    let year = chrono::Utc::now().year();
+
+    let bike = insert_bike_bought(&pool, &format!("{year}-03-01"), 10_000).await;
+    insert_service(&pool, bike, &format!("{year}-06-01"), 12_000).await;
+
+    let body = get_stats(app, &token).await;
+
+    let yearly = body["stats"]["yearly"].as_array().unwrap();
+    assert_eq!(yearly.len(), 1);
+    assert_eq!(year_distance(&body, year as i64), 2_000);
+    assert_eq!(yearly[0]["motorcycleCount"], 1);
+    assert_eq!(body["stats"]["overall"]["maxYearlyDistance"], 2_000);
+    assert_eq!(body["stats"]["overall"]["maxYearlyCount"], 1);
+    assert_eq!(body["stats"]["totalKmThisYear"], 2_000);
+    assert_eq!(body["stats"]["topRider"]["id"], bike);
+}
