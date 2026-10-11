@@ -572,7 +572,9 @@ async fn tools_only_see_the_token_owners_data_even_for_admins() {
         .map(|t| t["name"].as_str().unwrap())
         .collect();
     assert!(
-        names.contains(&"list_motorcycles") && names.contains(&"log_maintenance"),
+        names.contains(&"list_motorcycles")
+            && names.contains(&"log_maintenance")
+            && names.contains(&"get_riding_summary"),
         "{names:?}"
     );
     assert!(
@@ -587,6 +589,87 @@ async fn tools_only_see_the_token_owners_data_even_for_admins() {
             "every tool declares readOnlyHint: {tool}"
         );
     }
+}
+
+// MARK: - Riding summary
+
+#[tokio::test]
+async fn riding_summary_is_read_only_and_filters_by_year() {
+    let env = setup().await;
+    let bike = create_motorcycle(&env.pool, env.alice_id, "BMW", "R1150GS").await;
+    let home: i64 = sqlx::query(
+        "INSERT INTO locations (name, type, latitude, longitude, countryCode, userId, createdAt) \
+         VALUES ('Garage', 'storage', 47.3769, 8.5417, 'CH', ?, '2024-01-01T00:00:00Z')",
+    )
+    .bind(env.alice_id)
+    .execute(&env.pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let milan: i64 = sqlx::query(
+        "INSERT INTO locations (name, type, latitude, longitude, countryCode, userId, createdAt) \
+         VALUES ('Milano', 'fuel_station', 45.4642, 9.19, 'IT', ?, '2024-01-01T00:00:00Z')",
+    )
+    .bind(env.alice_id)
+    .execute(&env.pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    for (date, odo, loc) in [
+        ("2023-08-01", 100, home),
+        ("2024-06-01", 1000, home),
+        ("2024-06-02", 1250, milan),
+        ("2024-06-04", 1500, home),
+    ] {
+        sqlx::query(
+            "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type, fuelAmount, cost, locationId) \
+             VALUES (?, ?, ?, 'fuel', 12.0, 24.0, ?)",
+        )
+        .bind(date)
+        .bind(odo)
+        .bind(bike)
+        .bind(loc)
+        .execute(&env.pool)
+        .await
+        .unwrap();
+    }
+
+    let read_token = mint_token(&env, &env.alice_session, "reader", "read").await;
+    let summary = tool_json(
+        &call_tool(
+            &env,
+            &read_token,
+            "get_riding_summary",
+            json!({ "year": 2024 }),
+        )
+        .await,
+    );
+    assert_eq!(summary["year"], 2024);
+    assert_eq!(summary["home"]["locationId"], home);
+    assert_eq!(summary["years"].as_array().unwrap().len(), 1);
+    // 100→1000 (ends in 2024) + 1000→1250 + 1250→1500.
+    assert_eq!(summary["years"][0]["distanceKm"], 1400);
+    assert_eq!(summary["years"][0]["countries"], json!(["CH", "IT"]));
+    assert_eq!(summary["tours"].as_array().unwrap().len(), 1);
+    assert_eq!(summary["tours"][0]["countries"], json!(["CH", "IT"]));
+    assert_eq!(summary["topLocations"][0]["id"], home);
+    assert_eq!(summary["topLocations"][0]["fuelStops"], 2);
+
+    // No year → every year, and the 2023 stop shows up in the station count.
+    let all = tool_json(&call_tool(&env, &read_token, "get_riding_summary", json!({})).await);
+    assert!(all["year"].is_null());
+    assert_eq!(all["years"].as_array().unwrap().len(), 2);
+    assert_eq!(all["topLocations"][0]["fuelStops"], 3);
+
+    // Unknown arguments are rejected like everywhere else.
+    let body = call_tool(
+        &env,
+        &read_token,
+        "get_riding_summary",
+        json!({ "yr": 2024 }),
+    )
+    .await;
+    assert_eq!(body["result"]["isError"], json!(true), "{body}");
 }
 
 // MARK: - Scope and audit

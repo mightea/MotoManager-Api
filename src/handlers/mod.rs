@@ -11,6 +11,7 @@ pub mod home;
 pub mod issues;
 pub mod locations;
 pub mod maintenance;
+pub mod map;
 pub mod model_series;
 pub mod motorcycle_details;
 pub mod motorcycles;

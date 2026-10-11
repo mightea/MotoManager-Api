@@ -135,8 +135,10 @@ struct Field {
     update_uri: Box<dyn Fn(i64) -> String>,
     base: Value,
     /// Make the n-th create distinct where the entity has a uniqueness rule.
-    distinct: Box<dyn Fn(&mut Value, usize)>,
+    distinct: Distinct,
 }
+
+type Distinct = Box<dyn Fn(&mut Value, usize)>;
 
 fn same(_: &mut Value, _: usize) {}
 

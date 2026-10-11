@@ -245,6 +245,9 @@ pub struct Location {
     pub location_type: LocationType,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+    /// ISO 3166-1 alpha-2, uppercase (migration 056). Client-maintained via
+    /// reverse geocoding; NULL when unknown.
+    pub country_code: Option<String>,
     pub user_id: i64,
     pub created_at: String,
     pub updated_at: Option<String>,

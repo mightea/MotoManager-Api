@@ -101,6 +101,13 @@ pub struct MotorcycleIdParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct RidingSummaryParams {
+    /// Calendar year to summarise, e.g. 2024. Omit for every year on record.
+    pub year: Option<i32>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ListMaintenanceParams {
     /// ID of the motorcycle (from list_motorcycles).
     pub motorcycle_id: i64,
@@ -357,6 +364,70 @@ impl McpServer {
         )
         .await?;
         json_result(value)
+    }
+
+    #[tool(
+        name = "get_riding_summary",
+        description = "Where and how much the user rode: per-year kilometres, litres, fuel cost, riding days, countries visited (with km per country), farthest point from home, season start/end, multi-day tours (dates, km, stops, countries) and the most-visited fuel stations. Pass `year` for one year, omit it for all years. Distances between fuel stops are odometer deltas; a tour is a run of stops more than 80 km from home spanning several days.",
+        annotations(title = "Riding summary", read_only_hint = true)
+    )]
+    async fn get_riding_summary(
+        &self,
+        Extension(p): Extension<McpPrincipal>,
+        Parameters(args): Parameters<RidingSummaryParams>,
+    ) -> ToolResult {
+        let payload = handlers::map::compute_map(&self.pool, p.user.id).await?;
+        let year = args.year;
+        let years: Vec<_> = payload
+            .years
+            .iter()
+            .filter(|y| year.is_none_or(|wanted| y.year == wanted))
+            .collect();
+        let tours: Vec<_> = payload
+            .tours
+            .iter()
+            .filter(|t| year.is_none_or(|wanted| t.year == wanted))
+            .collect();
+        let stops_in_scope = |l: &crate::map_analysis::LocationOut| match year {
+            Some(wanted) => l
+                .years
+                .get(&wanted.to_string())
+                .map(|y| y.fuel_stops)
+                .unwrap_or(0),
+            None => l.fuel_stops,
+        };
+        let mut stations: Vec<_> = payload
+            .locations
+            .iter()
+            .filter(|l| stops_in_scope(l) > 0)
+            .collect();
+        stations.sort_by(|a, b| {
+            stops_in_scope(b)
+                .cmp(&stops_in_scope(a))
+                .then(a.name.cmp(&b.name))
+        });
+        let top_locations: Vec<Value> = stations
+            .into_iter()
+            .take(10)
+            .map(|l| {
+                json!({
+                    "id": l.id,
+                    "name": l.name,
+                    "type": l.location_type,
+                    "countryCode": l.country_code,
+                    "fuelStops": stops_in_scope(l),
+                    "distanceFromHomeKm": l.distance_from_home_km,
+                })
+            })
+            .collect();
+        json_result(json!({
+            "year": year,
+            "home": payload.home,
+            "years": years,
+            "tours": tours,
+            "topLocations": top_locations,
+            "motorcycles": payload.motorcycles,
+        }))
     }
 
     #[tool(

@@ -41,6 +41,26 @@ fn validate_coords(
     }
 }
 
+/// Normalise an optional country code: trimmed, uppercased, exactly two ASCII
+/// letters. An empty string clears the value (→ NULL).
+fn validate_country_code(raw: Option<String>) -> AppResult<Option<String>> {
+    match raw {
+        None => Ok(None),
+        Some(code) => {
+            let trimmed = code.trim();
+            if trimmed.is_empty() {
+                return Ok(None);
+            }
+            if trimmed.len() != 2 || !trimmed.chars().all(|c| c.is_ascii_alphabetic()) {
+                return Err(AppError::BadRequest(
+                    "countryCode must be a two-letter ISO 3166-1 alpha-2 code".to_string(),
+                ));
+            }
+            Ok(Some(trimmed.to_ascii_uppercase()))
+        }
+    }
+}
+
 /// Verifies a location belongs to the given user. Used by handlers in other modules
 /// (e.g. maintenance) that accept a locationId from the client.
 pub async fn verify_location_ownership(
@@ -62,7 +82,7 @@ pub async fn verify_location_ownership(
 }
 
 /// Great-circle distance between two WGS84 points, in metres.
-fn haversine_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+pub fn haversine_meters(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     const EARTH_RADIUS_M: f64 = 6_371_000.0;
     let (p1, p2) = (lat1.to_radians(), lat2.to_radians());
     let dlat = (lat2 - lat1).to_radians();
@@ -155,6 +175,8 @@ pub struct CreateLocationRequest {
     pub location_type: LocationType,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+    /// Optional ISO 3166-1 alpha-2 country code (migration 056).
+    pub country_code: Option<String>,
 }
 
 pub async fn create_location(
@@ -166,16 +188,18 @@ pub async fn create_location(
         return Err(AppError::BadRequest("name is required".to_string()));
     }
     let (latitude, longitude) = validate_coords(body.latitude, body.longitude)?;
+    let country_code = validate_country_code(body.country_code)?;
     let now = Utc::now().to_rfc3339();
 
     let id = sqlx::query(
-        "INSERT INTO locations (name, type, latitude, longitude, userId, createdAt) \
-         VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO locations (name, type, latitude, longitude, countryCode, userId, createdAt) \
+         VALUES (?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(body.name.trim())
     .bind(body.location_type)
     .bind(latitude)
     .bind(longitude)
+    .bind(country_code)
     .bind(user.id)
     .bind(&now)
     .execute(&pool)
@@ -198,6 +222,8 @@ pub struct UpdateLocationRequest {
     pub location_type: Option<LocationType>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
+    /// Optional country code; absent keeps the stored value, "" clears it.
+    pub country_code: Option<String>,
 }
 
 pub async fn update_location(
@@ -225,16 +251,22 @@ pub async fn update_location(
         (None, None) => (existing.latitude, existing.longitude),
         (lat, lon) => validate_coords(lat, lon)?,
     };
+    // Absent → keep; present (incl. "") → validated replacement.
+    let country_code = match body.country_code {
+        None => existing.country_code,
+        some => validate_country_code(some)?,
+    };
     let now = Utc::now().to_rfc3339();
 
     sqlx::query(
         "UPDATE locations SET name = ?, type = ?, latitude = ?, longitude = ?, \
-         updatedAt = ? WHERE id = ?",
+         countryCode = ?, updatedAt = ? WHERE id = ?",
     )
     .bind(&name)
     .bind(location_type)
     .bind(latitude)
     .bind(longitude)
+    .bind(country_code)
     .bind(&now)
     .bind(lid)
     .execute(&pool)
