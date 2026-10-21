@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/mightea/MotoManager-Api/compare/v0.24.0...v0.24.1) (2026-10-21)
+
+
+### Miscellaneous Chores
+
+* release 0.24.1 ([31befdb](https://github.com/mightea/MotoManager-Api/commit/31befdb045226f62f5d89792db492b9482e7d6c9))
+
 ## [0.24.0](https://github.com/mightea/MotoManager-Api/compare/v0.23.0...v0.24.0) (2026-10-11)
 
 
