@@ -1538,7 +1538,7 @@ dependencies = [
 
 [[package]]
 name = "moto-manager-api"
-version = "0.24.0"
+version = "0.24.1"
 dependencies = [
  "anyhow",
  "argon2",
