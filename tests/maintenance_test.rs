@@ -252,3 +252,112 @@ async fn test_fuel_additive_flags_default_false() {
         json!(false)
     );
 }
+
+async fn send(
+    app: &axum::Router,
+    token: &str,
+    method: Method,
+    uri: String,
+    body: Option<Value>,
+) -> Value {
+    let mut req = Request::builder().method(method).uri(uri);
+    let body = match body {
+        Some(b) => {
+            req = req.header(header::CONTENT_TYPE, "application/json");
+            Body::from(b.to_string())
+        }
+        None => Body::empty(),
+    };
+    let response = app
+        .clone()
+        .oneshot(auth(req.body(body).unwrap(), token))
+        .await
+        .unwrap();
+    assert!(response.status().is_success(), "{}", response.status());
+    body_json(response).await
+}
+
+async fn fuel_stats(pool: &sqlx::SqlitePool, id: i64) -> (Option<f64>, Option<f64>) {
+    sqlx::query_as("SELECT tripDistance, fuelConsumption FROM maintenanceRecords WHERE id = ?")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// Consumption depends on the neighbouring fill, so backfilling, correcting
+/// or deleting an earlier fill must re-derive the later ones too.
+#[tokio::test]
+async fn test_fuel_consumption_follows_neighbouring_fills() {
+    let (app, pool, token, moto_id) = setup_test_app().await;
+    let base = format!("/api/motorcycles/{}/maintenance", moto_id);
+    let create = |odo: i64, liters: f64, date: &str| json!({ "date": date, "odo": odo, "type": "fuel", "fuelAmount": liters });
+
+    let old = send(
+        &app,
+        &token,
+        Method::POST,
+        base.clone(),
+        Some(create(32414, 9.0, "2026-08-01")),
+    )
+    .await;
+    let old_id = old["maintenanceRecord"]["id"].as_i64().unwrap();
+    let later = send(
+        &app,
+        &token,
+        Method::POST,
+        base.clone(),
+        Some(create(33250, 11.34, "2026-10-07")),
+    )
+    .await;
+    let later_id = later["maintenanceRecord"]["id"].as_i64().unwrap();
+    assert_eq!(fuel_stats(&pool, later_id).await.0, Some(836.0));
+
+    // Backfill the fill in between: the later fill now measures 250 km.
+    let mid = send(
+        &app,
+        &token,
+        Method::POST,
+        base.clone(),
+        Some(create(33000, 8.4, "2026-09-26")),
+    )
+    .await;
+    let mid_id = mid["maintenanceRecord"]["id"].as_i64().unwrap();
+    let (trip, consumption) = fuel_stats(&pool, later_id).await;
+    assert_eq!(trip, Some(250.0));
+    assert!((consumption.unwrap() - 4.536).abs() < 1e-9);
+
+    // A client echoing a stale tripDistance must not pin it.
+    send(
+        &app,
+        &token,
+        Method::PUT,
+        format!("{}/{}", base, later_id),
+        Some(json!({ "tripDistance": 836.0, "fuelConsumption": 1.36 })),
+    )
+    .await;
+    assert_eq!(fuel_stats(&pool, later_id).await.0, Some(250.0));
+
+    // Deleting the oldest fill makes the 33000 fill the first one: no consumption.
+    send(
+        &app,
+        &token,
+        Method::DELETE,
+        format!("{}/{}", base, old_id),
+        None,
+    )
+    .await;
+    assert_eq!(fuel_stats(&pool, mid_id).await, (None, None));
+    assert_eq!(fuel_stats(&pool, later_id).await.0, Some(250.0));
+
+    // Correcting the first fill's odometer re-derives the next one.
+    send(
+        &app,
+        &token,
+        Method::PUT,
+        format!("{}/{}", base, mid_id),
+        Some(json!({ "odo": 33100 })),
+    )
+    .await;
+    assert_eq!(fuel_stats(&pool, later_id).await.0, Some(150.0));
+}

@@ -32,49 +32,73 @@ pub struct MaintenanceFilter {
     pub since: Option<String>,
 }
 
-async fn recalculate_fuel_consumption(
-    pool: &SqlitePool,
-    record_id: i64,
-    motorcycle_id: i64,
-    current_odo: i64,
-    fuel_amount: f64,
-    provided_trip_distance: Option<f64>,
-) -> AppResult<()> {
-    let prev_row = sqlx::query!(
-        "SELECT odo FROM maintenanceRecords \
-         WHERE motorcycleId = ? AND type = 'fuel' AND odo < ? AND id != ? \
-         ORDER BY odo DESC LIMIT 1",
-        motorcycle_id,
-        current_odo,
-        record_id
+/// id, odo, fuelAmount, tripDistance, fuelConsumption
+type FuelChainRow = (i64, i64, Option<f64>, Option<f64>, Option<f64>);
+
+/// Re-derive `tripDistance` and `fuelConsumption` for every live fuel record
+/// of a motorcycle from the odometer gap to the previous live fill.
+///
+/// Consumption depends on the neighbouring fill, so recomputing only the
+/// record being written left later fills stale whenever an earlier fill was
+/// backfilled, had its odometer corrected or was deleted (e.g. 11 L over a
+/// stale 836 km gap instead of the real 250 km → 1.4 L/100 km). The odometer
+/// is the source of truth: the first fill and fills without a positive gap get
+/// no consumption. Changed rows get a fresh `updatedAt` so offline clients
+/// pull the corrected values.
+pub(crate) async fn recalculate_fuel_chain(pool: &SqlitePool, motorcycle_id: i64) -> AppResult<()> {
+    let rows: Vec<FuelChainRow> = sqlx::query_as(
+        "SELECT id, odo, fuelAmount, tripDistance, fuelConsumption FROM maintenanceRecords \
+         WHERE motorcycleId = ? AND type = 'fuel' AND deletedAt IS NULL \
+         ORDER BY odo, date, id",
     )
-    .fetch_optional(pool)
+    .bind(motorcycle_id)
+    .fetch_all(pool)
     .await?;
 
-    let trip_distance = if let Some(d) = provided_trip_distance {
-        d
-    } else if let Some(prev) = prev_row {
-        (current_odo - prev.odo) as f64
-    } else {
-        return Ok(());
-    };
-
-    if trip_distance <= 0.0 {
-        return Ok(());
+    let now = sync_now();
+    let mut prev_odo: Option<i64> = None;
+    for (id, odo, amount, trip, consumption) in rows {
+        let (new_trip, new_consumption) = fuel_stats_for_gap(prev_odo, odo, amount);
+        prev_odo = Some(odo);
+        if same_value(trip, new_trip) && same_value(consumption, new_consumption) {
+            continue;
+        }
+        sqlx::query(
+            "UPDATE maintenanceRecords SET tripDistance = ?, fuelConsumption = ?, updatedAt = ? \
+             WHERE id = ?",
+        )
+        .bind(new_trip)
+        .bind(new_consumption)
+        .bind(&now)
+        .bind(id)
+        .execute(pool)
+        .await?;
     }
-
-    let fuel_consumption = (fuel_amount / trip_distance) * 100.0;
-
-    sqlx::query!(
-        "UPDATE maintenanceRecords SET fuelConsumption = ?, tripDistance = ? WHERE id = ?",
-        fuel_consumption,
-        trip_distance,
-        record_id
-    )
-    .execute(pool)
-    .await?;
-
     Ok(())
+}
+
+/// Trip distance and L/100 km for a fill at `odo` following one at `prev_odo`.
+fn fuel_stats_for_gap(
+    prev_odo: Option<i64>,
+    odo: i64,
+    amount: Option<f64>,
+) -> (Option<f64>, Option<f64>) {
+    match prev_odo {
+        Some(prev) if odo > prev => {
+            let trip = (odo - prev) as f64;
+            let consumption = amount.filter(|a| *a > 0.0).map(|a| a / trip * 100.0);
+            (Some(trip), consumption)
+        }
+        _ => (None, None),
+    }
+}
+
+fn same_value(a: Option<f64>, b: Option<f64>) -> bool {
+    match (a, b) {
+        (Some(x), Some(y)) => (x - y).abs() < 1e-9,
+        (None, None) => true,
+        _ => false,
+    }
 }
 
 pub async fn list_maintenance(
@@ -293,17 +317,7 @@ pub async fn create_maintenance(
     tx.commit().await?;
 
     if record_type == "fuel" {
-        if let Some(fuel_amount) = body.fuel_amount {
-            let _ = recalculate_fuel_consumption(
-                &pool,
-                id,
-                motorcycle_id,
-                odo,
-                fuel_amount,
-                body.trip_distance,
-            )
-            .await;
-        }
+        recalculate_fuel_chain(&pool, motorcycle_id).await?;
     }
 
     let record =
@@ -351,6 +365,7 @@ pub async fn update_maintenance(
 
     let date = body.date.unwrap_or(existing.date);
     let odo = body.odo.unwrap_or(existing.odo);
+    let was_fuel = existing.record_type == "fuel";
     let record_type = body.record_type.unwrap_or(existing.record_type);
     let cost = body.cost.or(existing.cost);
     let normalized_cost = body.normalized_cost.or(existing.normalized_cost);
@@ -507,18 +522,10 @@ pub async fn update_maintenance(
 
     tx.commit().await?;
 
-    if record_type == "fuel" {
-        if let Some(fa) = fuel_amount {
-            let _ = recalculate_fuel_consumption(
-                &pool,
-                mid,
-                motorcycle_id,
-                odo,
-                fa,
-                body.trip_distance,
-            )
-            .await;
-        }
+    // Also covers a record switched away from "fuel": its old neighbours
+    // re-link either way.
+    if record_type == "fuel" || was_fuel {
+        recalculate_fuel_chain(&pool, motorcycle_id).await?;
     }
 
     let record =
@@ -580,6 +587,9 @@ pub async fn delete_maintenance(
     .await?;
 
     tx.commit().await?;
+
+    // The next fill's consumption was measured against this one.
+    recalculate_fuel_chain(&pool, motorcycle_id).await?;
 
     tracing::info!("Maintenance record soft-deleted ID: {}", mid);
     Ok(Json(json!({ "message": "Maintenance record deleted" })))

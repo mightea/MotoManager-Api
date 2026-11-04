@@ -203,8 +203,9 @@ pub struct LogFuelParams {
     pub currency: Option<String>,
     /// 95E10 (default), 98E5 or Diesel.
     pub fuel_type: Option<String>,
-    /// Trip distance since the previous stop in km; computed from the
-    /// previous fuel record when omitted.
+    /// Deprecated and ignored: the trip distance is always derived from the
+    /// odometer gap to the previous fuel record, so it stays consistent when
+    /// fills are backfilled, corrected or deleted.
     pub trip_distance_km: Option<f64>,
     /// Free-text note.
     pub description: Option<String>,
