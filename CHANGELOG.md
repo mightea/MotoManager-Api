@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.25.0](https://github.com/mightea/MotoManager-Api/compare/v0.24.2...v0.25.0) (2026-11-04)
+
+
+### Features
+
+* add GET /api/stats/fleet with cost breakdown and total cost of ownership ([daa7ace](https://github.com/mightea/MotoManager-Api/commit/daa7ace98a23d2a03be6ac288fbd100a20a57de0))
+
+
+### Bug Fixes
+
+* correct CHF amounts of foreign-currency fuel imported from Road Trip ([19c4fd4](https://github.com/mightea/MotoManager-Api/commit/19c4fd47863e0449b1fe9ac6472057709a57c61f))
+
 ## [0.24.2](https://github.com/mightea/MotoManager-Api/compare/v0.24.1...v0.24.2) (2026-11-04)
 
 
