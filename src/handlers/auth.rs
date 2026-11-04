@@ -123,7 +123,7 @@ pub async fn me(
             "SELECT u.id, u.username, u.name FROM sessions s \
              JOIN users u ON u.id = s.impersonatorId WHERE s.token = ?",
         )
-        .bind(&token)
+        .bind(crate::auth::session::hash_session_token(&token))
         .fetch_optional(&pool)
         .await?;
         if let Some((id, username, name)) = impersonator {

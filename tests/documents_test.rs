@@ -332,3 +332,181 @@ async fn test_serve_document_enforces_privacy() {
 
     let _ = tokio::fs::remove_file("./test_data/documents/priv-doc-test.pdf").await;
 }
+
+fn multipart_upload(token: &str, file_name: &str, bytes: &[u8]) -> Request<Body> {
+    let boundary = "XBOUNDARYX";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nUpload\r\n")
+            .as_bytes(),
+    );
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    Request::builder()
+        .method("POST")
+        .uri("/api/documents")
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap()
+}
+
+/// SEC-01: script-capable uploads (HTML, SVG, XML) are rejected outright.
+#[tokio::test]
+async fn test_upload_rejects_active_content() {
+    let (app, _, token) = setup_test_app().await;
+    tokio::fs::create_dir_all("./test_data/documents")
+        .await
+        .unwrap();
+
+    for (name, bytes) in [
+        ("x.html", &b"<script>alert(1)</script>"[..]),
+        (
+            "x.svg",
+            &b"<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"[..],
+        ),
+        ("x.xml", &b"<?xml version=\"1.0\"?><a/>"[..]),
+        ("x.txt", &b"\x00\x01binary"[..]),
+    ] {
+        let r = app
+            .clone()
+            .oneshot(multipart_upload(&token, name, bytes))
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status(),
+            StatusCode::BAD_REQUEST,
+            "{name} must be rejected"
+        );
+    }
+}
+
+/// SEC-01: the stored extension follows the bytes, not the client's file name,
+/// and served files carry nosniff + a sandbox CSP.
+#[tokio::test]
+async fn test_upload_stored_by_content_and_served_sandboxed() {
+    let (app, _, token) = setup_test_app().await;
+    tokio::fs::create_dir_all("./test_data/documents")
+        .await
+        .unwrap();
+
+    let png = b"\x89PNG\r\n\x1a\nnot-really-a-png";
+    let r = app
+        .clone()
+        .oneshot(multipart_upload(&token, "evil.svg", png))
+        .await
+        .unwrap();
+    assert!(r.status().is_success(), "{}", r.status());
+    let body: Value = serde_json::from_slice(
+        &axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let file_path = body["document"]["filePath"].as_str().unwrap().to_string();
+    assert!(file_path.ends_with(".png"), "{file_path}");
+
+    let r = app
+        .oneshot(
+            Request::builder()
+                .uri(&file_path)
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let h = r.headers();
+    assert_eq!(h[header::CONTENT_TYPE], "image/png");
+    assert_eq!(h[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert!(h[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap()
+        .starts_with("sandbox"));
+    assert!(h[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .starts_with("inline"));
+
+    let stored = file_path.trim_start_matches("/documents/");
+    let _ = tokio::fs::remove_file(format!("./test_data/documents/{stored}")).await;
+}
+
+/// SEC-01: an HTML file uploaded before the allowlist existed is served as a
+/// sandboxed download, never rendered inline.
+#[tokio::test]
+async fn test_legacy_html_document_is_forced_to_download() {
+    let (app, pool, token) = setup_test_app().await;
+    tokio::fs::create_dir_all("./test_data/documents")
+        .await
+        .unwrap();
+    let filename = "legacy-sec01.html";
+    tokio::fs::write(
+        format!("./test_data/documents/{filename}"),
+        b"<script>alert(1)</script>",
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO documents (title, filePath, ownerId, isPrivate, createdAt, updatedAt) \
+         VALUES ('Legacy', ?, 1, 0, '2025-01-01', '2025-01-01')",
+    )
+    .bind(filename)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let r = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/documents/{filename}"))
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let h = r.headers();
+    assert!(h[header::CONTENT_DISPOSITION]
+        .to_str()
+        .unwrap()
+        .starts_with("attachment"));
+    assert_eq!(h[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert!(h[header::CONTENT_SECURITY_POLICY]
+        .to_str()
+        .unwrap()
+        .starts_with("sandbox"));
+
+    let _ = tokio::fs::remove_file(format!("./test_data/documents/{filename}")).await;
+}
+
+/// SEC-03: the session token is no longer accepted as a `?token=` query
+/// parameter on the file routes — only as a Bearer header.
+#[tokio::test]
+async fn test_file_routes_reject_query_token() {
+    let (app, _, token) = setup_test_app().await;
+    for path in ["/documents/any.pdf", "/previews/any.jpg"] {
+        let r = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("{path}?token={token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
+}

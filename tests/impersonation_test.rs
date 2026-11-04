@@ -151,7 +151,9 @@ async fn admin_impersonates_user_and_acts_as_them() {
     // The session is short-lived (1 hour, not 14 days) and audit-tagged.
     let (expires_at, impersonator_id): (String, i64) =
         sqlx::query_as("SELECT expiresAt, impersonatorId FROM sessions WHERE token = ?")
-            .bind(&imp_token)
+            .bind(moto_manager_api::auth::session::hash_session_token(
+                &imp_token,
+            ))
             .fetch_one(&pool)
             .await
             .unwrap();

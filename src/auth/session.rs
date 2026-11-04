@@ -1,5 +1,6 @@
 use chrono::{Duration, Utc};
 use rand::Rng;
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 
 use crate::{
@@ -15,9 +16,45 @@ pub fn generate_session_token() -> String {
     hex::encode(bytes)
 }
 
-/// Create a new session for the user.
+/// Raw tokens are 40 random bytes as hex; stored hashes are SHA-256 hex.
+/// The lengths differ, which is how [`hash_legacy_session_tokens`] tells
+/// old plaintext rows apart from hashed ones.
+const RAW_TOKEN_HEX_LEN: i64 = 80;
+
+/// What `sessions.token` stores: the SHA-256 (hex) of the bearer token. The raw
+/// token only ever lives on the client, so a leaked database or backup can't
+/// be replayed as a login. The token is 320 random bits, so a fast unsalted
+/// hash is enough (same scheme as API tokens and OAuth codes).
+pub fn hash_session_token(token: &str) -> String {
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
+/// One-time upgrade for sessions created before tokens were hashed: replaces
+/// each remaining plaintext token with its hash, so existing logins keep
+/// working. Idempotent; run at startup after migrations.
+pub async fn hash_legacy_session_tokens(pool: &SqlitePool) -> AppResult<u64> {
+    let legacy: Vec<String> =
+        sqlx::query_scalar("SELECT token FROM sessions WHERE length(token) = ?")
+            .bind(RAW_TOKEN_HEX_LEN)
+            .fetch_all(pool)
+            .await?;
+    let mut tx = pool.begin().await?;
+    for token in &legacy {
+        sqlx::query("UPDATE sessions SET token = ? WHERE token = ?")
+            .bind(hash_session_token(token))
+            .bind(token)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(legacy.len() as u64)
+}
+
+/// Create a new session for the user. Returns the raw token for the client;
+/// only its hash is stored.
 pub async fn create_session(pool: &SqlitePool, user_id: i64) -> AppResult<String> {
     let token = generate_session_token();
+    let token_hash = hash_session_token(&token);
     let now = Utc::now();
     let expires_at = now + Duration::days(SESSION_DURATION_DAYS);
     let created_at = now.to_rfc3339();
@@ -25,7 +62,7 @@ pub async fn create_session(pool: &SqlitePool, user_id: i64) -> AppResult<String
 
     sqlx::query!(
         "INSERT INTO sessions (token, userId, expiresAt, createdAt) VALUES (?, ?, ?, ?)",
-        token,
+        token_hash,
         user_id,
         expires_at_str,
         created_at
@@ -45,6 +82,7 @@ pub async fn create_impersonation_session(
     impersonator_id: i64,
 ) -> AppResult<String> {
     let token = generate_session_token();
+    let token_hash = hash_session_token(&token);
     let now = Utc::now();
     let expires_at_str = (now + Duration::hours(IMPERSONATION_DURATION_HOURS)).to_rfc3339();
     let created_at = now.to_rfc3339();
@@ -52,7 +90,7 @@ pub async fn create_impersonation_session(
     sqlx::query!(
         "INSERT INTO sessions (token, userId, expiresAt, createdAt, impersonatorId) \
          VALUES (?, ?, ?, ?, ?)",
-        token,
+        token_hash,
         user_id,
         expires_at_str,
         created_at,
@@ -74,7 +112,7 @@ pub async fn get_user_from_token(pool: &SqlitePool, token: &str) -> AppResult<Us
          JOIN users u ON u.id = s.userId \
          WHERE s.token = ? AND s.expiresAt > ?",
     )
-    .bind(token)
+    .bind(hash_session_token(token))
     .bind(&now)
     .fetch_optional(pool)
     .await?;
@@ -84,7 +122,8 @@ pub async fn get_user_from_token(pool: &SqlitePool, token: &str) -> AppResult<Us
 
 /// Delete a session (logout).
 pub async fn delete_session(pool: &SqlitePool, token: &str) -> AppResult<()> {
-    sqlx::query!("DELETE FROM sessions WHERE token = ?", token)
+    let token_hash = hash_session_token(token);
+    sqlx::query!("DELETE FROM sessions WHERE token = ?", token_hash)
         .execute(pool)
         .await?;
     Ok(())
@@ -98,6 +137,15 @@ mod tests {
     fn test_generate_session_token_length() {
         let token = generate_session_token();
         assert_eq!(token.len(), 80); // 40 bytes * 2 hex chars
+    }
+
+    #[test]
+    fn test_hash_session_token_differs_from_raw_length() {
+        let token = generate_session_token();
+        let hash = hash_session_token(&token);
+        assert_eq!(hash.len(), 64);
+        assert_ne!(hash.len() as i64, RAW_TOKEN_HEX_LEN);
+        assert_eq!(hash, hash_session_token(&token));
     }
 
     #[test]

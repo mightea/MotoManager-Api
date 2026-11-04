@@ -83,6 +83,13 @@ async fn main() -> anyhow::Result<()> {
     }
     tracing::info!("Migrations up to date (version {})", latest_applied);
 
+    // Sessions created before token hashing still hold the raw bearer token;
+    // hash them in place so the DB (and backups) never carry usable tokens.
+    let upgraded = moto_manager_api::auth::session::hash_legacy_session_tokens(&pool).await?;
+    if upgraded > 0 {
+        tracing::info!("Hashed {upgraded} legacy plaintext session token(s)");
+    }
+
     // A backup row left `running` means a previous process died mid-backup;
     // clear it so the admin monitor doesn't show a phantom in-progress run.
     moto_manager_api::backup::reset_stale_running(&pool).await?;

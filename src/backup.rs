@@ -168,7 +168,13 @@ async fn run_inner(
         .execute(pool)
         .await?;
 
-    // 2. Verify before trusting it — a backup that won't open is worse than none.
+    // 2. Strip live credentials (sessions, passkey challenges, OAuth codes) so
+    //    an archive can never be replayed as a login. Then verify before
+    //    trusting it — a backup that won't open is worse than none.
+    if let Err(e) = scrub_snapshot(&snapshot).await {
+        let _ = tokio::fs::remove_file(&snapshot).await;
+        return Err(e);
+    }
     verify_snapshot(&snapshot).await?;
 
     // 3. Fingerprint the content so a scheduled run can bail out before
@@ -329,6 +335,31 @@ fn collect_file_stats(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::i
 
 /// Open the snapshot read-only on its own connection and run `PRAGMA
 /// integrity_check`. A corrupt snapshot is deleted and reported as an error.
+/// Tables holding short-lived login material. Their rows are useless after a
+/// restore (users simply log in again) but dangerous in a leaked archive.
+const CREDENTIAL_TABLES: [&str; 3] = ["sessions", "challenges", "oauthAuthorizationCodes"];
+
+/// Empty [`CREDENTIAL_TABLES`] in the snapshot copy, then VACUUM so the deleted
+/// rows don't linger in free pages of the archived file.
+async fn scrub_snapshot(path: &Path) -> AppResult<()> {
+    let opts = SqliteConnectOptions::new().filename(path);
+    let mut conn = sqlx::sqlite::SqliteConnection::connect_with(&opts)
+        .await
+        .map_err(|e| AppError::Internal(format!("cannot open snapshot to scrub: {e}")))?;
+    let res = async {
+        for table in CREDENTIAL_TABLES {
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table}")))
+                .execute(&mut conn)
+                .await?;
+        }
+        sqlx::query("VACUUM").execute(&mut conn).await?;
+        Ok::<_, sqlx::Error>(())
+    }
+    .await;
+    let _ = conn.close().await;
+    res.map_err(|e| AppError::Internal(format!("failed to scrub snapshot: {e}")))
+}
+
 async fn verify_snapshot(path: &Path) -> AppResult<()> {
     let opts = SqliteConnectOptions::new().filename(path).read_only(true);
     let mut conn = sqlx::sqlite::SqliteConnection::connect_with(&opts)

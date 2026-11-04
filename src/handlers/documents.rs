@@ -87,16 +87,62 @@ pub async fn get_motorcycle_ids_for_doc(pool: &SqlitePool, doc_id: i64) -> AppRe
     Ok(rows.into_iter().map(|r| r.motorcycleId).collect())
 }
 
+/// Decide the stored extension for an uploaded document from its bytes, not its
+/// name. Only inert formats are accepted (PDF, raster images, plain text): a
+/// client-chosen extension like `.html` or `.svg` would otherwise be served
+/// back with an active content type and run script on the API origin.
+pub fn validate_document_upload(filename: &str, data: &[u8]) -> AppResult<&'static str> {
+    let head = &data[..data.len().min(1024)];
+    let detected = if head.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some("jpg")
+    } else if head.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("png")
+    } else if head.starts_with(b"GIF87a") || head.starts_with(b"GIF89a") {
+        Some("gif")
+    } else if head.len() >= 12 && &head[..4] == b"RIFF" && &head[8..12] == b"WEBP" {
+        Some("webp")
+    } else if head.starts_with(b"II*\0") || head.starts_with(b"MM\0*") {
+        Some("tiff")
+    } else if head.starts_with(b"BM") {
+        Some("bmp")
+    } else if head.len() >= 12
+        && &head[4..8] == b"ftyp"
+        && matches!(
+            &head[8..12],
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"heim" | b"heis" | b"mif1" | b"msf1"
+        )
+    {
+        Some("heic")
+    } else if head.windows(5).any(|w| w == b"%PDF-") {
+        Some("pdf")
+    } else {
+        None
+    };
+    if let Some(ext) = detected {
+        return Ok(ext);
+    }
+
+    let claimed = std::path::Path::new(filename)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_lowercase);
+    if claimed.as_deref() == Some("txt") && std::str::from_utf8(data).is_ok() && !data.contains(&0)
+    {
+        return Ok("txt");
+    }
+
+    Err(AppError::BadRequest(
+        "Unsupported file type: only PDF, images (JPEG, PNG, WebP, GIF, HEIC, TIFF, BMP) and plain text are allowed"
+            .to_string(),
+    ))
+}
+
 async fn save_document_file(
     config: &Config,
     data: Vec<u8>,
     filename: &str,
 ) -> AppResult<(String, Option<String>)> {
-    let ext = std::path::Path::new(filename)
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("bin")
-        .to_lowercase();
+    let ext = validate_document_upload(filename, &data)?;
 
     let uuid = Uuid::new_v4().to_string();
     let stored_filename = format!("{}.{}", uuid, ext);
@@ -108,8 +154,8 @@ async fn save_document_file(
     // Generate preview for images or PDFs. Image decode/Lanczos thumbnailing and
     // Pdfium rendering are CPU-bound; run them on a blocking thread so they don't
     // stall the async worker (and every other in-flight request) during an upload.
-    let image_extensions = ["jpg", "jpeg", "png", "webp", "gif"];
-    let preview_filename = if image_extensions.contains(&ext.as_str()) {
+    let image_extensions = ["jpg", "png", "webp", "gif"];
+    let preview_filename = if image_extensions.contains(&ext) {
         tracing::info!("Generating preview for image document: {}", stored_filename);
         generate_preview_blocking(config, data, uuid, PreviewKind::Image).await
     } else if ext == "pdf" {
@@ -493,6 +539,10 @@ pub async fn update_document(
 
         let (new_file_path, new_preview_path) = if let Some((file_bytes, original_name)) = file_data
         {
+            // Save (and validate) the replacement first, so a rejected upload
+            // leaves the existing file untouched.
+            let saved = save_document_file(&config, file_bytes, &original_name).await?;
+
             let old_file = config.documents_dir().join(&existing.file_path);
             let _ = tokio::fs::remove_file(old_file).await;
             if let Some(old_preview) = &existing.preview_path {
@@ -500,7 +550,7 @@ pub async fn update_document(
                 let _ = tokio::fs::remove_file(old_preview_file).await;
             }
 
-            save_document_file(&config, file_bytes, &original_name).await?
+            saved
         } else {
             (existing.file_path, existing.preview_path)
         };

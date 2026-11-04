@@ -74,6 +74,17 @@ async fn backup_snapshots_db_and_files() {
         .execute(&pool)
         .await
         .unwrap();
+    // A logged-in user: the live session must not end up in the archive.
+    let user_id = sqlx::query(
+        "INSERT INTO users (email, username, name, passwordHash, role) VALUES ('b@x.ch', 'b', 'B', 'x', 'user')",
+    )
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    moto_manager_api::auth::session::create_session(&pool, user_id)
+        .await
+        .unwrap();
 
     // Uploaded files the DB references and the backup must bundle.
     std::fs::create_dir_all(config.images_dir()).unwrap();
@@ -168,6 +179,16 @@ async fn backup_snapshots_db_and_files() {
         .fetch_one(&mut conn)
         .await
         .expect("marker row must be in the snapshot");
+
+    // Live login material never lands in an archive.
+    for table in ["sessions", "challenges", "oauthAuthorizationCodes"] {
+        let n: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+                .fetch_one(&mut conn)
+                .await
+                .unwrap();
+        assert_eq!(n, 0, "{table} must be empty in the backup");
+    }
     assert_eq!(code, "ZZZ");
 
     std::fs::remove_dir_all(&data_dir).ok();

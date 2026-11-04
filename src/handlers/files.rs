@@ -7,7 +7,7 @@ use axum::{
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
-use crate::auth::FileAuthUser;
+use crate::auth::AuthUser;
 use crate::config::Config;
 use crate::handlers::documents::{authorize_doc_file, DocFileKind};
 
@@ -132,10 +132,25 @@ pub async fn serve_image(
     }
 }
 
+/// User uploads are served from the API origin, so a file must never be able
+/// to run script there even if it is opened directly: `sandbox` gives it an
+/// opaque origin and no script execution.
+const FILE_CSP: &str =
+    "sandbox; default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'";
+
+/// Content types safe to render inline; everything else is forced to download.
+const INLINE_DOCUMENT_TYPES: [&str; 5] = [
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+];
+
 pub async fn serve_document(
     State(config): State<Config>,
     State(pool): State<SqlitePool>,
-    FileAuthUser(user): FileAuthUser,
+    AuthUser(user): AuthUser,
     Path(filename): Path<String>,
 ) -> impl IntoResponse {
     let filename = sanitize_filename(&filename);
@@ -152,17 +167,26 @@ pub async fn serve_document(
             let content_type = mime_guess::from_path(&filename)
                 .first_or_octet_stream()
                 .to_string();
+            // Uploads are allowlisted, but legacy files may predate that: only
+            // inert types render inline, anything else is a download.
+            let disposition = if INLINE_DOCUMENT_TYPES.contains(&content_type.as_str()) {
+                "inline"
+            } else {
+                "attachment"
+            };
 
             Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, content_type)
+                .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+                .header(header::CONTENT_SECURITY_POLICY, FILE_CSP)
                 // Content-addressed (UUID) filename → immutable. `private` because
                 // the file is auth-gated and may be a private document (never cache
                 // it in a shared proxy).
                 .header(header::CACHE_CONTROL, "private, max-age=31536000")
                 .header(
                     header::CONTENT_DISPOSITION,
-                    format!("inline; filename=\"{}\"", filename),
+                    format!("{disposition}; filename=\"{filename}\""),
                 )
                 .body(Body::from(data))
                 .unwrap()
@@ -175,7 +199,7 @@ pub async fn serve_document(
 pub async fn serve_preview(
     State(config): State<Config>,
     State(pool): State<SqlitePool>,
-    FileAuthUser(user): FileAuthUser,
+    AuthUser(user): AuthUser,
     Path(filename): Path<String>,
 ) -> impl IntoResponse {
     let filename = sanitize_filename(&filename);
@@ -192,6 +216,8 @@ pub async fn serve_preview(
         Ok(data) => Response::builder()
             .status(StatusCode::OK)
             .header(header::CONTENT_TYPE, "image/jpeg")
+            .header(header::X_CONTENT_TYPE_OPTIONS, "nosniff")
+            .header(header::CONTENT_SECURITY_POLICY, FILE_CSP)
             // `private`: a preview is a thumbnail of an auth-gated (possibly
             // private) document, so it must not be cached by shared proxies.
             .header(header::CACHE_CONTROL, "private, max-age=31536000")
