@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.24.2](https://github.com/mightea/MotoManager-Api/compare/v0.24.1...v0.24.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* block active-content uploads, hash session tokens, drop ?token= file auth ([a4b0376](https://github.com/mightea/MotoManager-Api/commit/a4b037623f62731c99411f20f57b555a19b0349c))
+* **deps:** bump tokio to 1.54.1 (GHSA-5wjr-9356-4wc8) ([fbaa4a1](https://github.com/mightea/MotoManager-Api/commit/fbaa4a1a5a8e3d42d08742e94d0065024412f869))
+* re-derive fuel consumption across the whole fill chain ([feb989a](https://github.com/mightea/MotoManager-Api/commit/feb989aa3c9d07bd314822a0e3b2f0a36aaf4def))
+
 ## [0.24.1](https://github.com/mightea/MotoManager-Api/compare/v0.24.0...v0.24.1) (2026-10-21)
 
 
