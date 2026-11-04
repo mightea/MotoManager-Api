@@ -7,6 +7,7 @@ pub mod boxxerparts;
 pub mod documents;
 pub mod expenses;
 pub mod files;
+pub mod fleet_stats;
 pub mod home;
 pub mod issues;
 pub mod locations;

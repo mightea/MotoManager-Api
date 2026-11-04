@@ -2,6 +2,7 @@ pub mod auth;
 pub mod backup;
 pub mod config;
 pub mod error;
+pub mod fleet_analysis;
 pub mod handlers;
 pub mod map_analysis;
 pub mod markup;
@@ -371,6 +372,10 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::admin::get_app_upgrade_public),
         )
         .route("/api/stats", get(handlers::stats::get_stats))
+        .route(
+            "/api/stats/fleet",
+            get(handlers::fleet_stats::get_fleet_stats),
+        )
         .route("/api/map", get(handlers::map::get_map))
         .route("/api/home", get(handlers::home::get_home_data))
         .route("/images/{filename}", get(handlers::files::serve_image))
