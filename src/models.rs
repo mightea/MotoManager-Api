@@ -110,6 +110,8 @@ pub struct Motorcycle {
     pub normalized_sale_price: Option<f64>,
     pub sale_currency_code: Option<String>,
     pub buyer_name: Option<String>,
+    /// Odometer at the sale (migration 059); None when unknown.
+    pub sale_odo: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -151,6 +153,7 @@ pub struct MotorcycleWithStats {
     pub normalized_sale_price: Option<f64>,
     pub sale_currency_code: Option<String>,
     pub buyer_name: Option<String>,
+    pub sale_odo: Option<i64>,
     pub open_issues: i64,
     pub maintenance_count: i64,
     pub latest_odo: Option<i64>,

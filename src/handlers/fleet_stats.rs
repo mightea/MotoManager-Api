@@ -35,6 +35,8 @@ struct BikeRow {
     purchase_price: Option<f64>,
     #[sqlx(rename = "salePrice")]
     sale_price: Option<f64>,
+    #[sqlx(rename = "saleOdo")]
+    sale_odo: Option<i64>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -78,7 +80,8 @@ pub async fn compute_fleet_stats(pool: &SqlitePool, user_id: i64) -> AppResult<F
          COALESCE(m.normalizedPurchasePrice, m.purchasePrice * COALESCE(pc.conversionFactor, 1.0)) \
            AS purchasePrice, \
          COALESCE(m.normalizedSalePrice, m.salePrice * COALESCE(sc.conversionFactor, 1.0)) \
-           AS salePrice \
+           AS salePrice, \
+         m.saleOdo \
          FROM motorcycles m \
          LEFT JOIN currencies pc ON pc.code = m.currencyCode \
          LEFT JOIN currencies sc ON sc.code = m.saleCurrencyCode \
@@ -137,6 +140,7 @@ pub async fn compute_fleet_stats(pool: &SqlitePool, user_id: i64) -> AppResult<F
                 initial_odo: b.initial_odo,
                 purchase_price: b.purchase_price,
                 sale_price: b.sale_price,
+                sale_odo: b.sale_odo,
             })
             .collect(),
         records: records

@@ -131,7 +131,8 @@ pub async fn get_home_data(
             .max(max_maintenance_odo)
             .max(max_issues_odo)
             .max(max_location_odo)
-            .max(manual_odo);
+            .max(manual_odo)
+            .max(moto.sale_odo.unwrap_or(0));
 
         // Odometer at start of year. Floored at initialOdo so a previous
         // owner's older reading cannot count toward this year's distance.
@@ -436,6 +437,7 @@ pub async fn get_home_data(
             "normalizedSalePrice": moto.normalized_sale_price,
             "saleCurrencyCode": moto.sale_currency_code,
             "buyerName": moto.buyer_name,
+            "saleOdo": moto.sale_odo,
             "initialOdo": initial_odo,
             "odometer": current_odo,
             "odometerThisYear": odo_this_year,

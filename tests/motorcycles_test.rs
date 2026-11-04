@@ -1299,10 +1299,12 @@ async fn test_update_motorcycle_status_and_sale() {
         ("salePrice", "4200"),
         ("saleCurrencyCode", "CHF"),
         ("buyerName", "Hans Muster"),
+        ("saleOdo", "48250"),
     ])
     .await;
     let m = &json["motorcycle"];
     assert_eq!(m["status"], "sold");
+    assert_eq!(m["saleOdo"], 48250);
     assert!(
         m["isArchived"].is_null(),
         "isArchived removed from the API: {m}"
@@ -1311,6 +1313,14 @@ async fn test_update_motorcycle_status_and_sale() {
     assert_eq!(m["salePrice"], 4200.0);
     assert_eq!(m["saleCurrencyCode"], "CHF");
     assert_eq!(m["buyerName"], "Hans Muster");
+
+    // Old clients don't send saleOdo: the stored value is kept.
+    let json = put(vec![("make", "BMW"), ("model", "R80"), ("status", "sold")]).await;
+    assert_eq!(json["motorcycle"]["saleOdo"], 48250);
+
+    // An empty value clears it.
+    let json = put(vec![("make", "BMW"), ("model", "R80"), ("saleOdo", "")]).await;
+    assert!(json["motorcycle"]["saleOdo"].is_null());
 
     // Back to active.
     let json = put(vec![
@@ -1388,4 +1398,78 @@ async fn test_home_excludes_sold_bike_from_active_counts() {
     assert_eq!(cards[0]["status"], "sold");
     assert_eq!(cards[0]["numberOfIssues"], 0);
     assert_eq!(cards[0]["hasOverdueMaintenance"], false);
+}
+
+/// The sale odometer is validated and counts as the bike's latest reading.
+#[tokio::test]
+async fn test_sale_odo_validation_and_latest_odo() {
+    let (app, pool, token) = setup_test_app().await;
+    let moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES ('BMW', 'R80', 1, 1000)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type) VALUES ('2026-01-01', 2000, ?, 'service')",
+    )
+    .bind(moto_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let boundary = "sale-odo-boundary";
+    let put = |sale_odo: &'static str| {
+        let app = app.clone();
+        let token = token.clone();
+        async move {
+            let mut body = String::new();
+            for (name, value) in [
+                ("make", "BMW"),
+                ("model", "R80"),
+                ("status", "sold"),
+                ("saleOdo", sale_odo),
+            ] {
+                body.push_str(&multipart_field(boundary, name, value));
+            }
+            body.push_str(&format!("--{boundary}--\r\n"));
+            app.oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/api/motorcycles/{moto_id}"))
+                    .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={boundary}"),
+                    )
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap()
+            .status()
+        }
+    };
+
+    assert_eq!(put("-5").await, StatusCode::BAD_REQUEST);
+    assert_eq!(put("2500").await, StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/motorcycles")
+                .header(header::AUTHORIZATION, format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let json: Value = serde_json::from_slice(&bytes).unwrap();
+    let m = &json["motorcycles"][0];
+    assert_eq!(m["saleOdo"], 2500);
+    assert_eq!(m["latestOdo"], 2500);
 }

@@ -39,6 +39,8 @@ pub struct BikeInput {
     pub purchase_price: Option<f64>,
     /// Normalized sale price; None when not sold or unknown.
     pub sale_price: Option<f64>,
+    /// Odometer at the sale — the bike's last reading while owned.
+    pub sale_odo: Option<i64>,
 }
 
 /// One `maintenanceRecords` row (any type, including fuel).
@@ -374,11 +376,14 @@ pub fn analyze(input: FleetInput) -> FleetStats {
         let owned_until = sold_day;
 
         // Distance
-        let readings: Vec<(NaiveDate, i64)> = own
+        let mut readings: Vec<(NaiveDate, i64)> = own
             .iter()
             .filter(|(_, r)| r.odo > 0)
             .map(|(d, r)| (*d, r.odo))
             .collect();
+        if let (Some(day), Some(odo)) = (sold_day, bike.sale_odo) {
+            readings.push((day, odo));
+        }
         let start = match purchase_day {
             Some(p) => Some((p, bike.initial_odo)),
             None => own.first().map(|(d, _)| (*d, bike.initial_odo)),
@@ -633,6 +638,7 @@ mod tests {
             initial_odo,
             purchase_price: None,
             sale_price: None,
+            sale_odo: None,
         }
     }
 
@@ -703,6 +709,21 @@ mod tests {
         assert_eq!(count(2024), 2);
         assert_eq!(count(2025), 1);
         assert_eq!(count(2026), 1);
+    }
+
+    #[test]
+    fn sale_odometer_counts_as_last_reading() {
+        let mut i = input("2026-01-01");
+        let mut b = bike(1, Some("2025-01-01"), Some("2025-05-01"), 1000);
+        b.sale_odo = Some(3000);
+        i.bikes = vec![b];
+        i.records = vec![record(1, "2025-03-01", 2000, "service", 0.0)];
+        let s = analyze(i);
+        assert_eq!(s.motorcycles[0].distance, 2000);
+        let y = s.years.iter().find(|y| y.year == 2025).unwrap();
+        assert_eq!(y.distance, 2000);
+        // Mar 2 – May 1 spreads the last 1000 km over 61 days; May gets one.
+        assert_eq!(y.months[4], 16);
     }
 
     #[test]

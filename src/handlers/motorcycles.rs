@@ -75,6 +75,16 @@ fn normalize_status(raw: Option<&str>) -> Option<String> {
     }
 }
 
+/// An odometer reading can't be negative; None (unknown) is fine.
+fn validate_sale_odo(sale_odo: Option<i64>) -> AppResult<Option<i64>> {
+    match sale_odo {
+        Some(v) if v < 0 => Err(AppError::BadRequest(
+            "saleOdo must not be negative".to_string(),
+        )),
+        other => Ok(other),
+    }
+}
+
 /// A new (non-empty) text value, present or not — for optional create fields.
 fn create_text(fields: &FieldMap, key: &str) -> Option<String> {
     fields
@@ -107,7 +117,10 @@ pub async fn list_motorcycles(
             m.*,
             (SELECT COUNT(*) FROM issues i WHERE i.motorcycleId = m.id AND i.status != 'done' AND i.deletedAt IS NULL) as openIssues,
             (SELECT COUNT(*) FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id AND mr.deletedAt IS NULL) as maintenanceCount,
-            (SELECT MAX(odo) FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id AND mr.deletedAt IS NULL) as latestOdo
+            (SELECT MAX(o) FROM (
+                SELECT odo AS o FROM maintenanceRecords mr WHERE mr.motorcycleId = m.id AND mr.deletedAt IS NULL
+                UNION ALL SELECT m.saleOdo
+            )) as latestOdo
         FROM motorcycles m
         WHERE m.userId = ?
         ORDER BY m.id ASC
@@ -223,6 +236,7 @@ pub async fn create_motorcycle(
         .and_then(|v| v.parse().ok());
     let sale_currency_code = create_text(&fields, "saleCurrencyCode");
     let buyer_name = create_text(&fields, "buyerName");
+    let sale_odo = validate_sale_odo(fields.get("saleOdo").and_then(|v| v.trim().parse().ok()))?;
 
     let id = sqlx::query(
         "INSERT INTO motorcycles
@@ -230,8 +244,8 @@ pub async fn create_motorcycle(
             image, isVeteran, hasSidecar, hasUnknownOwners, firstRegistration, initialOdo, manualOdo,
             purchaseDate, purchasePrice, normalizedPurchasePrice, currencyCode, fuelTankSize, seriesId,
             frontBrakeType, rearBrakeType, sidecarBrakeType, driveType,
-            status, soldDate, salePrice, normalizedSalePrice, saleCurrencyCode, buyerName)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            status, soldDate, salePrice, normalizedSalePrice, saleCurrencyCode, buyerName, saleOdo)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&make)
     .bind(&model)
@@ -264,6 +278,7 @@ pub async fn create_motorcycle(
     .bind(normalized_sale_price)
     .bind(&sale_currency_code)
     .bind(&buyer_name)
+    .bind(sale_odo)
     .execute(&pool)
     .await?
     .last_insert_rowid();
@@ -501,6 +516,7 @@ pub async fn update_motorcycle(
     );
     let sale_currency_code = merge_text(&fields, "saleCurrencyCode", existing.sale_currency_code);
     let buyer_name = merge_text(&fields, "buyerName", existing.buyer_name);
+    let sale_odo = validate_sale_odo(merge_number(&fields, "saleOdo", existing.sale_odo))?;
 
     sqlx::query(
         "UPDATE motorcycles SET
@@ -509,7 +525,7 @@ pub async fn update_motorcycle(
            hasSidecar = ?, hasUnknownOwners = ?, firstRegistration = ?, initialOdo = ?, manualOdo = ?, purchaseDate = ?,
            purchasePrice = ?, normalizedPurchasePrice = ?, currencyCode = ?, fuelTankSize = ?,
            seriesId = ?, frontBrakeType = ?, rearBrakeType = ?, sidecarBrakeType = ?, driveType = ?,
-           status = ?, soldDate = ?, salePrice = ?, normalizedSalePrice = ?, saleCurrencyCode = ?, buyerName = ?
+           status = ?, soldDate = ?, salePrice = ?, normalizedSalePrice = ?, saleCurrencyCode = ?, buyerName = ?, saleOdo = ?
            WHERE id = ? AND userId = ?",
     )
     .bind(&make)
@@ -542,6 +558,7 @@ pub async fn update_motorcycle(
     .bind(normalized_sale_price)
     .bind(&sale_currency_code)
     .bind(&buyer_name)
+    .bind(sale_odo)
     .bind(id)
     .bind(user.id)
     .execute(&pool)
