@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.0](https://github.com/mightea/MotoManager-Api/compare/v0.25.0...v0.26.0) (2026-11-07)
+
+
+### Features
+
+* record the odometer reading at the sale of a motorcycle ([f0f6191](https://github.com/mightea/MotoManager-Api/commit/f0f61912822eca63d83ff29e0a1d3bdc2ffb4d4c))
+
+
+### Bug Fixes
+
+* make passkey challenges single-use and enforce their expiry ([4b87250](https://github.com/mightea/MotoManager-Api/commit/4b8725078eba5187be30be48dd9a633e70961c7d))
+* persist the updated passkey credential after each login ([66ce0f1](https://github.com/mightea/MotoManager-Api/commit/66ce0f14bc2dc9f7012cefb5422f2cddcc0ffa48))
+* trim whitespace around the login identifier ([84b0f63](https://github.com/mightea/MotoManager-Api/commit/84b0f634c0684a176266b38a16c412cf6af65bf1))
+
 ## [0.25.0](https://github.com/mightea/MotoManager-Api/compare/v0.24.2...v0.25.0) (2026-11-04)
 
 
