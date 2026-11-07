@@ -41,9 +41,12 @@ pub async fn login(
     State(pool): State<SqlitePool>,
     Json(body): Json<LoginRequest>,
 ) -> AppResult<Response> {
-    tracing::info!("Login attempt for identifier: {}", body.identifier);
+    // Autofill and keyboard suggestions on iOS can leave invisible leading or
+    // trailing whitespace; the webapp already trims before sending.
+    let identifier = body.identifier.trim();
+    tracing::info!("Login attempt for identifier: {}", identifier);
     let user = sqlx::query_as::<_, User>("SELECT * FROM users WHERE ? IN (email, username)")
-        .bind(&body.identifier)
+        .bind(identifier)
         .fetch_optional(&pool)
         .await?;
 
@@ -51,8 +54,8 @@ pub async fn login(
         Some(u) => u,
         None => {
             tracing::warn!(
-                "Login failed: user not found for identifier: {}",
-                body.identifier
+                "Login failed: user not found for identifier: {:?}",
+                identifier
             );
             return Err(AppError::Unauthorized);
         }
