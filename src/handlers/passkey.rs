@@ -105,13 +105,7 @@ pub async fn register_verify(
         user.id
     );
 
-    let challenge_row =
-        sqlx::query_as::<_, Challenge>("SELECT * FROM challenges WHERE id = ? AND userId = ?")
-            .bind(&body.challenge_id)
-            .bind(user.id)
-            .fetch_optional(&pool)
-            .await?
-            .ok_or_else(|| AppError::BadRequest("Challenge not found".to_string()))?;
+    let challenge_row = take_challenge(&pool, &body.challenge_id, Some(user.id)).await?;
 
     let challenge: PasskeyRegistration = serde_json::from_str(&challenge_row.challenge)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -139,16 +133,41 @@ pub async fn register_verify(
     .execute(&pool)
     .await?;
 
-    sqlx::query!("DELETE FROM challenges WHERE id = ?", body.challenge_id)
-        .execute(&pool)
-        .await?;
-
     tracing::info!(
         "Passkey registered successfully for user: {} (ID: {})",
         user.username,
         user.id
     );
     Ok(Json(json!({ "verified": true })))
+}
+
+/// Claims a challenge for verification: deletes it and returns it in one
+/// statement, so each challenge can be used at most once, even by concurrent
+/// requests, and a failed attempt burns it too. Registration challenges are
+/// bound to their user (`user_id`); login challenges have no user. Expired
+/// challenges are rejected.
+pub async fn take_challenge(
+    pool: &SqlitePool,
+    challenge_id: &str,
+    user_id: Option<i64>,
+) -> AppResult<Challenge> {
+    let not_found = || AppError::BadRequest("Challenge not found".to_string());
+    let row = sqlx::query_as::<_, Challenge>(
+        "DELETE FROM challenges WHERE id = ? AND userId IS ? RETURNING *",
+    )
+    .bind(challenge_id)
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(not_found)?;
+
+    let expires_at = chrono::DateTime::parse_from_rfc3339(&row.expires_at)
+        .map_err(|e| AppError::Internal(format!("Invalid challenge expiry: {e}")))?;
+    if expires_at <= Utc::now() {
+        tracing::warn!("Rejected expired passkey challenge {}", challenge_id);
+        return Err(AppError::BadRequest("Challenge expired".to_string()));
+    }
+    Ok(row)
 }
 
 pub async fn login_options(
@@ -221,11 +240,7 @@ pub async fn login_verify(
 ) -> AppResult<Json<Value>> {
     tracing::info!("Passkey login verify requested");
 
-    let challenge_row = sqlx::query_as::<_, Challenge>("SELECT * FROM challenges WHERE id = ?")
-        .bind(&body.challenge_id)
-        .fetch_optional(&pool)
-        .await?
-        .ok_or_else(|| AppError::BadRequest("Challenge not found".to_string()))?;
+    let challenge_row = take_challenge(&pool, &body.challenge_id, None).await?;
 
     let challenge: PasskeyAuthentication = serde_json::from_str(&challenge_row.challenge)
         .map_err(|e| AppError::Internal(format!("Failed to parse challenge JSON: {}", e)))?;
@@ -275,10 +290,6 @@ pub async fn login_verify(
 
     let user_id = auth_row.user_id;
     let token = session::create_session(&pool, user_id).await?;
-
-    sqlx::query!("DELETE FROM challenges WHERE id = ?", body.challenge_id)
-        .execute(&pool)
-        .await?;
 
     tracing::info!("Passkey login successful for user ID: {}", user_id);
     Ok(Json(json!({
