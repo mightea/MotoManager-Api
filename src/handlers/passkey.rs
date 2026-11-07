@@ -256,10 +256,18 @@ pub async fn login_verify(
             AppError::BadRequest(format!("Verification failed: {}", e))
         })?;
 
+    let mut passkey: Passkey = serde_json::from_slice(&auth_row.public_key)
+        .map_err(|e| AppError::Internal(format!("Failed to parse passkey: {}", e)))?;
+    passkey.update_credential(&auth_result);
+
+    let passkey_json =
+        serde_json::to_vec(&passkey).map_err(|e| AppError::Internal(e.to_string()))?;
+
     let new_counter = auth_result.counter();
     sqlx::query!(
-        "UPDATE authenticators SET counter = ? WHERE id = ?",
+        "UPDATE authenticators SET counter = ?, publicKey = ? WHERE id = ?",
         new_counter,
+        passkey_json,
         auth_id
     )
     .execute(&pool)
