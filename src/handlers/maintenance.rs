@@ -32,8 +32,8 @@ pub struct MaintenanceFilter {
     pub since: Option<String>,
 }
 
-/// id, odo, fuelAmount, tripDistance, fuelConsumption
-type FuelChainRow = (i64, i64, Option<f64>, Option<f64>, Option<f64>);
+/// id, odo, fuelAmount, fullTank, tripDistance, fuelConsumption
+type FuelChainRow = (i64, i64, Option<f64>, bool, Option<f64>, Option<f64>);
 
 /// Re-derive `tripDistance` and `fuelConsumption` for every live fuel record
 /// of a motorcycle from the odometer gap to the previous live fill.
@@ -43,11 +43,12 @@ type FuelChainRow = (i64, i64, Option<f64>, Option<f64>, Option<f64>);
 /// backfilled, had its odometer corrected or was deleted (e.g. 11 L over a
 /// stale 836 km gap instead of the real 250 km → 1.4 L/100 km). The odometer
 /// is the source of truth: the first fill and fills without a positive gap get
-/// no consumption. Changed rows get a fresh `updatedAt` so offline clients
+/// no consumption. Consumption runs from one full tank to the next: a partial
+/// fill gets none, and its litres are added to the next full fill. Changed rows get a fresh `updatedAt` so offline clients
 /// pull the corrected values.
 pub(crate) async fn recalculate_fuel_chain(pool: &SqlitePool, motorcycle_id: i64) -> AppResult<()> {
     let rows: Vec<FuelChainRow> = sqlx::query_as(
-        "SELECT id, odo, fuelAmount, tripDistance, fuelConsumption FROM maintenanceRecords \
+        "SELECT id, odo, fuelAmount, fullTank, tripDistance, fuelConsumption FROM maintenanceRecords \
          WHERE motorcycleId = ? AND type = 'fuel' AND deletedAt IS NULL \
          ORDER BY odo, date, id",
     )
@@ -56,10 +57,9 @@ pub(crate) async fn recalculate_fuel_chain(pool: &SqlitePool, motorcycle_id: i64
     .await?;
 
     let now = sync_now();
-    let mut prev_odo: Option<i64> = None;
-    for (id, odo, amount, trip, consumption) in rows {
-        let (new_trip, new_consumption) = fuel_stats_for_gap(prev_odo, odo, amount);
-        prev_odo = Some(odo);
+    let mut chain = FuelChain::default();
+    for (id, odo, amount, full_tank, trip, consumption) in rows {
+        let (new_trip, new_consumption) = chain.next(odo, amount, full_tank);
         if same_value(trip, new_trip) && same_value(consumption, new_consumption) {
             continue;
         }
@@ -77,19 +77,45 @@ pub(crate) async fn recalculate_fuel_chain(pool: &SqlitePool, motorcycle_id: i64
     Ok(())
 }
 
-/// Trip distance and L/100 km for a fill at `odo` following one at `prev_odo`.
-fn fuel_stats_for_gap(
+/// Walks the fills of one motorcycle in odometer order.
+#[derive(Default)]
+struct FuelChain {
     prev_odo: Option<i64>,
-    odo: i64,
-    amount: Option<f64>,
-) -> (Option<f64>, Option<f64>) {
-    match prev_odo {
-        Some(prev) if odo > prev => {
-            let trip = (odo - prev) as f64;
-            let consumption = amount.filter(|a| *a > 0.0).map(|a| a / trip * 100.0);
-            (Some(trip), consumption)
+    /// Odometer at the last full tank; None until the first one.
+    last_full_odo: Option<i64>,
+    /// Litres of partial fills since the last full tank.
+    partial_liters: f64,
+}
+
+impl FuelChain {
+    /// Trip distance (to the previous fill) and L/100 km (since the last full
+    /// tank, only on full fills) for the next fill.
+    fn next(
+        &mut self,
+        odo: i64,
+        amount: Option<f64>,
+        full_tank: bool,
+    ) -> (Option<f64>, Option<f64>) {
+        let trip = self
+            .prev_odo
+            .filter(|prev| odo > *prev)
+            .map(|prev| (odo - prev) as f64);
+        self.prev_odo = Some(odo);
+
+        let liters = amount.filter(|a| *a > 0.0);
+        if !full_tank {
+            self.partial_liters += liters.unwrap_or(0.0);
+            return (trip, None);
         }
-        _ => (None, None),
+        let consumption = match (self.last_full_odo, liters) {
+            (Some(last), Some(l)) if odo > last => {
+                Some((l + self.partial_liters) / (odo - last) as f64 * 100.0)
+            }
+            _ => None,
+        };
+        self.last_full_odo = Some(odo);
+        self.partial_liters = 0.0;
+        (trip, consumption)
     }
 }
 
@@ -188,6 +214,8 @@ pub struct MaintenanceRequest {
     pub trip_distance: Option<f64>,
     pub fuel_additive_added: Option<bool>,
     pub lead_substitute_added: Option<bool>,
+    /// Fuel only: the tank was filled up. Absent = full (older clients).
+    pub full_tank: Option<bool>,
     pub parent_id: Option<i64>,
     pub bundled_items: Option<Vec<String>>,
     /// Client-generated idempotency key (UUID). Retried creates with the same
@@ -247,9 +275,9 @@ pub async fn create_maintenance(
          (date, odo, motorcycleId, cost, normalizedCost, currency, description, descriptionMarkup, type, \
           brand, model, tirePosition, tireSize, dotCode, batteryType, fluidType, viscosity, \
           oilType, locationId, fuelType, fuelAmount, pricePerUnit, \
-          fuelConsumption, tripDistance, fuelAdditiveAdded, leadSubstituteAdded, \
+          fuelConsumption, tripDistance, fuelAdditiveAdded, leadSubstituteAdded, fullTank, \
           parentId, clientId, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&date)
     .bind(odo)
@@ -277,6 +305,7 @@ pub async fn create_maintenance(
     .bind(body.trip_distance)
     .bind(body.fuel_additive_added.unwrap_or(false))
     .bind(body.lead_substitute_added.unwrap_or(false))
+    .bind(body.full_tank.unwrap_or(true))
     .bind(body.parent_id)
     .bind(&body.client_id)
     .bind(&now)
@@ -398,6 +427,7 @@ pub async fn update_maintenance(
     let lead_substitute_added = body
         .lead_substitute_added
         .unwrap_or(existing.lead_substitute_added);
+    let full_tank = body.full_tank.unwrap_or(existing.full_tank);
     let parent_id: Option<i64> = body.parent_id.or(existing.parent_id);
 
     let now = sync_now();
@@ -410,7 +440,7 @@ pub async fn update_maintenance(
          batteryType = ?, fluidType = ?, viscosity = ?, oilType = ?, \
          locationId = ?, fuelType = ?, fuelAmount = ?, pricePerUnit = ?, \
          fuelConsumption = ?, tripDistance = ?, fuelAdditiveAdded = ?, \
-         leadSubstituteAdded = ?, parentId = ?, updatedAt = ? \
+         leadSubstituteAdded = ?, fullTank = ?, parentId = ?, updatedAt = ? \
          WHERE id = ?",
     )
     .bind(&date)
@@ -438,6 +468,7 @@ pub async fn update_maintenance(
     .bind(trip_distance)
     .bind(fuel_additive_added)
     .bind(lead_substitute_added)
+    .bind(full_tank)
     .bind(parent_id)
     .bind(&now)
     .bind(mid)

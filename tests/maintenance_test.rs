@@ -361,3 +361,69 @@ async fn test_fuel_consumption_follows_neighbouring_fills() {
     .await;
     assert_eq!(fuel_stats(&pool, later_id).await.0, Some(150.0));
 }
+
+/// Consumption runs full tank to full tank: a partial fill gets none, and its
+/// litres count towards the next full one.
+#[tokio::test]
+async fn test_partial_fill_counts_towards_next_full_tank() {
+    let (app, pool, token, moto_id) = setup_test_app().await;
+    let base = format!("/api/motorcycles/{}/maintenance", moto_id);
+    let fill = |odo: i64, liters: f64, date: &str, full: Option<bool>| {
+        let mut v = json!({ "date": date, "odo": odo, "type": "fuel", "fuelAmount": liters });
+        if let Some(f) = full {
+            v["fullTank"] = json!(f);
+        }
+        v
+    };
+
+    let first = send(
+        &app,
+        &token,
+        Method::POST,
+        base.clone(),
+        Some(fill(10_000, 12.0, "2026-08-01", None)),
+    )
+    .await;
+    // Absent = full tank, for older clients.
+    assert_eq!(first["maintenanceRecord"]["fullTank"], json!(true));
+
+    let partial = send(
+        &app,
+        &token,
+        Method::POST,
+        base.clone(),
+        Some(fill(10_100, 4.0, "2026-08-05", Some(false))),
+    )
+    .await;
+    let partial_id = partial["maintenanceRecord"]["id"].as_i64().unwrap();
+    assert_eq!(partial["maintenanceRecord"]["fullTank"], json!(false));
+
+    let full = send(
+        &app,
+        &token,
+        Method::POST,
+        base.clone(),
+        Some(fill(10_300, 11.0, "2026-08-09", Some(true))),
+    )
+    .await;
+    let full_id = full["maintenanceRecord"]["id"].as_i64().unwrap();
+
+    // The partial fill has a trip but no consumption.
+    assert_eq!(fuel_stats(&pool, partial_id).await, (Some(100.0), None));
+    // The full fill: (4 + 11) L over 300 km since the last full tank.
+    let (trip, consumption) = fuel_stats(&pool, full_id).await;
+    assert_eq!(trip, Some(200.0));
+    assert!((consumption.unwrap() - 5.0).abs() < 1e-9);
+
+    // Marking the partial fill full splits the stretch in two.
+    send(
+        &app,
+        &token,
+        Method::PUT,
+        format!("{}/{}", base, partial_id),
+        Some(json!({ "fullTank": true })),
+    )
+    .await;
+    assert!((fuel_stats(&pool, partial_id).await.1.unwrap() - 4.0).abs() < 1e-9);
+    assert!((fuel_stats(&pool, full_id).await.1.unwrap() - 5.5).abs() < 1e-9);
+}

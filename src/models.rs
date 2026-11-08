@@ -194,6 +194,9 @@ pub struct MaintenanceRecord {
     pub trip_distance: Option<f64>,
     pub fuel_additive_added: bool,
     pub lead_substitute_added: bool,
+    /// Fuel only: the tank was filled up (migration 060). Consumption runs
+    /// full tank to full tank.
+    pub full_tank: bool,
     pub parent_id: Option<i64>,
     /// Normalized (CHF) value of the parts booked against this record, derived
     /// from its live `partConsumptions`. Server-maintained — clients read it
