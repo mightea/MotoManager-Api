@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/mightea/MotoManager-Api/compare/v0.26.0...v0.27.0) (2026-11-08)
+
+
+### Features
+
+* store whether a fuel record filled the tank and measure consumption full to full ([492df20](https://github.com/mightea/MotoManager-Api/commit/492df2060549ae82c7dbc79d7530f920efe2dc39))
+
 ## [0.26.0](https://github.com/mightea/MotoManager-Api/compare/v0.25.0...v0.26.0) (2026-11-07)
 
 
