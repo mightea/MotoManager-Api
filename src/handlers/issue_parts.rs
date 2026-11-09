@@ -83,6 +83,42 @@ pub async fn list_part_issues(
     Ok(Json(json!({ "issues": issues })))
 }
 
+/// `GET /api/issue-parts` — every link of the caller in one go, so a client
+/// can mirror the whole join table without one request per part. Only links
+/// whose issue and part are both live and owned by the caller are listed.
+pub async fn list_issue_parts(
+    State(pool): State<SqlitePool>,
+    AuthUser(user): AuthUser,
+) -> AppResult<Json<Value>> {
+    let rows = sqlx::query(
+        "SELECT ip.issueId, ip.partId, ip.createdAt \
+         FROM issueParts ip \
+         JOIN issues i ON i.id = ip.issueId \
+         JOIN motorcycles m ON m.id = i.motorcycleId \
+         JOIN parts p ON p.id = ip.partId \
+         WHERE m.userId = ? AND p.userId = ? \
+           AND i.deletedAt IS NULL AND p.deletedAt IS NULL \
+         ORDER BY ip.issueId ASC, ip.partId ASC",
+    )
+    .bind(user.id)
+    .bind(user.id)
+    .fetch_all(&pool)
+    .await?;
+
+    let links: Vec<Value> = rows
+        .into_iter()
+        .map(|row| {
+            json!({
+                "issueId": row.get::<i64, _>("issueId"),
+                "partId": row.get::<i64, _>("partId"),
+                "createdAt": row.get::<String, _>("createdAt"),
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "links": links })))
+}
+
 /// `PUT /api/issues/{issue_id}/parts/{part_id}` — link (idempotent).
 pub async fn link_issue_part(
     State(pool): State<SqlitePool>,

@@ -267,6 +267,10 @@ pub fn build_app(state: AppState) -> Router {
             get(handlers::issue_parts::list_part_issues),
         )
         .route(
+            "/api/issue-parts",
+            get(handlers::issue_parts::list_issue_parts),
+        )
+        .route(
             "/api/issues/{issue_id}/parts/{part_id}",
             put(handlers::issue_parts::link_issue_part)
                 .delete(handlers::issue_parts::unlink_issue_part),

@@ -446,3 +446,99 @@ async fn test_deleting_motorcycle_cascades_links() {
         .unwrap();
     assert_eq!(count, 0);
 }
+
+#[tokio::test]
+async fn test_list_all_links() {
+    let (app, pool, token, moto_id) = setup_test_app().await;
+    let user_id = owner_id(&pool, moto_id).await;
+    let issue_a = insert_issue(&pool, moto_id, "Bremse", "new").await;
+    let issue_b = insert_issue(&pool, moto_id, "Kette", "done").await;
+    let part_a = insert_part(&pool, user_id, "Beläge", 2).await;
+    let part_b = insert_part(&pool, user_id, "Kettensatz", 0).await;
+
+    let (status, body) = send(&app, Method::GET, "/api/issue-parts", &token).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["links"], json!([]));
+
+    for (issue, part) in [(issue_a, part_a), (issue_a, part_b), (issue_b, part_b)] {
+        let (status, _) = send(
+            &app,
+            Method::PUT,
+            &format!("/api/issues/{issue}/parts/{part}"),
+            &token,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+
+    // Another user's links never show up.
+    let (other_id, other_token, other_moto) = second_user(&pool).await;
+    let other_issue = insert_issue(&pool, other_moto, "Fremd", "new").await;
+    let other_part = insert_part(&pool, other_id, "Fremdteil", 1).await;
+    send(
+        &app,
+        Method::PUT,
+        &format!("/api/issues/{other_issue}/parts/{other_part}"),
+        &other_token,
+    )
+    .await;
+
+    let (_, body) = send(&app, Method::GET, "/api/issue-parts", &token).await;
+    let links = body["links"].as_array().unwrap();
+    assert_eq!(links.len(), 3);
+    let pairs: Vec<(i64, i64)> = links
+        .iter()
+        .map(|l| {
+            (
+                l["issueId"].as_i64().unwrap(),
+                l["partId"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        pairs,
+        vec![(issue_a, part_a), (issue_a, part_b), (issue_b, part_b)]
+    );
+    assert!(links[0]["createdAt"].is_string());
+
+    let (_, body) = send(&app, Method::GET, "/api/issue-parts", &other_token).await;
+    let links = body["links"].as_array().unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0]["issueId"], other_issue);
+    assert_eq!(links[0]["partId"], other_part);
+
+    // Tombstoned part or issue: their links disappear from the list.
+    send(
+        &app,
+        Method::DELETE,
+        &format!("/api/parts/{part_a}"),
+        &token,
+    )
+    .await;
+    send(
+        &app,
+        Method::DELETE,
+        &format!("/api/motorcycles/{moto_id}/issues/{issue_b}"),
+        &token,
+    )
+    .await;
+    let (_, body) = send(&app, Method::GET, "/api/issue-parts", &token).await;
+    let links = body["links"].as_array().unwrap();
+    assert_eq!(links.len(), 1);
+    assert_eq!(links[0]["issueId"], issue_a);
+    assert_eq!(links[0]["partId"], part_b);
+
+    // Unauthenticated: rejected.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri("/api/issue-parts")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
