@@ -4,6 +4,7 @@ pub mod auth;
 pub mod backups;
 pub mod bmwbike;
 pub mod boxxerparts;
+pub mod catalog_torque_specs;
 pub mod documents;
 pub mod expenses;
 pub mod files;

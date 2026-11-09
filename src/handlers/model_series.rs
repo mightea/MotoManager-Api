@@ -152,7 +152,14 @@ pub async fn list_model_series(
     .fetch_all(&pool)
     .await?;
 
-    Ok(Json(json!({ "modelSeries": series })))
+    // Per-node count of shared catalog torque values (migration 064); an
+    // additive key, so older clients ignore it.
+    let torque_spec_counts =
+        crate::handlers::catalog_torque_specs::catalog_torque_spec_counts(&pool).await?;
+
+    Ok(Json(
+        json!({ "modelSeries": series, "torqueSpecCounts": torque_spec_counts }),
+    ))
 }
 
 /// Normalize a user-supplied type-code list: 4 alphanumeric chars starting

@@ -167,6 +167,14 @@ pub fn build_app(state: AppState) -> Router {
             post(handlers::torque_specs::import_torque_specs),
         )
         .route(
+            "/api/motorcycles/{id}/torque-specs/import-catalog",
+            post(handlers::catalog_torque_specs::import_catalog_torque_specs),
+        )
+        .route(
+            "/api/motorcycles/{id}/torque-specs/share-catalog",
+            post(handlers::catalog_torque_specs::share_torque_specs_to_catalog),
+        )
+        .route(
             "/api/motorcycles/{id}/torque-specs/{tid}",
             put(handlers::torque_specs::update_torque_spec)
                 .delete(handlers::torque_specs::delete_torque_spec),
@@ -228,6 +236,11 @@ pub fn build_app(state: AppState) -> Router {
             "/api/model-series/{sid}",
             put(handlers::model_series::update_model_series)
                 .delete(handlers::model_series::delete_model_series),
+        )
+        .route(
+            "/api/model-series/{sid}/torque-specs",
+            get(handlers::catalog_torque_specs::list_catalog_torque_specs)
+                .delete(handlers::catalog_torque_specs::remove_catalog_contribution),
         )
         .route("/api/vin/decode", get(handlers::model_series::decode_vin))
         .route(
