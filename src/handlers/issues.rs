@@ -11,7 +11,10 @@ use sqlx::SqlitePool;
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
-    handlers::{maintenance::sync_now, motorcycles::verify_motorcycle_ownership},
+    handlers::{
+        issue_parts::issues_with_linked_parts, maintenance::sync_now,
+        motorcycles::verify_motorcycle_ownership,
+    },
     markup::{double_option_string, non_empty, resolve_markup},
     models::Issue,
 };
@@ -49,6 +52,8 @@ pub async fn list_issues(
         .fetch_all(&pool)
         .await?
     };
+    // Additive `linkedParts` per issue (migration 063); old clients ignore it.
+    let issues = issues_with_linked_parts(&pool, motorcycle_id, user.id, issues).await?;
 
     Ok(Json(json!({ "issues": issues })))
 }

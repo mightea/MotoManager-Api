@@ -9,6 +9,7 @@ pub mod expenses;
 pub mod files;
 pub mod fleet_stats;
 pub mod home;
+pub mod issue_parts;
 pub mod issues;
 pub mod locations;
 pub mod maintenance;

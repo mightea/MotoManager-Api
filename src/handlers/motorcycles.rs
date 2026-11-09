@@ -319,6 +319,9 @@ pub async fn get_motorcycle(
     .bind(id)
     .fetch_all(&pool)
     .await?;
+    // Additive `linkedParts` per issue (migration 063); old clients ignore it.
+    let issues =
+        crate::handlers::issue_parts::issues_with_linked_parts(&pool, id, user.id, issues).await?;
 
     let maintenance = sqlx::query_as::<_, MaintenanceRecord>(
         "SELECT * FROM maintenanceRecords WHERE motorcycleId = ? AND deletedAt IS NULL ORDER BY date DESC, id DESC",

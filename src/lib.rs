@@ -250,6 +250,15 @@ pub fn build_app(state: AppState) -> Router {
             put(handlers::parts::update_part).delete(handlers::parts::delete_part),
         )
         .route(
+            "/api/parts/{id}/issues",
+            get(handlers::issue_parts::list_part_issues),
+        )
+        .route(
+            "/api/issues/{issue_id}/parts/{part_id}",
+            put(handlers::issue_parts::link_issue_part)
+                .delete(handlers::issue_parts::unlink_issue_part),
+        )
+        .route(
             "/api/parts/{id}/image",
             post(handlers::parts::upload_part_image)
                 .delete(handlers::parts::delete_part_image)
