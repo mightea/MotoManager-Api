@@ -16,6 +16,36 @@ use crate::{
     models::Document,
 };
 
+/// The accepted `docType` keys. Stored verbatim; labels live in the clients.
+pub const DOC_TYPES: &[&str] = &[
+    "werkstatthandbuch",
+    "reparaturanleitung",
+    "schaltplan",
+    "checkliste",
+    "teilekatalog",
+    "bedienungsanleitung",
+    "fahrzeugausweis",
+    "rechnung",
+    "sonstiges",
+];
+
+/// Validate a submitted `docType`: empty means "unset" (`None`), a known key is
+/// kept, anything else is a 400.
+pub fn parse_doc_type(raw: &str) -> AppResult<Option<String>> {
+    let value = raw.trim();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    if DOC_TYPES.contains(&value) {
+        Ok(Some(value.to_string()))
+    } else {
+        Err(AppError::BadRequest(format!(
+            "Invalid docType '{value}': expected one of {}",
+            DOC_TYPES.join(", ")
+        )))
+    }
+}
+
 pub fn format_doc_paths(mut doc: Document) -> Document {
     doc.file_path = format!(
         "/documents/{}",
@@ -348,6 +378,7 @@ pub async fn create_document(
     );
     let mut title: Option<String> = None;
     let mut is_private = false;
+    let mut doc_type: Option<String> = None;
     let mut motorcycle_ids: Vec<i64> = Vec::new();
     let mut file_data: Option<(Vec<u8>, String)> = None;
 
@@ -369,6 +400,13 @@ pub async fn create_document(
                     AppError::BadRequest(format!("Failed to read isPrivate: {}", e))
                 })?;
                 is_private = val == "true" || val == "1";
+            }
+            "docType" => {
+                let val = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("Failed to read docType: {}", e)))?;
+                doc_type = parse_doc_type(&val)?;
             }
             "motorcycleIds" | "motorcycleIds[]" => {
                 let val = field.text().await.map_err(|e| {
@@ -404,8 +442,8 @@ pub async fn create_document(
     let now = Utc::now().to_rfc3339();
 
     let doc_id = sqlx::query(
-        "INSERT INTO documents (title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO documents (title, filePath, previewPath, uploadedBy, ownerId, isPrivate, createdAt, updatedAt, docType) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&title)
     .bind(&stored_filename)
@@ -415,6 +453,7 @@ pub async fn create_document(
     .bind(is_private)
     .bind(&now)
     .bind(&now)
+    .bind(&doc_type)
     .execute(&pool)
     .await?
     .last_insert_rowid();
@@ -478,6 +517,8 @@ pub async fn update_document(
 
     let mut new_title: Option<String> = None;
     let mut new_is_private: Option<bool> = None;
+    // Outer None = field absent (keep); Some(None) = clear; Some(Some(_)) = set.
+    let mut new_doc_type: Option<Option<String>> = None;
     let mut new_motorcycle_ids: Option<Vec<i64>> = None;
     let mut file_data: Option<(Vec<u8>, String)> = None;
     let mut motorcycle_ids_buf: Vec<i64> = Vec::new();
@@ -501,6 +542,13 @@ pub async fn update_document(
                     AppError::BadRequest(format!("Failed to read isPrivate: {}", e))
                 })?;
                 new_is_private = Some(val == "true" || val == "1");
+            }
+            "docType" if is_owner => {
+                let val = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(format!("Failed to read docType: {}", e)))?;
+                new_doc_type = Some(parse_doc_type(&val)?);
             }
             "motorcycleIds" | "motorcycleIds[]" => {
                 let val = field.text().await.map_err(|e| {
@@ -536,6 +584,7 @@ pub async fn update_document(
     if is_owner {
         let title = new_title.unwrap_or(existing.title);
         let is_private = new_is_private.unwrap_or(existing.is_private);
+        let doc_type = new_doc_type.unwrap_or(existing.doc_type);
 
         let (new_file_path, new_preview_path) = if let Some((file_bytes, original_name)) = file_data
         {
@@ -556,9 +605,9 @@ pub async fn update_document(
         };
 
         sqlx::query!(
-            "UPDATE documents SET title = ?, filePath = ?, previewPath = ?, isPrivate = ?, updatedAt = ? \
+            "UPDATE documents SET title = ?, filePath = ?, previewPath = ?, isPrivate = ?, docType = ?, updatedAt = ? \
              WHERE id = ?",
-            title, new_file_path, new_preview_path, is_private, now, doc_id
+            title, new_file_path, new_preview_path, is_private, doc_type, now, doc_id
         )
         .execute(&pool)
         .await?;

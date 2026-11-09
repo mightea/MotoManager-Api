@@ -510,3 +510,201 @@ async fn test_file_routes_reject_query_token() {
         assert_eq!(r.status(), StatusCode::UNAUTHORIZED, "{path}");
     }
 }
+
+/// Build a multipart request with arbitrary text fields and an optional file.
+fn multipart_fields(
+    method: &str,
+    uri: &str,
+    token: &str,
+    fields: &[(&str, &str)],
+    file: Option<(&str, &[u8])>,
+) -> Request<Body> {
+    let boundary = "XBOUNDARYX";
+    let mut body = Vec::new();
+    for (name, value) in fields {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+            )
+            .as_bytes(),
+        );
+    }
+    if let Some((file_name, bytes)) = file {
+        body.extend_from_slice(
+            format!(
+                "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+            )
+            .as_bytes(),
+        );
+        body.extend_from_slice(bytes);
+        body.extend_from_slice(b"\r\n");
+    }
+    body.extend_from_slice(format!("--{boundary}--\r\n").as_bytes());
+    Request::builder()
+        .method(method)
+        .uri(uri)
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(
+            header::CONTENT_TYPE,
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(Body::from(body))
+        .unwrap()
+}
+
+async fn json_body(r: axum::response::Response) -> Value {
+    serde_json::from_slice(
+        &axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap(),
+    )
+    .unwrap()
+}
+
+/// docType: optional on create/update, validated, returned in every document
+/// payload; requests in the old shape (no docType) keep working.
+#[tokio::test]
+async fn test_document_type_create_update_and_validation() {
+    let (app, _, token) = setup_test_app().await;
+    tokio::fs::create_dir_all("./test_data/documents")
+        .await
+        .unwrap();
+    let file = Some(("notes.txt", &b"hello"[..]));
+    let mut stored = Vec::new();
+
+    // Old shape: no docType → created, docType null.
+    let r = app
+        .clone()
+        .oneshot(multipart_fields(
+            "POST",
+            "/api/documents",
+            &token,
+            &[("title", "Old client")],
+            file,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let body = json_body(r).await;
+    assert!(body["document"]["docType"].is_null());
+    stored.push(body["document"]["filePath"].as_str().unwrap().to_string());
+
+    // Unknown type → 400.
+    let r = app
+        .clone()
+        .oneshot(multipart_fields(
+            "POST",
+            "/api/documents",
+            &token,
+            &[("title", "Bad"), ("docType", "kochbuch")],
+            file,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+
+    // Valid type → stored and returned.
+    let r = app
+        .clone()
+        .oneshot(multipart_fields(
+            "POST",
+            "/api/documents",
+            &token,
+            &[("title", "Plan"), ("docType", "schaltplan")],
+            file,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::CREATED);
+    let body = json_body(r).await;
+    assert_eq!(body["document"]["docType"], "schaltplan");
+    stored.push(body["document"]["filePath"].as_str().unwrap().to_string());
+    let id = body["document"]["id"].as_i64().unwrap();
+    let uri = format!("/api/documents/{id}");
+
+    // Update without docType keeps it.
+    let r = app
+        .clone()
+        .oneshot(multipart_fields(
+            "PUT",
+            &uri,
+            &token,
+            &[("title", "Plan 2")],
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::OK);
+    let body = json_body(r).await;
+    assert_eq!(body["document"]["docType"], "schaltplan");
+    assert_eq!(body["document"]["title"], "Plan 2");
+
+    // Update with an invalid type → 400, unchanged.
+    let r = app
+        .clone()
+        .oneshot(multipart_fields(
+            "PUT",
+            &uri,
+            &token,
+            &[("docType", "nope")],
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::BAD_REQUEST);
+
+    // Update to another type.
+    let r = app
+        .clone()
+        .oneshot(multipart_fields(
+            "PUT",
+            &uri,
+            &token,
+            &[("docType", "checkliste")],
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(json_body(r).await["document"]["docType"], "checkliste");
+
+    // List carries it.
+    let r = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/documents")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = json_body(r).await;
+    let listed = body["docs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["id"] == id)
+        .unwrap()
+        .clone();
+    assert_eq!(listed["docType"], "checkliste");
+
+    // Empty value clears it.
+    let r = app
+        .clone()
+        .oneshot(multipart_fields(
+            "PUT",
+            &uri,
+            &token,
+            &[("docType", "")],
+            None,
+        ))
+        .await
+        .unwrap();
+    assert!(json_body(r).await["document"]["docType"].is_null());
+
+    for path in stored {
+        let name = path.trim_start_matches("/documents/");
+        let _ = tokio::fs::remove_file(format!("./test_data/documents/{name}")).await;
+    }
+}

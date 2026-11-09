@@ -408,6 +408,9 @@ pub struct Document {
     pub is_private: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// Kind of document (see `handlers::documents::DOC_TYPES`); NULL = unset.
+    #[sqlx(default)]
+    pub doc_type: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
