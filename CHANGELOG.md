@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.28.0](https://github.com/mightea/MotoManager-Api/compare/v0.27.0...v0.28.0) (2026-11-09)
+
+
+### Features
+
+* add a type to documents ([7533117](https://github.com/mightea/MotoManager-Api/commit/753311781f8c37e5758741e1b5526d377c700a9d))
+* link spare parts to open defects ([27cb31d](https://github.com/mightea/MotoManager-Api/commit/27cb31d9bbd5809792ee1972fca54cb0a119c365))
+* list all part-defect links of the user in one request ([354342a](https://github.com/mightea/MotoManager-Api/commit/354342afed5e5c071426aedc08d42f1c7f14486b))
+* share torque values into the model catalog and import them from there ([30a03d9](https://github.com/mightea/MotoManager-Api/commit/30a03d9604ca68dbe1525a0fa8fbdf400bf81a64))
+* track when currency rates were updated and refresh them daily ([8eb70c1](https://github.com/mightea/MotoManager-Api/commit/8eb70c15dde01c865242f065943c7f25e2290c2c))
+
 ## [0.27.0](https://github.com/mightea/MotoManager-Api/compare/v0.26.0...v0.27.0) (2026-11-08)
 
 
