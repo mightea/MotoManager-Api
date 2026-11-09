@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod backup;
 pub mod config;
+pub mod currency_rates;
 pub mod error;
 pub mod fleet_analysis;
 pub mod handlers;
@@ -334,6 +335,10 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/api/admin/currencies",
             get(handlers::admin::list_currencies).post(handlers::admin::create_currency),
+        )
+        .route(
+            "/api/admin/currencies/refresh",
+            post(handlers::admin::refresh_currencies),
         )
         .route(
             "/api/admin/currencies/{cid}",

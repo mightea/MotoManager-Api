@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::{
     auth::{password::hash_password, session::create_impersonation_session, AdminUser},
     config::Config,
+    currency_rates,
     error::{AppError, AppResult},
     models::{AppUpgradeSettings, CurrencySetting, PublicUser, User, UserSettings},
 };
@@ -484,18 +485,26 @@ pub async fn create_currency(
         )));
     }
 
-    let conversion_factor = fetch_conversion_factor(&body.code).await.unwrap_or(1.0);
+    // A failed fetch falls back to 1.0 with an unknown rate date, so the admin
+    // page flags it instead of presenting the placeholder as current.
+    let fetched = currency_rates::fetch_rate(body.code.clone()).await;
+    if let Err(e) = &fetched {
+        tracing::warn!("Could not fetch a rate for new currency {}: {e}", body.code);
+    }
+    let conversion_factor = fetched.as_ref().copied().unwrap_or(1.0);
     let now = Utc::now().to_rfc3339();
+    let rate_updated_at = fetched.is_ok().then(|| now.clone());
 
     let id = sqlx::query(
-        "INSERT INTO currencies (code, symbol, label, conversionFactor, createdAt) \
-         VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO currencies (code, symbol, label, conversionFactor, createdAt, rateUpdatedAt) \
+         VALUES (?, ?, ?, ?, ?, ?)",
     )
     .bind(&body.code)
     .bind(&body.symbol)
     .bind(&body.label)
     .bind(conversion_factor)
     .bind(&now)
+    .bind(&rate_updated_at)
     .execute(&pool)
     .await?
     .last_insert_rowid();
@@ -533,15 +542,23 @@ pub async fn update_currency(
     let symbol = body.symbol.unwrap_or(existing.symbol);
     let label = body.label.or(existing.label);
     let conversion_factor = body.conversion_factor.unwrap_or(existing.conversion_factor);
+    // Editing the factor by hand counts as a rate update; renaming doesn't.
+    let rate_updated_at = if (conversion_factor - existing.conversion_factor).abs() > f64::EPSILON {
+        Some(Utc::now().to_rfc3339())
+    } else {
+        existing.rate_updated_at
+    };
 
-    sqlx::query!(
-        "UPDATE currencies SET code = ?, symbol = ?, label = ?, conversionFactor = ? WHERE id = ?",
-        code,
-        symbol,
-        label,
-        conversion_factor,
-        cid
+    sqlx::query(
+        "UPDATE currencies SET code = ?, symbol = ?, label = ?, conversionFactor = ?, \
+         rateUpdatedAt = ? WHERE id = ?",
     )
+    .bind(code)
+    .bind(symbol)
+    .bind(label)
+    .bind(conversion_factor)
+    .bind(rate_updated_at)
+    .bind(cid)
     .execute(&pool)
     .await?;
 
@@ -567,6 +584,33 @@ pub async fn delete_currency(
     }
 
     Ok(Json(json!({ "message": "Currency deleted" })))
+}
+
+/// Refetch every non-base rate now. Per-currency failures leave that row as it
+/// was and are listed in `failed`; the request itself still succeeds.
+pub async fn refresh_currencies(
+    State(pool): State<SqlitePool>,
+    AdminUser(admin): AdminUser,
+) -> AppResult<Json<Value>> {
+    let report = currency_rates::refresh_all(&pool, currency_rates::fetch_rate).await?;
+    tracing::info!(
+        "Admin {} (ID: {}) refreshed currency rates: {} updated, {} failed",
+        admin.username,
+        admin.id,
+        report.updated.len(),
+        report.failed.len()
+    );
+
+    let currencies =
+        sqlx::query_as::<_, CurrencySetting>("SELECT * FROM currencies ORDER BY code ASC")
+            .fetch_all(&pool)
+            .await?;
+
+    Ok(Json(json!({
+        "currencies": currencies,
+        "updated": report.updated,
+        "failed": report.failed,
+    })))
 }
 
 // ─── App Upgrade Requirements ────────────────────────────────────────────────
@@ -645,48 +689,4 @@ pub async fn update_app_upgrade(
 
     let settings = load_app_upgrade_settings(&pool).await?;
     Ok(Json(json!({ "appUpgrade": settings })))
-}
-
-// ─── Exchange Rate Helper ─────────────────────────────────────────────────────
-
-async fn fetch_conversion_factor(currency_code: &str) -> Option<f64> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpStream;
-
-    let host = "api.frankfurter.app";
-    let path = format!("/latest?from=CHF&to={}", currency_code);
-    let request = format!(
-        "GET {} HTTP/1.0\r\nHost: {}\r\nAccept: application/json\r\nConnection: close\r\n\r\n",
-        path, host
-    );
-
-    let mut stream = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        TcpStream::connect((host, 80u16)),
-    )
-    .await
-    .ok()?
-    .ok()?;
-
-    stream.write_all(request.as_bytes()).await.ok()?;
-
-    let mut response = Vec::new();
-    tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        stream.read_to_end(&mut response),
-    )
-    .await
-    .ok()?
-    .ok()?;
-
-    let response_str = String::from_utf8_lossy(&response);
-    let body = response_str.split("\r\n\r\n").nth(1)?;
-    let json: serde_json::Value = serde_json::from_str(body.trim()).ok()?;
-    let rate = json.get("rates")?.get(currency_code)?.as_f64()?;
-
-    if rate > 0.0 {
-        Some(1.0 / rate)
-    } else {
-        None
-    }
 }

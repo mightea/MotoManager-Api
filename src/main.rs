@@ -114,6 +114,14 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("Automatic backups disabled (BACKUP_ENABLED=false)");
     }
 
+    // Keep exchange rates current (gated by CURRENCY_REFRESH_ENABLED). The admin
+    // "Kurse aktualisieren" button works regardless.
+    if moto_manager_api::currency_rates::refresh_enabled_from_env() {
+        moto_manager_api::currency_rates::spawn_scheduler(pool.clone());
+    } else {
+        tracing::info!("Automatic currency rate refresh disabled (CURRENCY_REFRESH_ENABLED=false)");
+    }
+
     let state = AppState {
         pool: pool.clone(),
         config: config.clone(),

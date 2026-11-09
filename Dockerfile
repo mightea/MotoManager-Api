@@ -94,6 +94,9 @@ ENV ENABLE_REGISTRATION=false
 ENV BACKUP_ENABLED=true
 ENV BACKUP_INTERVAL_HOURS=24
 ENV BACKUP_KEEP=14
+# Daily currency exchange-rate refresh from frankfurter.dev; false disables the
+# background task (the admin "refresh" button keeps working).
+ENV CURRENCY_REFRESH_ENABLED=true
 # Invoice-import LLM (optional): set LLM_BASE_URL (e.g. http://10.0.0.2:8542/v1),
 # LLM_MODEL and LLM_API_KEY at deploy time. Unset = deterministic parser only.
 

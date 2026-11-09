@@ -389,6 +389,10 @@ pub struct CurrencySetting {
     pub label: Option<String>,
     pub conversion_factor: f64,
     pub created_at: String,
+    /// When `conversion_factor` was last fetched or edited (RFC 3339). Null when
+    /// unknown, e.g. a currency created while the rate source was unreachable.
+    #[sqlx(default)]
+    pub rate_updated_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]

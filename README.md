@@ -29,6 +29,7 @@ Rust backend for MotoManager — a motorcycle maintenance and management applica
    RUST_LOG=info
    MCP_ALLOWED_HOSTS=                # optional Host allowlist for /mcp, see "MCP server"
    BACKEND_URL=http://localhost:3001 # public API base URL (OAuth issuer / MCP resource)
+   CURRENCY_REFRESH_ENABLED=true     # daily exchange-rate refresh (false = manual only)
    ```
 
 3. Build and run:
