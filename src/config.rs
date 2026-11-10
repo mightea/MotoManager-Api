@@ -46,6 +46,24 @@ pub struct Config {
     pub public_url: String,
 }
 
+/// `User-Agent` for the server's own outbound requests to third-party
+/// catalogues (BMWBike, Boxxerparts). The contact URL is this deployment's
+/// webapp origin (`ORIGIN`), so no host name is baked into the source; it is
+/// left out when `ORIGIN` is unset or a local development origin.
+pub fn outbound_user_agent(purpose: &str) -> String {
+    user_agent_for(env::var("ORIGIN").ok().as_deref(), purpose)
+}
+
+fn user_agent_for(origin: Option<&str>, purpose: &str) -> String {
+    let contact = origin
+        .map(|o| o.trim().trim_end_matches('/'))
+        .filter(|o| o.starts_with("https://"));
+    match contact {
+        Some(origin) => format!("MotoManager/1.0 (+{}; {})", origin, purpose),
+        None => format!("MotoManager/1.0 ({})", purpose),
+    }
+}
+
 impl Config {
     pub fn from_env() -> anyhow::Result<Self> {
         let port: u16 = env::var("PORT")
@@ -155,7 +173,7 @@ fn resolve_public_url(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_public_url;
+    use super::{resolve_public_url, user_agent_for};
 
     #[test]
     fn backend_url_is_preferred_then_public_url_then_localhost() {
@@ -178,6 +196,26 @@ mod tests {
         assert_eq!(
             resolve_public_url(None, None, 4000),
             "http://localhost:4000"
+        );
+    }
+
+    #[test]
+    fn user_agent_carries_the_deployment_origin_as_contact() {
+        assert_eq!(
+            user_agent_for(Some("https://moto.example.com/"), "part-lookup"),
+            "MotoManager/1.0 (+https://moto.example.com; part-lookup)"
+        );
+    }
+
+    #[test]
+    fn user_agent_omits_contact_without_a_public_origin() {
+        assert_eq!(
+            user_agent_for(None, "part-import"),
+            "MotoManager/1.0 (part-import)"
+        );
+        assert_eq!(
+            user_agent_for(Some("http://localhost:5174"), "part-import"),
+            "MotoManager/1.0 (part-import)"
         );
     }
 }

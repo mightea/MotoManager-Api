@@ -33,7 +33,7 @@ const ALGOLIA_APP_ID: &str = "J5Z2XFBN3D";
 const ALGOLIA_SEARCH_KEY: &str = "0e975644d59dfe63927b2be969b3addb";
 const ALGOLIA_INDEX: &str = "bmw_products_index_prod";
 const CACHE_TTL: Duration = Duration::from_secs(6 * 60 * 60);
-const USER_AGENT: &str = "MotoManager/1.0 (+https://moto.herrmann.ltd; part-lookup)";
+const USER_AGENT_PURPOSE: &str = "part-lookup";
 
 /// Catalog data as BMWBike publishes it, before fitment mapping.
 #[derive(Debug, Clone, PartialEq)]
@@ -141,7 +141,7 @@ async fn fetch_product(normalized: &str) -> AppResult<Option<BmwbikeProduct>> {
     crate::install_crypto_provider();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
-        .user_agent(USER_AGENT)
+        .user_agent(crate::config::outbound_user_agent(USER_AGENT_PURPOSE))
         .build()
         .map_err(|e| AppError::Internal(format!("HTTP client: {}", e)))?;
 
