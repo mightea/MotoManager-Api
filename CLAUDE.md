@@ -1,6 +1,6 @@
 # MotoManager API
 
-Rust/Axum backend for the MotoManager fleet manager, serving two clients: the SwiftUI iOS app (`../MotoManagerApp`, distributed via TestFlight) and the React Router webapp (`../MotoManager`). SQLite via SQLx; deployed at `https://moto-api.herrmann.ltd`.
+Rust/Axum backend for the MotoManager fleet manager, serving two clients: the SwiftUI iOS app (`../MotoManagerApp`, distributed via TestFlight) and the React Router webapp (`../MotoManager`). SQLite via SQLx; deployed at `https://moto-api.example.com`.
 
 > `GEMINI.md` in this directory holds the detailed workflow guide (entity checklist, migration mechanics, upload helpers). The rules below apply on top of it — the compatibility section is the most important thing in this file.
 

@@ -5,7 +5,7 @@
     "version": "0.15.0",
     "description": "Compatibility contract shared by the web and iOS clients. Existing paths and fields are additive-only."
   },
-  "servers": [{ "url": "https://moto-api.herrmann.ltd" }],
+  "servers": [{ "url": "https://moto-api.example.com" }],
   "paths": {
     "/api/health": {
       "get": {
