@@ -427,3 +427,266 @@ async fn test_partial_fill_counts_towards_next_full_tank() {
     assert!((fuel_stats(&pool, partial_id).await.1.unwrap() - 4.0).abs() < 1e-9);
     assert!((fuel_stats(&pool, full_id).await.1.unwrap() - 5.5).abs() < 1e-9);
 }
+
+#[tokio::test]
+async fn test_update_maintenance_parent_id_ownership_and_scoped_reconciliation() {
+    let (app, pool, victim_token, victim_moto_id) = setup_test_app().await;
+
+    let password_hash = hash_password("password123").unwrap();
+    let attacker_user_id = sqlx::query(
+        "INSERT INTO users (email, username, name, passwordHash, role) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("attacker@example.com")
+    .bind("attacker")
+    .bind("Attacker")
+    .bind(password_hash)
+    .bind("user")
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let attacker_token = create_session(&pool, attacker_user_id).await.unwrap();
+    let attacker_moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("Honda")
+    .bind("CB500")
+    .bind(attacker_user_id)
+    .bind(500)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let victim_parent = send(
+        &app,
+        &victim_token,
+        Method::POST,
+        format!("/api/motorcycles/{}/maintenance", victim_moto_id),
+        Some(json!({
+            "date": "2026-08-01",
+            "odo": 5000,
+            "type": "inspection"
+        })),
+    )
+    .await;
+    let victim_mid = victim_parent["maintenanceRecord"]["id"].as_i64().unwrap();
+
+    let attacker_rec = send(
+        &app,
+        &attacker_token,
+        Method::POST,
+        format!("/api/motorcycles/{}/maintenance", attacker_moto_id),
+        Some(json!({
+            "date": "2026-01-01",
+            "odo": 1000,
+            "type": "chain"
+        })),
+    )
+    .await;
+    let attacker_mid = attacker_rec["maintenanceRecord"]["id"].as_i64().unwrap();
+
+    // Attacker cannot link their record to victim's maintenance record via parentId.
+    let res = app
+        .clone()
+        .oneshot(auth(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!(
+                    "/api/motorcycles/{}/maintenance/{}",
+                    attacker_moto_id, attacker_mid
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "parentId": victim_mid }).to_string()))
+                .unwrap(),
+            &attacker_token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NOT_FOUND);
+
+    // Self-referential parentId is rejected with 400 Bad Request.
+    let res = app
+        .clone()
+        .oneshot(auth(
+            Request::builder()
+                .method(Method::PUT)
+                .uri(format!(
+                    "/api/motorcycles/{}/maintenance/{}",
+                    attacker_moto_id, attacker_mid
+                ))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({ "parentId": attacker_mid }).to_string()))
+                .unwrap(),
+            &attacker_token,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+
+    // Even if a foreign record points at victim_mid in DB, bundled_items reconciliation
+    // must stay scoped to victim_moto_id.
+    sqlx::query("UPDATE maintenanceRecords SET parentId = ? WHERE id = ?")
+        .bind(victim_mid)
+        .bind(attacker_mid)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    send(
+        &app,
+        &victim_token,
+        Method::PUT,
+        format!(
+            "/api/motorcycles/{}/maintenance/{}",
+            victim_moto_id, victim_mid
+        ),
+        Some(json!({
+            "date": "2026-09-01",
+            "odo": 6000,
+            "bundledItems": ["chain"]
+        })),
+    )
+    .await;
+
+    let (attacker_date, attacker_odo): (String, i64) =
+        sqlx::query_as("SELECT date, odo FROM maintenanceRecords WHERE id = ?")
+            .bind(attacker_mid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(attacker_date, "2026-01-01");
+    assert_eq!(attacker_odo, 1000);
+
+    let victim_children: (i64,) = sqlx::query_as(
+        "SELECT COUNT(*) FROM maintenanceRecords WHERE parentId = ? AND motorcycleId = ? AND type = 'chain'",
+    )
+    .bind(victim_mid)
+    .bind(victim_moto_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(victim_children.0, 1);
+
+    // Clearing bundledItems on victim_mid must not delete attacker_mid.
+    send(
+        &app,
+        &victim_token,
+        Method::PUT,
+        format!(
+            "/api/motorcycles/{}/maintenance/{}",
+            victim_moto_id, victim_mid
+        ),
+        Some(json!({
+            "bundledItems": []
+        })),
+    )
+    .await;
+
+    let attacker_exists: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM maintenanceRecords WHERE id = ?")
+            .bind(attacker_mid)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(attacker_exists.0, 1);
+}
+
+#[tokio::test]
+async fn test_create_maintenance_parent_id_ownership_validation() {
+    let (app, pool, token, moto_id) = setup_test_app().await;
+
+    let password_hash = hash_password("password123").unwrap();
+    let other_user_id = sqlx::query(
+        "INSERT INTO users (email, username, name, passwordHash, role) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind("other@example.com")
+    .bind("otheruser")
+    .bind("Other User")
+    .bind(password_hash)
+    .bind("user")
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let other_moto_id = sqlx::query(
+        "INSERT INTO motorcycles (make, model, userId, initialOdo) VALUES (?, ?, ?, ?)",
+    )
+    .bind("Honda")
+    .bind("CB500X")
+    .bind(other_user_id)
+    .bind(500)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    let other_parent_id = sqlx::query(
+        "INSERT INTO maintenanceRecords (date, odo, motorcycleId, type) VALUES (?, ?, ?, ?)",
+    )
+    .bind("2026-08-01")
+    .bind(1000)
+    .bind(other_moto_id)
+    .bind("service")
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+
+    // Attempting to create a maintenance record referencing another motorcycle's parentId must fail with 404.
+    let response = app
+        .clone()
+        .oneshot(auth(
+            Request::builder()
+                .method(Method::POST)
+                .uri(format!("/api/motorcycles/{}/maintenance", moto_id))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({
+                        "date": "2026-08-02",
+                        "odo": 1200,
+                        "type": "chain",
+                        "parentId": other_parent_id
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+            &token,
+        ))
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // Referencing a parent record on the same motorcycle succeeds.
+    let own_parent = send(
+        &app,
+        &token,
+        Method::POST,
+        format!("/api/motorcycles/{}/maintenance", moto_id),
+        Some(json!({
+            "date": "2026-08-01",
+            "odo": 1100,
+            "type": "service"
+        })),
+    )
+    .await;
+    let own_parent_id = own_parent["maintenanceRecord"]["id"].as_i64().unwrap();
+
+    let child = send(
+        &app,
+        &token,
+        Method::POST,
+        format!("/api/motorcycles/{}/maintenance", moto_id),
+        Some(json!({
+            "date": "2026-08-02",
+            "odo": 1200,
+            "type": "chain",
+            "parentId": own_parent_id
+        })),
+    )
+    .await;
+    assert_eq!(child["maintenanceRecord"]["parentId"], json!(own_parent_id));
+}
