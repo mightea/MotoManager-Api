@@ -23,6 +23,27 @@ pub(crate) fn sync_now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 
+async fn verify_parent_maintenance(
+    pool: &SqlitePool,
+    parent_id: i64,
+    motorcycle_id: i64,
+) -> AppResult<()> {
+    let row: Option<(i64,)> = sqlx::query_as(
+        "SELECT id FROM maintenanceRecords WHERE id = ? AND motorcycleId = ? AND deletedAt IS NULL",
+    )
+    .bind(parent_id)
+    .bind(motorcycle_id)
+    .fetch_optional(pool)
+    .await?;
+
+    if row.is_none() {
+        return Err(AppError::NotFound(
+            "Parent maintenance record not found".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MaintenanceFilter {
@@ -238,6 +259,9 @@ pub async fn create_maintenance(
     if let Some(lid) = body.location_id {
         verify_location_ownership(&pool, lid, user.id).await?;
     }
+    if let Some(pid) = body.parent_id {
+        verify_parent_maintenance(&pool, pid, motorcycle_id).await?;
+    }
 
     // Idempotency: a retried create with the same clientId returns the
     // already-stored record instead of inserting a duplicate.
@@ -382,6 +406,14 @@ pub async fn update_maintenance(
     if let Some(lid) = body.location_id {
         verify_location_ownership(&pool, lid, user.id).await?;
     }
+    if let Some(pid) = body.parent_id {
+        if pid == mid {
+            return Err(AppError::BadRequest(
+                "Maintenance record cannot be its own parent".to_string(),
+            ));
+        }
+        verify_parent_maintenance(&pool, pid, motorcycle_id).await?;
+    }
 
     let existing = sqlx::query_as::<_, MaintenanceRecord>(
         "SELECT * FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?",
@@ -479,8 +511,9 @@ pub async fn update_maintenance(
     if let Some(bundled) = body.bundled_items {
         // Fetch existing child records
         let existing_children = sqlx::query!(
-            "SELECT id, type AS record_type, fluidType FROM maintenanceRecords WHERE parentId = ?",
-            mid
+            "SELECT id, type AS record_type, fluidType FROM maintenanceRecords WHERE parentId = ? AND motorcycleId = ?",
+            mid,
+            motorcycle_id
         )
         .fetch_all(&mut *tx)
         .await?;
@@ -494,9 +527,13 @@ pub async fn update_maintenance(
             };
 
             if !bundled.contains(&item_key) {
-                sqlx::query!("DELETE FROM maintenanceRecords WHERE id = ?", child.id)
-                    .execute(&mut *tx)
-                    .await?;
+                sqlx::query!(
+                    "DELETE FROM maintenanceRecords WHERE id = ? AND motorcycleId = ?",
+                    child.id,
+                    motorcycle_id
+                )
+                .execute(&mut *tx)
+                .await?;
             }
         }
 
@@ -538,10 +575,11 @@ pub async fn update_maintenance(
             } else {
                 // Update existing child's date and odo to match parent
                 sqlx::query!(
-                    "UPDATE maintenanceRecords SET date = ?, odo = ? WHERE parentId = ? AND type = ? AND (fluidType = ? OR fluidType IS NULL)",
+                    "UPDATE maintenanceRecords SET date = ?, odo = ? WHERE parentId = ? AND motorcycleId = ? AND type = ? AND (fluidType = ? OR fluidType IS NULL)",
                     date,
                     odo,
                     mid,
+                    motorcycle_id,
                     rec_type,
                     fluid_type
                 )
