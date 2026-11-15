@@ -12,8 +12,10 @@ use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
     handlers::{
-        issue_parts::issues_with_linked_parts, maintenance::sync_now,
+        issue_parts::issues_with_linked_parts,
+        maintenance::sync_now,
         motorcycles::verify_motorcycle_ownership,
+        odometer_changes::{resolve_odo, OdoRecord},
     },
     markup::{double_option_string, non_empty, resolve_markup},
     models::Issue,
@@ -62,6 +64,10 @@ pub async fn list_issues(
 #[serde(rename_all = "camelCase")]
 pub struct CreateIssueRequest {
     pub odo: i64,
+    /// Offset the client already added to `odo` (migration 065): `odo` is the
+    /// instrument reading plus this. Absent = a client that predates odometer
+    /// changes; see `odometer_changes::resolve_odo`.
+    pub odo_offset: Option<i64>,
     pub title: String,
     pub description: Option<String>,
     /// Formatted twin of `description` (migration 055); optional so older
@@ -112,6 +118,16 @@ pub async fn create_issue(
         .unwrap_or_else(|| Utc::now().format("%Y-%m-%d").to_string());
     let priority = body.priority.unwrap_or_else(|| "medium".to_string());
     let status = body.status.unwrap_or_else(|| "new".to_string());
+    // Stored odometer values are totals; lift an instrument reading if needed.
+    let odo = resolve_odo(
+        &pool,
+        motorcycle_id,
+        &date,
+        body.odo,
+        body.odo_offset,
+        OdoRecord::New,
+    )
+    .await?;
     let now = sync_now();
 
     let id = sqlx::query(
@@ -119,7 +135,7 @@ pub async fn create_issue(
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(motorcycle_id)
-    .bind(body.odo)
+    .bind(odo)
     .bind(&title)
     .bind(&description)
     .bind(non_empty(body.description_markup))
@@ -144,6 +160,10 @@ pub async fn create_issue(
 #[serde(rename_all = "camelCase")]
 pub struct UpdateIssueRequest {
     pub odo: Option<i64>,
+    /// Offset the client already added to `odo` (migration 065): `odo` is the
+    /// instrument reading plus this. Absent = a client that predates odometer
+    /// changes; see `odometer_changes::resolve_odo`.
+    pub odo_offset: Option<i64>,
     pub title: Option<String>,
     // Use a double Option to distinguish "field absent" from "field
     // explicitly set to null" — the latter clears description.
@@ -181,7 +201,6 @@ pub async fn update_issue(
             .await?
             .ok_or_else(|| AppError::NotFound("Issue not found".to_string()))?;
 
-    let odo = body.odo.unwrap_or(existing.odo);
     let title = match body.title {
         Some(t) => {
             let t = t.trim().to_string();
@@ -209,6 +228,22 @@ pub async fn update_issue(
     let priority = body.priority.unwrap_or(existing.priority);
     let status = body.status.unwrap_or(existing.status);
     let date = body.date.unwrap_or(existing.date);
+    // An unchanged odo echoed back without an offset is already the total.
+    let odo = match body.odo {
+        Some(odo) if body.odo_offset.is_some() || odo != existing.odo => {
+            resolve_odo(
+                &pool,
+                motorcycle_id,
+                &date,
+                odo,
+                body.odo_offset,
+                OdoRecord::Issue(issue_id),
+            )
+            .await?
+        }
+        Some(odo) => odo,
+        None => existing.odo,
+    };
     let now = sync_now();
 
     sqlx::query(

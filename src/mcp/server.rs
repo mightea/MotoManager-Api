@@ -606,6 +606,7 @@ impl McpServer {
         let body = MaintenanceRequest {
             date: Some(v::date("date", &args.date)?),
             odo: Some(v::odo(args.odo)?),
+            odo_offset: None,
             record_type: Some(record_type),
             cost,
             normalized_cost,
@@ -693,6 +694,7 @@ impl McpServer {
         let body = MaintenanceRequest {
             date: Some(v::date("date", &args.date)?),
             odo: Some(v::odo(args.odo)?),
+            odo_offset: None,
             record_type: Some("fuel".to_string()),
             cost,
             normalized_cost,
@@ -751,6 +753,7 @@ impl McpServer {
     ) -> ToolResult {
         let body = CreateIssueRequest {
             odo: v::odo(args.odo)?,
+            odo_offset: None,
             title: v::required_text("title", &args.title, v::SHORT_TEXT)?,
             description: v::text("description", args.description.as_deref(), v::LONG_TEXT)?,
             description_markup: None,
@@ -793,6 +796,7 @@ impl McpServer {
     ) -> ToolResult {
         let body = UpdateIssueRequest {
             odo: None,
+            odo_offset: None,
             title: None,
             description: None,
             description_markup: None,

@@ -158,6 +158,16 @@ pub fn build_app(state: AppState) -> Router {
                 .delete(handlers::previous_owners::delete_previous_owner),
         )
         .route(
+            "/api/motorcycles/{id}/odometer-changes",
+            get(handlers::odometer_changes::list_odometer_changes)
+                .post(handlers::odometer_changes::create_odometer_change),
+        )
+        .route(
+            "/api/motorcycles/{id}/odometer-changes/{cid}",
+            put(handlers::odometer_changes::update_odometer_change)
+                .delete(handlers::odometer_changes::delete_odometer_change),
+        )
+        .route(
             "/api/motorcycles/{id}/torque-specs",
             get(handlers::torque_specs::list_torque_specs)
                 .post(handlers::torque_specs::create_torque_spec),

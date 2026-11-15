@@ -11,7 +11,11 @@ use sqlx::SqlitePool;
 use crate::{
     auth::AuthUser,
     error::{AppError, AppResult},
-    handlers::{locations::verify_location_ownership, motorcycles::verify_motorcycle_ownership},
+    handlers::{
+        locations::verify_location_ownership,
+        motorcycles::verify_motorcycle_ownership,
+        odometer_changes::{resolve_odo, OdoRecord},
+    },
     markup::{double_option_string, non_empty, resolve_markup},
     models::MaintenanceRecord,
 };
@@ -186,6 +190,10 @@ pub async fn list_maintenance(
 pub struct MaintenanceRequest {
     pub date: Option<String>,
     pub odo: Option<i64>,
+    /// Offset the client already added to `odo` (migration 065): `odo` is the
+    /// instrument reading plus this. Absent = a client that predates odometer
+    /// changes; see `odometer_changes::resolve_odo`.
+    pub odo_offset: Option<i64>,
     #[serde(rename = "type")]
     pub record_type: Option<String>,
     pub cost: Option<f64>,
@@ -266,6 +274,16 @@ pub async fn create_maintenance(
     let record_type = body
         .record_type
         .ok_or_else(|| AppError::BadRequest("type is required".to_string()))?;
+    // Stored odometer values are totals; lift an instrument reading if needed.
+    let odo = resolve_odo(
+        &pool,
+        motorcycle_id,
+        &date,
+        odo,
+        body.odo_offset,
+        OdoRecord::New,
+    )
+    .await?;
 
     let now = sync_now();
     let mut tx = pool.begin().await?;
@@ -393,7 +411,22 @@ pub async fn update_maintenance(
     .ok_or_else(|| AppError::NotFound("Maintenance record not found".to_string()))?;
 
     let date = body.date.unwrap_or(existing.date);
-    let odo = body.odo.unwrap_or(existing.odo);
+    // An unchanged odo echoed back without an offset is already the total.
+    let odo = match body.odo {
+        Some(odo) if body.odo_offset.is_some() || odo != existing.odo => {
+            resolve_odo(
+                &pool,
+                motorcycle_id,
+                &date,
+                odo,
+                body.odo_offset,
+                OdoRecord::Maintenance(mid),
+            )
+            .await?
+        }
+        Some(odo) => odo,
+        None => existing.odo,
+    };
     let was_fuel = existing.record_type == "fuel";
     let record_type = body.record_type.unwrap_or(existing.record_type);
     let cost = body.cost.or(existing.cost);

@@ -18,6 +18,7 @@ pub mod map;
 pub mod model_series;
 pub mod motorcycle_details;
 pub mod motorcycles;
+pub mod odometer_changes;
 pub mod part_import;
 pub mod parts;
 pub mod passkey;

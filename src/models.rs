@@ -159,6 +159,24 @@ pub struct MotorcycleWithStats {
     pub latest_odo: Option<i64>,
 }
 
+/// The instrument was replaced or rolled over (migration 065). Readings are
+/// raw instrument values; `readingBefore - readingAfter` is the distance this
+/// change adds to every later reading.
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+#[serde(rename_all = "camelCase")]
+#[sqlx(rename_all = "camelCase")]
+pub struct OdometerChange {
+    pub id: i64,
+    pub motorcycle_id: i64,
+    pub date: String,
+    pub reading_before: i64,
+    pub reading_after: i64,
+    /// "replacement" | "rollover".
+    pub kind: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[serde(rename_all = "camelCase")]
 #[sqlx(rename_all = "camelCase")]

@@ -8,6 +8,7 @@ use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
 use crate::handlers::documents::format_doc_paths;
+use crate::handlers::odometer_changes;
 use crate::{
     auth::AuthUser,
     config::Config,
@@ -102,6 +103,15 @@ pub(crate) fn format_image_url(image: Option<String>) -> Option<String> {
     })
 }
 
+/// A motorcycle as the API returns it: the row plus the additive
+/// `odometerChanges` / `odometerOffset` keys (migration 065).
+async fn motorcycle_json(pool: &SqlitePool, motorcycle: Motorcycle) -> AppResult<Value> {
+    let changes = odometer_changes::load_changes(pool, motorcycle.id).await?;
+    let mut value = serde_json::to_value(motorcycle).unwrap_or(json!({}));
+    odometer_changes::attach_to_motorcycle(&mut value, &changes);
+    Ok(value)
+}
+
 pub async fn list_motorcycles(
     State(pool): State<SqlitePool>,
     AuthUser(user): AuthUser,
@@ -129,11 +139,20 @@ pub async fn list_motorcycles(
     .fetch_all(&pool)
     .await?;
 
+    // Additive `odometerChanges` / `odometerOffset` per motorcycle (migration
+    // 065); old clients ignore them.
+    let changes = odometer_changes::load_changes_for_user(&pool, user.id).await?;
     let result: Vec<Value> = motorcycles
         .into_iter()
         .map(|mut m| {
             m.image = format_image_url(m.image);
-            serde_json::to_value(m).unwrap_or(json!({}))
+            let id = m.id;
+            let mut value = serde_json::to_value(m).unwrap_or(json!({}));
+            odometer_changes::attach_to_motorcycle(
+                &mut value,
+                changes.get(&id).map(Vec::as_slice).unwrap_or(&[]),
+            );
+            value
         })
         .collect();
 
@@ -289,6 +308,7 @@ pub async fn create_motorcycle(
         .await?;
 
     motorcycle.image = format_image_url(motorcycle.image);
+    let motorcycle = motorcycle_json(&pool, motorcycle).await?;
 
     tracing::info!("Motorcycle created: {} {} (ID: {})", make, model, id);
     Ok((
@@ -386,8 +406,12 @@ pub async fn get_motorcycle(
         formatted_docs.push(doc_val);
     }
 
+    let motorcycle = motorcycle_json(&pool, motorcycle).await?;
+    let odometer_changes = motorcycle["odometerChanges"].clone();
+
     Ok(Json(json!({
         "motorcycle": motorcycle,
+        "odometerChanges": odometer_changes,
         "issues": issues,
         "maintenanceRecords": maintenance,
         "maintenanceLocations": maintenance_locations,
@@ -573,6 +597,7 @@ pub async fn update_motorcycle(
         .await?;
 
     motorcycle.image = format_image_url(motorcycle.image);
+    let motorcycle = motorcycle_json(&pool, motorcycle).await?;
 
     tracing::info!("Motorcycle updated ID: {}", id);
     Ok(Json(json!({ "motorcycle": motorcycle })))
