@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/mightea/MotoManager-Api/compare/v0.28.0...v0.29.0) (2026-11-15)
+
+
+### Features
+
+* support replaced odometers with per-motorcycle odometer changes ([5f99f7c](https://github.com/mightea/MotoManager-Api/commit/5f99f7cd0df0ab5c82cab509d1593d8b268fb090))
+
 ## [0.28.0](https://github.com/mightea/MotoManager-Api/compare/v0.27.0...v0.28.0) (2026-11-09)
 
 
