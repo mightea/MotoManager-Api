@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.29.1](https://github.com/mightea/MotoManager-Api/compare/v0.29.0...v0.29.1) (2026-11-18)
+
+
+### Bug Fixes
+
+* enforce parentId ownership and scope bundled child maintenance records ([386f372](https://github.com/mightea/MotoManager-Api/commit/386f3721018c2313279c3743181c5da03c431708))
+* patch RUSTSEC advisories in dependencies ([49b9f6c](https://github.com/mightea/MotoManager-Api/commit/49b9f6ca94a9f57c67e44d0b5ec69497cb78f952))
+
 ## [0.29.0](https://github.com/mightea/MotoManager-Api/compare/v0.28.0...v0.29.0) (2026-11-15)
 
 
